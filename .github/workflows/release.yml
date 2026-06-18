@@ -36,11 +36,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: 'https://registry.npmjs.org'
+          node-version: 22
+          # NOTE: deliberately NO `registry-url`. Setting it makes setup-node
+          # write an .npmrc with `_authToken=${NODE_AUTH_TOKEN}`, which forces
+          # token auth and BREAKS OIDC trusted publishing (npm sends an empty
+          # token and the publish 404s). OIDC needs npm's default config.
 
-      # Trusted Publishing + `npm publish --provenance` need a recent npm.
-      # Pin to a version known to support OIDC publishing.
+      # Trusted Publishing needs npm >= 11.5.1. Pin to latest known-good.
       - name: Upgrade npm
         run: npm install -g npm@latest
 
@@ -63,8 +65,8 @@ jobs:
         run: npm run build
 
       - name: Publish to npm (Trusted Publishing + provenance)
+        # No NPM_TOKEN and no token .npmrc — npm@latest auto-detects the GitHub
+        # Actions OIDC environment (id-token: write granted above) and exchanges
+        # the OIDC token for a short-lived publish credential. --provenance is
+        # implied under OIDC but kept explicit for clarity.
         run: npm publish --access public --provenance
-        env:
-          # No NPM_TOKEN — OIDC handles auth. npm@latest auto-detects the
-          # GitHub Actions OIDC environment when id-token: write is granted.
-          NPM_CONFIG_PROVENANCE: 'true'
