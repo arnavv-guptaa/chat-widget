@@ -31,6 +31,11 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.mjs",
       "require": "./dist/server/index.js"
+    },
+    "./server/drizzle": {
+      "types": "./dist/server/drizzle/index.d.ts",
+      "import": "./dist/server/drizzle/index.mjs",
+      "require": "./dist/server/drizzle/index.js"
     }
   },
   "bin": {

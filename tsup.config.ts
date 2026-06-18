@@ -25,6 +25,7 @@ export default defineConfig([
       'api/index': 'src/api/index.ts',
       'schema/index': 'src/schema/index.ts',
       'server/index': 'src/server/index.ts',
+      'server/drizzle/index': 'src/server/stores/drizzle/index.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
