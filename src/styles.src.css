@@ -1,0 +1,496 @@
+/* Declare our layer first so it has lowest priority */
+@layer chat-widget-base, chat-widget;
+
+/* Import Tailwind with theme scoped to our container */
+@import "tailwindcss/theme" layer(chat-widget-base);
+@import "tailwindcss/utilities" layer(chat-widget);
+@source "./**/*.tsx";
+
+/* Streamdown uses border-border utility - define it to use our border color */
+.chat-widget-container .border-border {
+  border-color: var(--color-border);
+}
+
+/**
+ * Chat Widget Styles
+ * Uses CSS layers for low priority - host app styles will override.
+ */
+
+/* ============================================
+   SCROLLBAR STYLES
+   ============================================ */
+
+.ai-assistant-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.922 0 0 / 30%);
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.922 0 0 / 50%);
+}
+
+.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 20%);
+}
+
+.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(1 0 0 / 30%);
+}
+
+.ai-assistant-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.922 0 0 / 30%) transparent;
+}
+
+.dark .ai-assistant-scrollbar {
+  scrollbar-color: oklch(1 0 0 / 20%) transparent;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================
+   CHAT WIDGET CONTAINER
+   ============================================ */
+
+.chat-widget-container {
+  /* Core color tokens (HSL triplets — used inside hsl() with optional alpha) */
+  --chat-primary:    0 0% 20.5%;
+  --chat-background: 0 0% 100%;
+  --chat-text:       0 0% 14.5%;
+  --chat-muted:      0 0% 97%;
+  --chat-border:     0 0% 89.8%;
+
+  /* Surface variants — for elevated rows, tabs, hover states. JS no longer
+     branches on themeMode; it just sets backgroundColor: 'var(--chat-surface)'
+     and the right value falls out per theme. */
+  --chat-surface:        0 0% 96.1%;   /* light: #f5f5f5  — tab bg, alt rows */
+  --chat-surface-hover:  0 0% 89.8%;   /* light: #e5e5e5  — hover/active */
+  --chat-surface-deep:   0 0% 100%;    /* light: #ffffff  — deepest panel */
+
+  /* Text variants */
+  --chat-text-strong: 0 0% 25.1%;      /* light: #404040 — emphasised body */
+  --chat-text-muted:  0 0% 45.1%;      /* light: #737373 — secondary text */
+  --chat-text-subtle: 0 0% 63.9%;      /* light: #a3a3a3 — placeholder/disabled */
+
+  /* Translucent overlays — full color values, not HSL triplets, since they
+     bake in alpha on a fixed base. Use them directly: backgroundColor:
+     'var(--chat-header-bg)'. */
+  --chat-header-bg:        rgba(255, 255, 255, 0.8);
+  --chat-header-bg-strong: rgba(255, 255, 255, 0.95);
+  --chat-overlay:          rgba(0, 0, 0, 0.02);
+  --chat-hover-bg:         rgba(245, 245, 245, 0.5);
+
+  /* THE divider colour. One token. Used by every border, divider, hairline,
+     1px-tall background, and form rule in this widget. Override this from
+     the consumer to recolour ALL separators in one place. */
+  --chat-divider:          hsl(0 0% 14.5% / 0.1);
+
+  --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  /* Override Tailwind's border color for Streamdown compatibility */
+  --color-border: var(--chat-divider);
+
+  /* Sizing tokens - uses clamp() for responsive sizing with bounds
+     clamp(min, preferred, max) - preferred is viewport-relative */
+  --chat-widget-width: clamp(320px, 28vw, 500px);
+  --chat-widget-height: 100dvh;
+
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  background-color: hsl(var(--chat-background));
+  color: hsl(var(--chat-text));
+
+  /* Enable container queries */
+  container-type: inline-size;
+  container-name: chat-widget;
+}
+
+.chat-widget-container.dark {
+  --chat-primary:    0 0% 92.2%;
+  --chat-background: 0 0% 14.5%;
+  --chat-text:       0 0% 98.5%;
+  --chat-muted:      0 0% 26.9%;
+  --chat-border:     0 0% 24.9%;
+
+  --chat-surface:        0 0% 20%;     /* dark: #333333 */
+  --chat-surface-hover:  0 0% 33.3%;   /* dark: #555555 */
+  --chat-surface-deep:   0 0% 10.2%;   /* dark: #1a1a1a */
+
+  --chat-text-strong: 0 0% 80%;        /* dark: #cccccc */
+  --chat-text-muted:  0 0% 60%;        /* dark: #999999 */
+  --chat-text-subtle: 0 0% 40%;        /* dark: #666666 */
+
+  --chat-header-bg:        rgba(37, 37, 37, 0.8);
+  --chat-header-bg-strong: rgba(37, 37, 37, 0.95);
+  --chat-overlay:          rgba(0, 0, 0, 0.2);
+  --chat-hover-bg:         rgba(68, 68, 68, 0.5);
+  /* Same single token in dark mode (slightly higher alpha because the
+     dark text colour is light, and translucent-light-on-dark reads thinner). */
+  --chat-divider:          hsl(0 0% 98.5% / 0.12);
+
+  --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+
+  /* Override Tailwind's border color for Streamdown compatibility */
+  --color-border: var(--chat-divider);
+}
+
+/* ============================================
+   SIZE PRESETS
+   Uses clamp(min, preferred, max) for responsive sizing
+   ============================================ */
+
+.chat-widget-container[data-size="compact"] {
+  /* Smaller widget - good for sidebars, minimal footprint */
+  --chat-widget-width: clamp(300px, 24vw, 400px);
+}
+
+.chat-widget-container[data-size="default"] {
+  /* Balanced size - works well for most use cases */
+  --chat-widget-width: clamp(320px, 28vw, 500px);
+}
+
+.chat-widget-container[data-size="large"] {
+  /* Spacious - better for content-heavy conversations */
+  --chat-widget-width: clamp(400px, 35vw, 700px);
+}
+
+.chat-widget-container[data-size="full"] {
+  /* Full width - takes entire screen */
+  --chat-widget-width: 100%;
+}
+
+/* ============================================
+   RESPONSIVE CONTAINER QUERIES
+   Adapts based on container width, not viewport
+   ============================================ */
+
+/* Compact layout for narrow containers */
+@container chat-widget (max-width: 380px) {
+  .chat-widget-content {
+    --chat-message-max-width: 95%;
+    --chat-input-padding: 0.5rem;
+  }
+
+  .chat-widget-content .chat-header {
+    padding: 0.75rem;
+  }
+
+  .chat-widget-content .chat-tabs {
+    gap: 0.25rem;
+  }
+}
+
+/* Standard layout */
+@container chat-widget (min-width: 381px) and (max-width: 500px) {
+  .chat-widget-content {
+    --chat-message-max-width: 88%;
+    --chat-input-padding: 0.75rem;
+  }
+}
+
+/* Spacious layout for wider containers */
+@container chat-widget (min-width: 501px) {
+  .chat-widget-content {
+    --chat-message-max-width: 85%;
+    --chat-input-padding: 1rem;
+  }
+}
+
+/* ============================================
+   MESSAGE BUBBLES
+   ============================================ */
+
+.chat-widget-container .is-user .chat-message-content {
+  background-color: hsl(var(--chat-text));
+  border: 1px solid var(--chat-divider);
+}
+
+.chat-widget-container .is-user .chat-message-content * {
+  color: hsl(var(--chat-background));
+}
+
+.chat-widget-container .is-assistant .chat-message-content * {
+  color: hsl(var(--chat-text));
+}
+
+/* ============================================
+   FORM & INPUT ELEMENTS
+   ============================================ */
+
+.chat-widget-container button[type="submit"] {
+  background-color: hsl(var(--chat-text));
+  color: hsl(var(--chat-background));
+  border-radius: 12px;
+  border: 1px solid var(--chat-divider);
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: var(--chat-shadow-sm);
+}
+
+.chat-widget-container button[type="submit"]:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: var(--chat-shadow-md) !important;
+}
+
+.chat-widget-container button[type="submit"]:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.chat-widget-container button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.chat-widget-container button[type="submit"] svg {
+  color: hsl(var(--chat-background));
+}
+
+.chat-widget-container form {
+  background-color: hsl(var(--chat-background));
+  border-radius: 0.5rem; /* 8px — matches the conversation tabs (rounded-lg) */
+  border: 1px solid var(--chat-divider);
+  box-shadow: var(--chat-shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.chat-widget-container form:focus-within {
+  border-color: var(--chat-divider);
+  box-shadow: var(--chat-shadow-md);
+}
+
+.chat-widget-container textarea {
+  background-color: hsl(var(--chat-background));
+  color: hsl(var(--chat-text));
+}
+
+.chat-widget-container textarea::placeholder {
+  color: hsl(var(--chat-text) / 0.6);
+}
+
+/* Form internal divider (between PromptInputBody and PromptInputToolbar).
+   Tailwind v4 wraps `divide-y` colour utility classes in :where() which
+   gives them zero specificity, so an arbitrary divide colour gets out-bid.
+   This real selector wins and uses the single --chat-divider token. */
+.chat-widget-container form > * + * {
+  border-top: 1px solid var(--chat-divider);
+}
+
+/* ============================================
+   BUTTONS & CONTROLS
+   ============================================ */
+
+.chat-widget-container button[type="button"].absolute {
+  background-color: hsl(var(--chat-background));
+  border: 1px solid var(--chat-divider);
+  color: hsl(var(--chat-text));
+  box-shadow: var(--chat-shadow-md);
+}
+
+.chat-widget-container button[type="button"].absolute:hover {
+  background-color: hsl(var(--chat-muted));
+  border-color: hsl(var(--chat-text) / 0.2);
+}
+
+.chat-widget-container button[type="button"].absolute svg {
+  color: hsl(var(--chat-text));
+}
+
+/* ============================================
+   CODE BLOCKS
+   ============================================ */
+
+.chat-widget-container pre {
+  background-color: hsl(var(--chat-text) / 0.03);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 0.75rem 0;
+  max-height: 24rem;
+  overflow-y: auto;
+  overflow-anchor: none;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.chat-widget-container pre code {
+  display: block;
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: inherit;
+  color: hsl(var(--chat-text));
+}
+
+.chat-widget-container :not(pre) > code {
+  background-color: hsl(var(--chat-text) / 0.06);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: hsl(var(--chat-text));
+}
+
+.chat-widget-container pre::after {
+  content: "";
+  display: block;
+  height: 1px;
+  overflow-anchor: auto;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes chat-slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes chat-slide-out-right {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes chat-slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes chat-slide-out-left {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(-100%); opacity: 0; }
+}
+
+@keyframes chat-fade-in-up {
+  from { transform: translateY(20px) scale(0.95); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes chat-fade-out-down {
+  from { transform: translateY(0) scale(1); opacity: 1; }
+  to { transform: translateY(20px) scale(0.95); opacity: 0; }
+}
+
+@keyframes chat-backdrop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.chat-backdrop-fade-in {
+  animation: chat-backdrop-fade-in 0.2s ease-out forwards;
+}
+
+.chat-widget-container[style*="animation"] {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+/* ============================================
+   POPUP WIDGET LAYOUT
+   Uses CSS custom properties for sizing
+   Note: Uses combined selector (no space) since classes are on same element
+   ============================================ */
+
+.chat-widget-container.chat-widget-popup {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: var(--chat-widget-height, 100dvh);
+  width: var(--chat-widget-width);
+  z-index: 50;
+  border-left: 1px solid var(--chat-divider);
+  background-color: hsl(var(--chat-background));
+  animation: chat-slide-in-right 0.3s ease-out forwards;
+}
+
+/* ============================================
+   INLINE LAYOUT
+   Renders in place inside the parent. Parent CSS controls dimensions —
+   widget just fills 100% of whatever container it lives in. No fixed
+   positioning, no slide-in animation, no FAB.
+   ============================================ */
+
+.chat-widget-container.chat-widget-inline {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: hsl(var(--chat-background));
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* ============================================
+   PAGE LAYOUT
+   Full-viewport chat surface for a dedicated route. Uses dvh so the
+   layout adapts to mobile address-bar collapse without jumping.
+   ============================================ */
+
+.chat-widget-container.chat-widget-page {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  background-color: hsl(var(--chat-background));
+  overflow: hidden;
+}
+
+/* When user is resizing, disable transitions for smooth drag */
+.chat-widget-container.chat-widget-popup[data-resizing="true"] {
+  transition: none;
+}
+
+/* Resize handle */
+.chat-widget-container .chat-widget-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 4px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 10;
+}
+
+.chat-widget-container .chat-widget-resize-handle:hover,
+.chat-widget-container .chat-widget-resize-handle:active {
+  background-color: hsl(var(--chat-primary) / 0.2);
+}
+
+/* ============================================
+   MOBILE RESPONSIVE
+   Full-width on small screens regardless of size preset
+   ============================================ */
+
+@media (max-width: 640px) {
+  .chat-widget-container.chat-widget-popup {
+    --chat-widget-width: 100%;
+    --chat-widget-min-width: 100%;
+    --chat-widget-max-width: 100%;
+    border-left: none;
+  }
+
+  .chat-widget-container .chat-widget-resize-handle {
+    display: none;
+  }
+}

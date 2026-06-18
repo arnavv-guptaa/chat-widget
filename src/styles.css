@@ -1,0 +1,332 @@
+/**
+ * Chat Widget Styles
+ *
+ * This file contains all the CSS needed for the chat widget to function properly.
+ * Import this file in your application after importing Tailwind CSS.
+ *
+ * Usage:
+ * import '@/components/chat-widget/chat-widget.css';
+ */
+
+/* ============================================
+   SCROLLBAR STYLES
+   ============================================ */
+
+/* Custom scrollbar for chat widget */
+.ai-assistant-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0.922 0 0 / 30%);
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+
+.ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.922 0 0 / 50%);
+}
+
+/* Dark mode scrollbar */
+.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 20%);
+}
+
+.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(1 0 0 / 30%);
+}
+
+/* Firefox scrollbar for AI Assistant */
+.ai-assistant-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.922 0 0 / 30%) transparent;
+}
+
+.dark .ai-assistant-scrollbar {
+  scrollbar-color: oklch(1 0 0 / 20%) transparent;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* Internet Explorer 10+ */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Safari and Chrome */
+}
+
+/* ============================================
+   CHAT WIDGET CONTAINER
+   ============================================ */
+
+.chat-widget-container {
+  /* Light theme - inspired by landing page */
+  --chat-primary: 0 0% 20.5%; /* Near black (matches --primary) */
+  --chat-background: 0 0% 100%; /* White */
+  --chat-text: 0 0% 14.5%; /* Dark gray (matches --foreground) */
+  --chat-muted: 0 0% 97%; /* Light gray (matches --secondary) */
+  --chat-border: 0 0% 89.8%; /* Light border color */
+
+  /* Derived colors */
+  --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  /* Typography */
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+
+  /* Apply theme */
+  background-color: hsl(var(--chat-background));
+  color: hsl(var(--chat-text));
+}
+
+/* Dark theme - inspired by landing page */
+.chat-widget-container.dark {
+  --chat-primary: 0 0% 92.2%; /* Light gray (matches dark --primary) */
+  --chat-background: 0 0% 14.5%; /* Dark (matches dark --background) */
+  --chat-text: 0 0% 98.5%; /* Near white (matches dark --foreground) */
+  --chat-muted: 0 0% 26.9%; /* Darker gray (matches dark --secondary) */
+  --chat-border: 0 0% 24.9%; /* Dark border color */
+
+  --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================
+   MESSAGE BUBBLES
+   ============================================ */
+
+/* User message bubble - clean grayscale styling */
+.chat-widget-container .is-user .chat-message-content {
+  background-color: hsl(var(--chat-text));
+  border: 1px solid hsl(var(--chat-text) / 0.1);
+}
+
+.chat-widget-container .is-user .chat-message-content * {
+  color: hsl(var(--chat-background));
+}
+
+/* Assistant message - uses theme text color */
+.chat-widget-container .is-assistant .chat-message-content * {
+  color: hsl(var(--chat-text));
+}
+
+/* ============================================
+   FORM & INPUT ELEMENTS
+   ============================================ */
+
+/* Submit button - clean grayscale styling */
+.chat-widget-container button[type="submit"] {
+  background-color: hsl(var(--chat-text));
+  color: hsl(var(--chat-background));
+  border-radius: 12px;
+  border: 1px solid hsl(var(--chat-text) / 0.1);
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: var(--chat-shadow-sm);
+}
+
+.chat-widget-container button[type="submit"]:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: var(--chat-shadow-md) !important;
+}
+
+.chat-widget-container button[type="submit"]:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.chat-widget-container button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Submit button icon color */
+.chat-widget-container button[type="submit"] svg {
+  color: hsl(var(--chat-background));
+}
+
+/* Input form */
+.chat-widget-container form {
+  background-color: hsl(var(--chat-background));
+  border-radius: 20px;
+  border: 1px solid hsl(var(--chat-text) / 0.1);
+  box-shadow: var(--chat-shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.chat-widget-container form:focus-within {
+  border-color: hsl(var(--chat-text) / 0.2);
+  box-shadow: var(--chat-shadow-md);
+}
+
+/* Textarea */
+.chat-widget-container textarea {
+  background-color: hsl(var(--chat-background));
+  color: hsl(var(--chat-text));
+}
+
+/* Textarea placeholder */
+.chat-widget-container textarea::placeholder {
+  color: hsl(var(--chat-text) / 0.6);
+}
+
+/* ============================================
+   BUTTONS & CONTROLS
+   ============================================ */
+
+/* Scroll to bottom button - only style icon buttons in absolute position */
+.chat-widget-container button[type="button"].absolute {
+  background-color: hsl(var(--chat-background));
+  border: 1px solid hsl(var(--chat-text) / 0.15);
+  color: hsl(var(--chat-text));
+  box-shadow: var(--chat-shadow-md);
+}
+
+.chat-widget-container button[type="button"].absolute:hover {
+  background-color: hsl(var(--chat-muted));
+  border-color: hsl(var(--chat-text) / 0.2);
+}
+
+.chat-widget-container button[type="button"].absolute svg {
+  color: hsl(var(--chat-text));
+}
+
+/* ============================================
+   CODE BLOCKS
+   ============================================ */
+
+/* Code block max height restriction */
+.chat-widget-container pre {
+  max-height: 24rem; /* 384px */
+  overflow-y: auto;
+  overflow-anchor: none;
+}
+
+/* Ensure nested code elements don't override */
+.chat-widget-container pre code {
+  display: block;
+}
+
+/* Auto-scroll anchor for streaming code blocks */
+.chat-widget-container pre::after {
+  content: "";
+  display: block;
+  height: 1px;
+  overflow-anchor: auto;
+}
+
+/* ============================================
+   SLIDE-IN ANIMATIONS
+   ============================================ */
+
+/* Slide in from right */
+@keyframes chat-slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Slide out to right */
+@keyframes chat-slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Slide in from left */
+@keyframes chat-slide-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Slide out to left */
+@keyframes chat-slide-out-left {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+/* Fade in from bottom (for corner widgets) */
+@keyframes chat-fade-in-up {
+  from {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Fade out to bottom */
+@keyframes chat-fade-out-down {
+  from {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+}
+
+/* Backdrop fade in */
+@keyframes chat-backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.chat-backdrop-fade-in {
+  animation: chat-backdrop-fade-in 0.2s ease-out forwards;
+}
+
+/* ============================================
+   POPUP WIDGET SHADOW
+   ============================================ */
+
+/* Add shadow to popup widgets */
+.chat-widget-container[style*="animation"] {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+/* ============================================
+   POPUP WIDGET BORDER
+   ============================================ */
+
+/* Border for popup widget */
+.chat-widget-popup {
+  border-left: 1px solid hsl(var(--chat-border));
+}
