@@ -21,3 +21,6 @@ npm-debug.log*
 *.swp
 .idea/
 .vscode/
+
+# npm auth (NEVER commit)
+.npmrc
