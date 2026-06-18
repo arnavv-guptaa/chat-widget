@@ -18,7 +18,7 @@
 
 import 'server-only';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
-import type { UIMessage } from 'ai';
+import { generateId, type UIMessage } from 'ai';
 
 import {
   ConversationOwnershipError,
@@ -186,11 +186,16 @@ class DrizzleChatStore implements ChatStore {
 
     if (turnMessages.length === 0) return;
 
-    // Idempotent insert keyed on message id. The AI SDK delivers stable ids;
-    // replays/retries re-deliver them. onConflictDoNothing makes re-saving a
-    // seen message a no-op instead of a duplicate.
+    // Idempotent insert keyed on message id. The handler configures the AI SDK
+    // to assign a stable id to every message (generateMessageId), and replays/
+    // retries re-deliver the same id — so onConflictDoNothing dedupes safely.
+    //
+    // Defence in depth: if a message arrives without an id (empty string),
+    // mint one rather than inserting it. Multiple id-less messages would
+    // otherwise all collide on the '' primary key and silently vanish — the
+    // exact bug an empty assistant id caused before generateMessageId was set.
     const values = turnMessages.map((m) => ({
-      id: m.id,
+      id: m.id && m.id.length > 0 ? m.id : generateId(),
       conversationId,
       role: m.role as 'user' | 'assistant' | 'system',
       parts: m.parts,

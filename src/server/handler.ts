@@ -31,6 +31,7 @@
 import 'server-only';
 import {
   convertToModelMessages,
+  generateId,
   stepCountIs,
   streamText,
   type LanguageModel,
@@ -158,7 +159,13 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const ctx = await authenticate(request, conversationId);
     if (!ctx) return new Response('Unauthorized', { status: 401 });
 
-    const incoming = Array.isArray(body.messages) ? body.messages : [];
+    // Sanitise the incoming array: drop anything that isn't a well-formed
+    // message (null/undefined, missing role, missing parts). A malformed entry
+    // must never crash the turn — skip it rather than throw downstream.
+    const incoming = (Array.isArray(body.messages) ? body.messages : []).filter(
+      (m): m is UIMessage =>
+        !!m && typeof m === 'object' && typeof m.role === 'string' && Array.isArray(m.parts),
+    );
     const store = resolveStore(ctx.userId);
 
     // Ownership chokepoint: create the conversation for this user, or reject
@@ -225,6 +232,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return result.toUIMessageStreamResponse({
       sendSources: true,
       sendReasoning: true,
+      // REQUIRED for correct persistence. Without `generateMessageId` the
+      // assistant message comes back with an empty id, so every assistant turn
+      // in a conversation collides on the same '' primary key and only the
+      // first one survives `saveTurn`'s idempotent insert. `originalMessages`
+      // lets the SDK reuse existing ids (preventing duplicates) and return the
+      // full original+response set in onFinish.
+      originalMessages: incoming,
+      generateMessageId: generateId,
       onFinish: async ({ messages: finalMessages, isAborted }) => {
         // Don't persist a turn the client aborted mid-stream — the assistant
         // message is partial and the user didn't receive it. The idempotent
@@ -445,7 +460,7 @@ function resolveUploadPolicy(upload?: UploadPolicy): {
 /** Cap overlong text parts so one pasted blob can't dominate the window. */
 function capMessages(messages: UIMessage[], maxChars: number): UIMessage[] {
   return messages.map((msg) => {
-    if (!msg.parts) return msg;
+    if (!msg || !Array.isArray(msg.parts)) return msg;
     const parts = msg.parts.map((p) =>
       p.type === 'text' && typeof (p as { text?: string }).text === 'string' && (p as { text: string }).text.length > maxChars
         ? { ...p, text: (p as { text: string }).text.slice(0, maxChars) }

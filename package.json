@@ -1,6 +1,6 @@
 {
   "name": "@mordn/chat-widget",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "A customizable AI chat widget for React applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -48,7 +48,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js",
