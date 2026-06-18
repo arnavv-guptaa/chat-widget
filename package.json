@@ -1,6 +1,6 @@
 {
   "name": "@mordn/chat-widget",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "A customizable AI chat widget for React applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -41,6 +41,11 @@
       "types": "./dist/server/supabase/index.d.ts",
       "import": "./dist/server/supabase/index.mjs",
       "require": "./dist/server/supabase/index.js"
+    },
+    "./server/hosted": {
+      "types": "./dist/server/hosted/index.d.ts",
+      "import": "./dist/server/hosted/index.mjs",
+      "require": "./dist/server/hosted/index.js"
     }
   },
   "bin": {

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@mordn/chat-widget — Hosted Backend Plan</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --panel2: #f0f2f6; --border: #e1e5ec;
+    --ink: #1c2230; --muted: #5b6573; --accent: #2563eb; --good: #16a34a;
+    --warn: #b45309; --bad: #dc2626; --code-bg: #f2f4f8; --cite: #7c3aed;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 48px 28px 120px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 30px; font-size: 15px; }
+  h2 { font-size: 21px; margin: 46px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; }
+  h3 { font-size: 16px; margin: 22px 0 8px; color: var(--accent); }
+  code { background: var(--code-bg); padding: 1.5px 6px; border-radius: 5px;
+    font: 13.5px/1.5 "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: #1e3a8a; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 14px 0; }
+  pre code { background: none; border: none; padding: 0; color: #243049; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin: 16px 0; }
+  .grid { display: grid; gap: 14px; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 760px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; letter-spacing: 0.03em; }
+  .tag.done { background: rgba(22,163,74,.12); color: var(--good); border: 1px solid rgba(22,163,74,.32); }
+  .tag.todo { background: rgba(180,83,9,.10); color: var(--warn); border: 1px solid rgba(180,83,9,.3); }
+  .tag.now { background: rgba(37,99,235,.10); color: var(--accent); border: 1px solid rgba(37,99,235,.3); }
+  .lead { font-size: 17px; }
+  .callout { border-left: 3px solid var(--accent); background: var(--panel2); border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.good { border-left-color: var(--good); }
+  .callout.cite { border-left-color: var(--cite); }
+  ul.tight { margin: 6px 0; padding-left: 22px; } ul.tight li { margin: 3px 0; }
+  ol.tight { margin: 6px 0; padding-left: 22px; } ol.tight li { margin: 3px 0; }
+  .ascii { font: 12.5px/1.45 "SF Mono", ui-monospace, Menlo, monospace; color: #334155; white-space: pre; }
+  .step { display: flex; gap: 14px; align-items: flex-start; margin: 14px 0; }
+  .stepnum { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--accent); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 40px; }
+  a { color: var(--accent); }
+  .src { font-size: 12px; color: var(--cite); }
+  .ev { font-size: 12.5px; color: var(--cite); font-weight: 600; }
+  .big { font-size: 19px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>@mordn/chat-widget — Hosted Backend Plan</h1>
+  <p class="sub">Evidence-backed infra design · grounded in how OpenAI, Cursor &amp; Chatbase actually scale · drafted June 2026 · light theme</p>
+
+  <div class="callout good">
+    <strong>The reassuring headline.</strong> We researched how products serving hundreds of millions are built.
+    The verdict: <strong>you do not need anything exotic.</strong> OpenAI runs ChatGPT for
+    <strong>800M users on a single-primary Postgres + read replicas — no sharding</strong>. The architecture we
+    already designed is the right one. The thing that determines scale is the <em>data topology</em> (which the real
+    products agree on), not the compute platform (which they all differ on, and all work).
+  </div>
+
+  <h2>1 · What the real products do <span class="ev">— evidence</span></h2>
+  <table>
+    <tr><th>Product</th><th>Scale</th><th>What they run</th></tr>
+    <tr>
+      <td><strong>OpenAI / ChatGPT</strong></td>
+      <td>~800M users</td>
+      <td><strong>Single-primary Postgres + ~50 read replicas</strong> across regions. <strong>No sharding</strong> (deliberately — "too complex for a read-heavy workload"). PgBouncer (50ms→5ms). Redis cache with stampede-lock. Replicas co-located with app per region → low double-digit-ms p99 globally.</td>
+    </tr>
+    <tr>
+      <td><strong>Cursor</strong></td>
+      <td>1M+ QPS, billions/day</td>
+      <td><strong>AWS</strong> backend (EC2, managed by <strong>Terraform</strong>). <strong>Cloudflare as a reverse proxy in front</strong> (TLS, DDoS, perf). A TypeScript <em>monolith</em> (Rust hot paths) — not microservices. Latency POPs in Tokyo + London on a US core.</td>
+    </tr>
+    <tr>
+      <td><strong>Chatbase</strong></td>
+      <td>$4M ARR, 500K MAU</td>
+      <td><strong>Vercel + Next.js + AI SDK.</strong> Optimised for iteration speed over infra cost — right call at their stage. (Proof the platform is flexible.)</td>
+    </tr>
+  </table>
+  <div class="callout cite">
+    <strong>The pattern — three platforms, one data architecture:</strong> single-primary Postgres + many regional
+    read replicas + PgBouncer + a Redis cache + object storage for blobs; co-locate compute with replicas for global
+    latency; <strong>don't shard until forced</strong>. Cursor=AWS, OpenAI=Azure/K8s, Chatbase=Vercel — all scale,
+    because they all got the <em>data layer</em> right.
+    <div class="src" style="margin-top:8px">Sources: OpenAI Postgres (openai.com + bytebytego) · Cursor infra (bytebytego + pragmaticengineer) · Chatbase (vercel.com). Full links at bottom.</div>
+  </div>
+
+  <h2>2 · The lesson applied — our stack</h2>
+  <p class="lead">Lock the proven <strong>data topology</strong> (the fixed part). Pick compute for ops-comfort (the flexible part). Add the one piece our earlier design was missing: <strong>a Redis cache layer</strong> — OpenAI's #1 lesson.</p>
+  <div class="panel">
+    <div class="ascii">                      Cloudflare (edge: TLS, DDoS, proxy)   ← like Cursor
+                                   │
+                      ┌────────────┴────────────┐
+                      ▼                          ▼
+            AWS region us-east           AWS region eu / ap  (add as you grow)
+            ┌──────────────────┐         ┌──────────────────┐
+            │ API containers   │         │ API containers   │   stateless,
+            │ (ECS/EKS, TF)    │         │ (ECS/EKS, TF)    │   autoscaling
+            │   │       │      │         │   │       │      │
+            │ Redis    PgBouncer         │ Redis    PgBouncer
+            │ (cache)   │      │         │ (cache)   │      │
+            └───────────┼──────┘         └───────────┼──────┘
+                        ▼                            ▼
+              Postgres PRIMARY  ◀──replication──▶  read replica (regional)
+              (ClickHouse-managed PG)            co-located w/ compute
+                        │
+                        ▼
+              Cloudflare R2  (private attachment blobs, zero egress)</div>
+  </div>
+
+  <table>
+    <tr><th>Layer</th><th>Choice</th><th>Precedent / why</th></tr>
+    <tr><td><strong>Edge</strong></td><td>Cloudflare (proxy in front)</td><td>Exactly how Cursor uses it — TLS, DDoS, global routing. <em>Not</em> the whole backend.</td></tr>
+    <tr><td><strong>Compute / API</strong></td><td>AWS containers (ECS→EKS), Terraform</td><td>Cursor's model. You control cost (vCPU-hours, spot/reserved), no per-invocation tax, co-locate with replicas.</td></tr>
+    <tr><td><strong>Cache</strong> <span class="tag now">NEW</span></td><td>Redis (per region, hot sessions)</td><td>OpenAI's top lesson: a cache miss must not stampede the DB. Add a stampede-lock. This was missing from our v1 design.</td></tr>
+    <tr><td><strong>Chat DB</strong></td><td>ClickHouse-managed Postgres: <strong>single primary + regional read replicas</strong></td><td>The OpenAI playbook, proven to 800M. PgBouncer built in. <strong>No sharding.</strong> Store unchanged.</td></tr>
+    <tr><td><strong>Attachments</strong></td><td>Cloudflare R2</td><td>Zero egress; S3-compatible. Already chosen.</td></tr>
+    <tr><td><strong>Analytics (later)</strong></td><td>ClickHouse OLAP via Postgres CDC</td><td>Usage metering / dashboards over the message firehose.</td></tr>
+  </table>
+
+  <div class="callout good">
+    <span class="big">The headline fact:</span> OpenAI serves <strong>800 million users on un-sharded Postgres</strong>.
+    So "scale" for us = single primary → add read replicas → PgBouncer → Redis cache → partition the messages table.
+    All standard Postgres levers. <strong>No distributed SQL, no NoSQL, no sharding</strong> until far beyond where we'll be.
+  </div>
+
+  <h2>3 · Global low-latency — the proven way</h2>
+  <p>"Fast everywhere" is a <strong>data</strong> problem, not a compute one. OpenAI's answer (and now ours):</p>
+  <ul class="tight">
+    <li><strong>Read replicas in each region</strong>, co-located with API compute → reads served locally (history loads, conversation lists).</li>
+    <li><strong>Writes go to the primary</strong> (a message insert tolerates one cross-region hop; reads dominate chat).</li>
+    <li><strong>Cloudflare edge</strong> in front routes users to the nearest region and absorbs TLS/DDoS.</li>
+    <li><strong>Redis per region</strong> caches hot conversations so most reads never touch Postgres at all.</li>
+  </ul>
+  <p class="muted">This is regional read-replica co-location — exactly OpenAI's "double-digit-ms p99 globally" technique. Not a magic platform; a data topology.</p>
+
+  <h2>4 · Two-level identity &amp; tenancy</h2>
+  <div class="grid cols-2">
+    <div class="panel"><h3 style="margin-top:0">Tenant</h3><p class="muted" style="margin:0">"Whose app?" — from the <strong>API key</strong>. Shared cluster, <code>tenant_id</code> on every row. Isolates customers.</p></div>
+    <div class="panel"><h3 style="margin-top:0">End user</h3><p class="muted" style="margin:0">"Which of their users?" — the app passes its <strong>server-verified</strong> user id (existing <code>getUserId</code>). Isolates users within a tenant.</p></div>
+  </div>
+  <p>Both filtered on every query. <code>tenant_id</code> threaded from day one (even on one shared cluster) is the keystone that lets an enterprise tenant later move to a dedicated DB without a rewrite. OpenAI's "noisy-neighbor" lesson: route low/high-priority tenants to separate replica pools as you grow.</p>
+
+  <h2>5 · Schema delta from today</h2>
+  <pre><code>-- new
+tenants(id, name, plan, region, created_at)
+api_keys(id, tenant_id, key_hash, scope, created_at, revoked_at)
+
+-- altered: tenant_id added + indexed, filtered in every query
+chat_conversations(  tenant_id, … )   -- partition / index by tenant
+chat_messages(       tenant_id, … )   -- JSONB parts already in place
+
+-- R2 paths gain tenant prefix:
+<tenant_id>/<userId>/<conversationId>/<uuid>/<file></code></pre>
+  <p class="muted">Note: OpenAI stores conversation history + tool results as JSONB — same as our <code>parts</code> column. We're already aligned with the proven shape.</p>
+
+  <h2>6 · API surface — endpoints ↔ interface methods</h2>
+  <table>
+    <tr><th>Endpoint</th><th>Interface method</th></tr>
+    <tr><td><code>GET /v1/conversations</code></td><td><code>listConversations()</code> — Redis-cached</td></tr>
+    <tr><td><code>GET /v1/conversations/:id</code></td><td><code>getConversation()</code> + <code>listMessages()</code> — replica read</td></tr>
+    <tr><td><code>POST /v1/conversations/:id/turns</code></td><td><code>ensureConversation()</code> + <code>saveTurn()</code> — primary write</td></tr>
+    <tr><td><code>PATCH /v1/conversations/:id</code></td><td><code>renameConversation()</code></td></tr>
+    <tr><td><code>DELETE /v1/conversations/:id</code></td><td><code>deleteConversation()</code></td></tr>
+    <tr><td><code>POST /v1/uploads</code> · <code>/resign</code></td><td><code>StorageAdapter.upload()</code> / <code>resign()</code> → R2</td></tr>
+  </table>
+  <p>Each request: authenticate <strong>tenant</strong> (key) → read <strong>user</strong> (header) → <code>createDrizzleChatStore(userId)</code> scoped to tenant, against the regional replica (reads) or primary (writes) → JSON. The package-side <code>createHostedChatStore({ apiKey })</code> is a thin HTTP client over the same <code>ChatStore</code> interface (≈ a day's work once the API exists).</p>
+
+  <h2>7 · Build phasing</h2>
+  <div class="step"><div class="stepnum">0</div><div><strong>Design</strong> <span class="tag now">done / this doc</span><br><span class="muted">Evidence-backed stack. No infra, no spend.</span></div></div>
+  <div class="step"><div class="stepnum">1</div><div><strong>Single-tenant prototype — built locally</strong> <span class="tag todo">next</span><br><span class="muted">API service + <code>tenant_id</code> schema + Redis + <code>createHostedChatStore</code>, one hardcoded tenant, Jarvis → localhost. Runs in Docker / one Postgres. Proves the loop. <em>No cloud account needed.</em></span></div></div>
+  <div class="step"><div class="stepnum">2</div><div><strong>Deploy single region</strong> <span class="tag todo">company gate</span><br><span class="muted">AWS (ECS via Terraform) + Cloudflare edge + ClickHouse-PG primary + R2. One region, real keys, minimal dashboard.</span></div></div>
+  <div class="step"><div class="stepnum">3</div><div><strong>Multi-region + productionize (per demand)</strong> <span class="tag todo">todo</span><br><span class="muted">Regional read replicas, Redis per region, partition messages, monitoring, billing. Residency/DPA/dedicated-DB when a regulated customer appears.</span></div></div>
+
+  <div class="callout warn">
+    <strong>Gate before Phase 2:</strong> deploying = committing to operate infrastructure indefinitely (backups, uptime,
+    never losing a customer's history, a DPA for regulated buyers). The "are we a company?" decision. <strong>Phase 1
+    needs none of it</strong> — it's local, and it's mostly code I write.
+  </div>
+
+  <h2>8 · What's already done vs. to build</h2>
+  <div class="grid cols-2">
+    <div class="panel"><h3 style="margin-top:0"><span class="tag done">DONE</span> shipped in 0.8.1</h3>
+      <ul class="tight">
+        <li><code>ChatStore</code> / <code>StorageAdapter</code> interfaces (user-bound)</li>
+        <li><code>createChatHandler</code> request loop</li>
+        <li>Default Drizzle + Supabase implementations</li>
+        <li>Jarvis runs on this (BYO) today</li>
+      </ul>
+    </div>
+    <div class="panel"><h3 style="margin-top:0"><span class="tag todo">TO BUILD</span> the hosted half</h3>
+      <ul class="tight">
+        <li>Hosted API service (endpoints above)</li>
+        <li><code>tenant_id</code> schema + keys + Redis cache</li>
+        <li><code>createHostedChatStore</code> / <code>createHostedStorage</code> (HTTP clients)</li>
+        <li>Terraform for AWS + Cloudflare; infra ops</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>9 · To start Phase 1 — minimal provisioning</h2>
+  <p>Phase 1 is built/run locally, so the cloud platform (AWS/Cloudflare) is <em>not</em> needed yet. The only things to provision are the data layer (which is testable locally):</p>
+  <div class="grid cols-3">
+    <div class="panel"><strong>Postgres</strong><br><span class="muted">A connection string. ClickHouse-managed PG (or any Postgres / local Docker for the prototype). → <code>DATABASE_URL</code></span></div>
+    <div class="panel"><strong>R2</strong><br><span class="muted">Bucket + API token. (Or local MinIO for the prototype — S3-compatible.)</span></div>
+    <div class="panel"><strong>Redis</strong><br><span class="muted">Any Redis (local Docker fine for Phase 1). → cache layer.</span></div>
+  </div>
+  <p class="muted">Everything else — the API service, schema, hosted client, Jarvis wiring — is code I write and we run locally before any cloud spend.</p>
+
+  <hr>
+  <h3>Sources</h3>
+  <ul class="tight" style="font-size:13.5px">
+    <li>OpenAI — <a href="https://openai.com/index/scaling-postgresql/">Scaling PostgreSQL to 800M users</a> · <a href="https://blog.bytebytego.com/p/how-openai-scaled-to-800-million">ByteByteGo breakdown</a></li>
+    <li>Cursor — <a href="https://blog.bytebytego.com/p/how-cursor-serves-billions-of-ai">Serving billions of completions/day</a> · <a href="https://newsletter.pragmaticengineer.com/p/cursor">Pragmatic Engineer: building Cursor</a></li>
+    <li>Chatbase — <a href="https://vercel.com/blog/how-chatbase-scaled-rapidly-with-vercels-developer-experience-and-ai-sdk">Scaling with Vercel + AI SDK</a></li>
+  </ul>
+  <p class="foot">
+    Status: Phase 0 design, evidence-backed, not built · Data topology validated against OpenAI (800M, un-sharded) ·
+    Compute = Cursor-shaped (AWS + Cloudflare edge) · Added Redis cache layer (OpenAI's #1 lesson) ·
+    Phase 1 is local-only, mostly code.
+  </p>
+
+</div>
+</body>
+</html>

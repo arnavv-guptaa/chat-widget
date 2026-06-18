@@ -27,6 +27,7 @@ export default defineConfig([
       'server/index': 'src/server/index.ts',
       'server/drizzle/index': 'src/server/stores/drizzle/index.ts',
       'server/supabase/index': 'src/server/stores/supabase/index.ts',
+      'server/hosted/index': 'src/server/stores/hosted/index.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
