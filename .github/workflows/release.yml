@@ -37,10 +37,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          # NOTE: deliberately NO `registry-url`. Setting it makes setup-node
-          # write an .npmrc with `_authToken=${NODE_AUTH_TOKEN}`, which forces
-          # token auth and BREAKS OIDC trusted publishing (npm sends an empty
-          # token and the publish 404s). OIDC needs npm's default config.
+          # registry-url is required so npm knows which registry to run the
+          # OIDC exchange against. We do NOT set NODE_AUTH_TOKEN on the publish
+          # step, so npm uses OIDC trusted publishing rather than token auth.
+          registry-url: 'https://registry.npmjs.org'
 
       # Trusted Publishing needs npm >= 11.5.1. Pin to latest known-good.
       - name: Upgrade npm
