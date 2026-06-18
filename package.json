@@ -36,6 +36,11 @@
       "types": "./dist/server/drizzle/index.d.ts",
       "import": "./dist/server/drizzle/index.mjs",
       "require": "./dist/server/drizzle/index.js"
+    },
+    "./server/supabase": {
+      "types": "./dist/server/supabase/index.d.ts",
+      "import": "./dist/server/supabase/index.mjs",
+      "require": "./dist/server/supabase/index.js"
     }
   },
   "bin": {
