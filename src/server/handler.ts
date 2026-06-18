@@ -195,6 +195,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
     const tools = built.tools ?? ({} as ToolSet);
     const model = await resolveModel(ctx);
+    // String label of the model for persistence (the `model` column). A
+    // LanguageModel is either a gateway string ("anthropic/claude-…") or a
+    // provider object exposing `.modelId`.
+    const modelLabel =
+      typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
     const system = buildSystemPrompt ? await buildSystemPrompt(ctx) : DEFAULT_SYSTEM_PROMPT;
 
     // Single, guarded teardown of the tools' per-request resource. Fires
@@ -249,7 +254,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           // silently-dropped turn is the exact failure we designed against —
           // but never thrown, because the user already has their answer.
           try {
-            await store.saveTurn({ conversationId, messages: finalMessages });
+            await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel });
           } catch (err) {
             console.error(
               JSON.stringify({
