@@ -44,7 +44,7 @@
     }
   },
   "bin": {
-    "chat-widget": "./dist/cli/init.js"
+    "chat-widget": "dist/cli/init.js"
   },
   "files": [
     "dist",
@@ -117,7 +117,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/arnavv-guptaa/chat-widget"
+    "url": "git+https://github.com/arnavv-guptaa/chat-widget.git"
   },
   "homepage": "https://github.com/arnavv-guptaa/chat-widget#readme",
   "bugs": {
