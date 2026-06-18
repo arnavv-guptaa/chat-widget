@@ -28,3 +28,11 @@ export type {
   UploadInput,
   UploadResult,
 } from './storage-adapter';
+
+export { createChatHandler } from './handler';
+export type {
+  CreateChatHandlerOptions,
+  ChatRequestContext,
+  BuiltTools,
+  UploadPolicy,
+} from './handler-types';
