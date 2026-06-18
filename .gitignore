@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output (produced by `npm run build` / CI; never committed)
+dist/
+
+# Packed tarballs from `npm pack`
+*.tgz
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

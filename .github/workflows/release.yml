@@ -1,0 +1,70 @@
+name: Release
+
+# Publishes @mordn/chat-widget to npm when a version tag is pushed.
+#
+# Auth is via npm Trusted Publishing (OIDC) — no NPM_TOKEN secret is stored.
+# GitHub Actions presents a signed OIDC token; npm verifies it against the
+# trust relationship configured for this package (Settings → Trusted Publisher
+# on npmjs.com, pointing at this repo + this workflow file). The same OIDC
+# flow produces a provenance attestation, so published builds are traceable to
+# this exact commit + workflow run.
+#
+# Release flow:
+#   1. bump version in package.json (e.g. npm version patch/minor/major)
+#   2. push the commit AND the tag:  git push origin main --follow-tags
+#   3. this workflow builds + publishes that version automatically
+#
+# The tag must match the package.json version (e.g. tag v0.8.0 == version
+# 0.8.0); the guard step below fails loudly if they drift.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm Trusted Publishing (OIDC) AND for provenance.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing + `npm publish --provenance` need a recent npm.
+      # Pin to a version known to support OIDC publishing.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard — tag must match package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+          echo "Publishing version $PKG"
+
+      # `prepublishOnly` runs the build; we run it explicitly too so a build
+      # failure surfaces as its own step rather than buried in publish output.
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm (Trusted Publishing + provenance)
+        run: npm publish --access public --provenance
+        env:
+          # No NPM_TOKEN — OIDC handles auth. npm@latest auto-detects the
+          # GitHub Actions OIDC environment when id-token: write is granted.
+          NPM_CONFIG_PROVENANCE: 'true'
