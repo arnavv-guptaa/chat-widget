@@ -1,20 +1,40 @@
 # @mordn/chat-widget
 
-A customizable AI chat widget for React/Next.js applications with built-in conversation persistence.
+A customizable, **secure-by-default** AI chat widget for React/Next.js apps,
+with conversation persistence and attachments handled for you.
+
+The widget owns the hard, dangerous-to-get-wrong backend plumbing — conversation
+ownership, idempotent persistence, history, private attachments, streaming —
+behind one mounted handler. You supply the three things that are genuinely
+yours: **who the user is** (auth), **which model**, and **which tools**.
+
+> ## ⚠️ Security: you establish identity on the server
+>
+> The widget sends an `X-User-Id` header, but **it is not an authentication
+> boundary** — the browser controls it. You must implement `getChatUserId(req)`
+> to return the user id from your **verified server session** (Clerk, NextAuth,
+> Supabase Auth, …). The scaffold's stub **throws until you do this**, so a
+> fresh install is never silently insecure.
+>
+> Trusting a client-supplied id is the IDOR bug that lets one user read another
+> user's chats. The package is designed so this is *unrepresentable* once you
+> wire up `getChatUserId`. **Read [SECURITY.md](./SECURITY.md).**
 
 ## Quick Start
 
 ```bash
-# 1. Install the package
+# 1. Install
 npm install @mordn/chat-widget drizzle-kit
 
 # 2. Run the setup wizard
 npx @mordn/chat-widget
 ```
 
-The setup wizard creates all required files:
-- API routes (`/api/chat/...`)
-- `drizzle.config.ts`
+The wizard creates exactly four files:
+
+- `app/api/chat/[[...chat]]/route.ts` — one catch-all that mounts the whole backend
+- `lib/chat-auth.ts` — the `getChatUserId` stub **you implement** (the security boundary)
+- `drizzle.config.ts` — points at the package's chat schema
 - `.env.example`
 
 ## Requirements
@@ -23,40 +43,55 @@ The setup wizard creates all required files:
 - React 18+
 - PostgreSQL database (Supabase recommended)
 - Tailwind CSS v4
+- `ai` v5 or v6 (peer dependency)
 
 ## Setup
 
 ### 1. Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in your credentials:
+Copy `.env.example` to `.env.local` and fill in your credentials (see the file
+for the full list — `DATABASE_URL`, and the Supabase keys if you keep uploads).
 
-```env
-# Database (Required)
-DATABASE_URL="postgresql://postgres.xxx:[PASSWORD]@aws-0-region.pooler.supabase.com:6543/postgres"
+### 2. Implement the auth boundary
 
-# AI Provider (Required)
-AI_GATEWAY_API_KEY="your-ai-gateway-key"
+Open `lib/chat-auth.ts` and replace the throwing stub with your real session
+lookup:
+
+```ts
+// Clerk example
+import { auth } from '@clerk/nextjs/server';
+
+export async function getChatUserId() {
+  const { userId } = await auth();   // from the verified session — never a header
+  return userId;
+}
 ```
 
-### 2. Database Setup
-
-Push the schema to your database:
+### 3. Database Setup
 
 ```bash
-npx drizzle-kit push
+npx drizzle-kit push   # creates chat_conversations + chat_messages
 ```
 
-### 3. Configure Your AI Model
+### 4. Configure your model and tools
 
-Open `app/api/chat/route.ts` and update the config:
+Everything is configured in the single `route.ts` the wizard created — model,
+system prompt, store, storage, and tools:
 
-```typescript
-const DEVELOPER_CONFIG = {
-  model: 'openai/gpt-4o', // Your AI model
-  systemPrompt: 'You are a helpful assistant',
-  temperature: 0.7,
-};
+```ts
+export const { GET, POST, DELETE } = createChatHandler({
+  getUserId: getChatUserId,
+  model: anthropic('claude-sonnet-4-5'),
+  store: createDrizzleChatStore(),       // or bring your own ChatStore
+  storage: createSupabaseStorage(),      // or bring your own StorageAdapter
+  // buildTools: async (ctx) => ({ tools: { /* ... */ }, cleanup: async () => {} }),
+});
 ```
+
+**Bring your own database / storage:** pass a custom `store` / `storage` that
+implement the `ChatStore` / `StorageAdapter` interfaces from
+`@mordn/chat-widget/server`. The hosted defaults and your own implementations
+are interchangeable — same handler, same security.
 
 ### 4. Add the Widget
 
