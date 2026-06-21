@@ -85,9 +85,12 @@ type ChatTab = {
 };
 
 export default function ChatInterface({ id, initialMessages, config, onClose, headerActions }: { id?: string; initialMessages?: any[]; config?: any; onClose?: () => void; headerActions?: React.ReactNode } = {}) {
-  // Get storage key prefix from context to scope localStorage keys per user/deployment
+  // Storage key prefix is scoped to (agent, user). It is `null` when identity
+  // is incomplete — in that case storageKey() returns null and every caller
+  // must skip persistence (no shared/static fallback bucket → no cross-user leak).
   const { storageKeyPrefix } = useChatStorageKey();
-  const storageKey = (key: string) => storageKeyPrefix ? `chat-${storageKeyPrefix}-${key}` : `chat-${key}`;
+  const storageKey = (key: string): string | null =>
+    storageKeyPrefix ? `chat-${storageKeyPrefix}-${key}` : null;
 
   // Get theme mode from config (defaults to 'light')
   const themeMode = config?.theme?.mode || 'light';
@@ -134,9 +137,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
-      api: '/api/chat',
+      api: `${config?.apiBase ?? '/api/chat'}`,
       headers: {
         'X-User-Id': config?.userId || '',
+        // Extra headers the host injects (e.g. the dashboard playground sends
+        // its unsaved draft model/system-prompt for an owner-authed preview).
+        ...(config?.extraHeaders ?? {}),
       },
     }),
     // Throttle UI updates to 200ms to prevent hanging during streaming
@@ -169,7 +175,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             formData.append('conversationId', activeTabId || 'default');
             formData.append('userId', config?.userId || 'demo-user');
 
-            const uploadResponse = await fetch('/api/chat/upload', {
+            const uploadResponse = await fetch(`${config?.apiBase ?? '/api/chat'}/upload`, {
               method: 'POST',
               body: formData
             });
@@ -268,7 +274,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     try {
-      const response = await fetch(`/api/chat/history/${conversationId}?userId=${config.userId}`);
+      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}`);
       if (response.ok) {
         const data = await response.json();
         const loadedMessages = data.messages || [];
@@ -349,14 +355,23 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     createNewTab();
   }, [createNewTab]);
 
-  // Clear tabs from localStorage when component unmounts (optional cleanup)
+  // Identity-change teardown: when the (agent, user) scope changes WITHOUT a
+  // full page reload (e.g. user switches account in-app), clear the previous
+  // scope's persisted keys so the new identity never inherits stale tabs.
+  const prevPrefixRef = useRef<string | null>(storageKeyPrefix);
   useEffect(() => {
-    return () => {
-      // Optional: Clear localStorage on unmount if needed
-      // localStorage.removeItem('chat-tabs');
-      // localStorage.removeItem('active-tab-id');
-    };
-  }, []);
+    const prev = prevPrefixRef.current;
+    if (prev && prev !== storageKeyPrefix) {
+      const stalePrefix = `chat-${prev}-`;
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(stalePrefix)) toRemove.push(k);
+      }
+      toRemove.forEach((k) => localStorage.removeItem(k));
+    }
+    prevPrefixRef.current = storageKeyPrefix;
+  }, [storageKeyPrefix]);
 
   const switchToTab = async (tabId: string) => {
     const targetTab = tabs.find(tab => tab.id === tabId);
@@ -405,11 +420,13 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     // Update localStorage immediately when tab is closed
-    if (filteredTabs.length > 0) {
-      localStorage.setItem(storageKey('tabs'), JSON.stringify(filteredTabs));
+    const tabsKey = storageKey('tabs');
+    if (filteredTabs.length > 0 && tabsKey) {
+      localStorage.setItem(tabsKey, JSON.stringify(filteredTabs));
       if (tabId === activeTabId) {
         const newActiveTab = filteredTabs[0];
-        localStorage.setItem(storageKey('active-tab-id'), newActiveTab.id);
+        const activeKey = storageKey('active-tab-id');
+        if (activeKey) localStorage.setItem(activeKey, newActiveTab.id);
       }
     }
   };
@@ -422,7 +439,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     setLoadingHistory(true);
     try {
-      const response = await fetch(`/api/chat/history?userId=${config.userId}`);
+      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history?userId=${config.userId}`);
 
       if (response.ok) {
         const data = await response.json();
@@ -463,22 +480,41 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   useEffect(() => {
     if (tabs.length > 0) {
       const timeoutId = setTimeout(() => {
-        localStorage.setItem(storageKey('tabs'), JSON.stringify(tabs));
-        localStorage.setItem(storageKey('active-tab-id'), activeTabId);
+        const tabsKey = storageKey('tabs');
+        const activeKey = storageKey('active-tab-id');
+        if (tabsKey) localStorage.setItem(tabsKey, JSON.stringify(tabs));
+        if (activeKey) localStorage.setItem(activeKey, activeTabId);
       }, 500); // Debounce 500ms
 
       return () => clearTimeout(timeoutId);
     }
-  }, [tabs, activeTabId, storageKey]);
+  }, [tabs, activeTabId, storageKeyPrefix]);
 
-  // Tab Persistence: Load tabs from localStorage on component mount (ONLY ONCE)
+  // Tab Persistence: restore tabs from localStorage. Runs once PER REAL SCOPE.
+  // If identity (agent, user) isn't known at mount, we provisionally start a
+  // clean tab but stay un-initialized, so when the prefix transitions
+  // null → real this effect re-runs and restores that scope's saved tabs.
   useEffect(() => {
-    // Ref-based guard to absolutely ensure this only runs once
     if (hasInitialized.current) return;
 
+    const startCleanTab = () => {
+      const initialTabId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      setTabs([{ id: initialTabId, title: 'New Chat', isActive: true }]);
+      setActiveTabId(initialTabId);
+      setInitialTabCreated(true);
+      setIsInitializing(false);
+    };
+
+    // No complete identity yet → usable provisional clean tab, but DON'T mark
+    // initialized so restore can still happen once the scope is known.
+    if (!storageKeyPrefix) {
+      if (!initialTabCreated && tabs.length === 0) startCleanTab();
+      return;
+    }
+
     const loadInitialTabs = () => {
-      const savedTabs = localStorage.getItem(storageKey('tabs'));
-      const savedActiveTabId = localStorage.getItem(storageKey('active-tab-id'));
+      const savedTabs = localStorage.getItem(`chat-${storageKeyPrefix}-tabs`);
+      const savedActiveTabId = localStorage.getItem(`chat-${storageKeyPrefix}-active-tab-id`);
 
       if (savedTabs && savedTabs !== '[]') {
         // Restore saved tabs. Don't flip isInitializing yet — the
@@ -490,14 +526,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         const activeId = savedActiveTabId || parsedTabs[0]?.id;
         setActiveTabId(activeId);
         setInitialTabCreated(true);
-      } else if (!initialTabCreated && tabs.length === 0) {
-        // Clean start (no saved tabs) — create one empty tab and finish
-        // hydration immediately. There's no remote conversation to wait on.
-        const initialTabId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        setTabs([{ id: initialTabId, title: 'New Chat', isActive: true }]);
-        setActiveTabId(initialTabId);
-        setInitialTabCreated(true);
-        setIsInitializing(false);
+      } else if (tabs.length === 0) {
+        // Clean start (no saved tabs) — create one empty tab and finish.
+        startCleanTab();
       }
     };
 
@@ -509,14 +540,20 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       console.error('[chat-widget] init failed, falling back to clean start:', err);
       setIsInitializing(false);
     }
+    // Only lock initialization once a REAL scope has been processed.
     hasInitialized.current = true;
-  }, []); // Empty dependency array - run only once on mount
+  }, [storageKeyPrefix]); // Re-run when identity arrives (null → real)
 
-  // Load messages for active tab when userId becomes available (on initialization)
+  // Load messages for active tab when identity is fully resolved.
   const hasLoadedInitialMessages = useRef(false);
   useEffect(() => {
     if (hasLoadedInitialMessages.current) return; // Only run once
     if (!config?.userId) return; // Wait for userId
+    // Wait for a complete (agent, user) identity before consuming the one-shot
+    // guard. Otherwise, if agentId arrives AFTER userId, the provisional
+    // null-phase clean tab would consume this ref and the restored tab (swapped
+    // in once the real prefix lands) would render with no messages.
+    if (!storageKeyPrefix) return;
     if (!activeTabId) return; // Wait for activeTabId to be set
 
     // Load the conversation messages, then flip isInitializing false. This
@@ -530,7 +567,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setIsInitializing(false);
       }
     })();
-  }, [config?.userId, activeTabId]);
+  }, [config?.userId, activeTabId, storageKeyPrefix]);
 
   // Handle state updates when active tab changes
   // Messages are loaded in switchToTab function, not here

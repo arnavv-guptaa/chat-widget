@@ -43,5 +43,3 @@ export const MODELS = [
     value: 'google/gemini-2.5-pro',
   }
 ];
-
-export const DEFAULT_MODEL = MODELS[0].value;

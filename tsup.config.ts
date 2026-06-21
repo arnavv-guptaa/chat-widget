@@ -21,6 +21,9 @@ export default defineConfig([
   // Server-only code (db, api) - no "use client", externalize node modules
   {
     entry: {
+      // Pure data (supported model list) — no "use client", safe to import from
+      // server actions or client components. Exposed as '@mordn/chat-widget/models'.
+      'models': 'src/utils/models.ts',
       'db/index': 'src/db/index.ts',
       'api/index': 'src/api/index.ts',
       'schema/index': 'src/schema/index.ts',

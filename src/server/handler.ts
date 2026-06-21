@@ -70,25 +70,43 @@ const KNOWN_SEGMENTS = new Set(['upload', 'history']);
 
 // ── Small helpers ─────────────────────────────────────────────────────────
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
 
+// For responses that carry user chat data (conversation lists, messages):
+// never let a browser/proxy/disk cache retain them, and mark them private so
+// a shared cache can't serve one user's history to another.
+function jsonNoStore(body: unknown, status = 200): Response {
+  return json(body, status, { 'Cache-Control': 'no-store, private' });
+}
+
 /**
- * Split the request path into the segments *after* the handler's mount point.
- * We locate the mount point by finding the last "chat" segment that's followed
- * only by known sub-routes (or nothing). This keeps the handler agnostic to
- * the exact mount path.
+ * Split the request path into the segments *after* the handler's mount point —
+ * the trailing sub-route the handler dispatches on (`[]`, `['upload']`,
+ * `['history']`, `['history', ':id']`).
+ *
+ * The handler is mount-agnostic: it can sit at `/api/chat`, `/api/preview-chat/:agentId`,
+ * or anywhere. We detect the sub-route by the trailing KNOWN_SEGMENT
+ * (`upload`/`history`) rather than a hardcoded mount marker:
+ *   • `…/history`        → ['history']
+ *   • `…/history/:id`    → ['history', ':id']
+ *   • `…/upload`         → ['upload']
+ *   • anything else      → []  (the root chat turn — POST, or empty GET)
  */
 function subSegments(url: URL): string[] {
   const parts = url.pathname.split('/').filter(Boolean);
-  // Find the final "chat" segment — everything after it is our sub-route.
-  const chatIdx = parts.lastIndexOf('chat');
-  if (chatIdx === -1) return [];
-  return parts.slice(chatIdx + 1);
+  // Scan from the end for the last known sub-route head. Everything from there
+  // on is our sub-route; everything before it is the (arbitrary) mount path.
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (KNOWN_SEGMENTS.has(parts[i])) {
+      return parts.slice(i);
+    }
+  }
+  return [];
 }
 
 // ── The handler ─────────────────────────────────────────────────────────────
@@ -101,6 +119,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     store: storeFactory,
     storage: storageFactory,
     buildSystemPrompt,
+    getHostedConfig,
     transformMessages,
     onChatFinish,
     onError,
@@ -128,12 +147,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return null; // uploads disabled when no storage configured
   }
 
-  async function resolveModel(ctx: ChatRequestContext): Promise<LanguageModel> {
+  // Precedence: code option > hosted config > throw. A hosted model is a
+  // gateway string, which `streamText` accepts directly.
+  async function resolveModel(
+    ctx: ChatRequestContext,
+    hostedModel?: string | null,
+  ): Promise<LanguageModel> {
     if (typeof modelOption === 'function') return modelOption(ctx);
     if (modelOption) return modelOption;
+    if (hostedModel) return hostedModel;
     throw new Error(
       '[chat-widget] No `model` provided. Pass a `model` (a LanguageModel or a ' +
-        'function returning one).',
+        'function returning one), or configure one via hosted config.',
     );
   }
 
@@ -191,16 +216,37 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let modelMessages: ModelMessage[] = await convertToModelMessages(capped);
     if (transformMessages) modelMessages = await transformMessages(modelMessages, ctx);
 
-    // Build tools (with their per-request resource) and resolve the model.
+    // Build tools (with their per-request resource).
     const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
     const tools = built.tools ?? ({} as ToolSet);
-    const model = await resolveModel(ctx);
+
+    // Fetch hosted config once (best-effort — a failure must never break the
+    // turn). The inner try/catch swallows BOTH a synchronous throw and an async
+    // rejection, honouring the "throwing falls through to code/defaults"
+    // contract for arbitrary consumers. Used only to fill model / system that
+    // code didn't provide.
+    const hosted = getHostedConfig
+      ? await (async () => {
+          try {
+            return await getHostedConfig(ctx);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+
+    // Model: code option > hosted > throw.
+    const model = await resolveModel(ctx, hosted?.model);
     // String label of the model for persistence (the `model` column). A
     // LanguageModel is either a gateway string ("anthropic/claude-…") or a
     // provider object exposing `.modelId`.
     const modelLabel =
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
-    const system = buildSystemPrompt ? await buildSystemPrompt(ctx) : DEFAULT_SYSTEM_PROMPT;
+
+    // System prompt: code (buildSystemPrompt) > hosted > package default.
+    const system = buildSystemPrompt
+      ? await buildSystemPrompt(ctx)
+      : hosted?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
 
     // Single, guarded teardown of the tools' per-request resource. Fires
     // exactly once across all completion paths (finish / error / abort).
@@ -294,7 +340,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     if (!ctx) return new Response('Unauthorized', { status: 401 });
     const store = resolveStore(ctx.userId);
     const conversations = await store.listConversations();
-    return json({
+    return jsonNoStore({
       conversations: conversations.map((c) => ({
         id: c.id,
         title: c.title,
@@ -331,7 +377,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       ? await Promise.all(messages.map((m) => resignMessageAttachments(m, storage)))
       : messages;
 
-    return json({
+    return jsonNoStore({
       conversation: {
         id: conversation.id,
         title: conversation.title,

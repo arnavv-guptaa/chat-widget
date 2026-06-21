@@ -44,8 +44,13 @@ export type { ChatWidgetProps } from './ChatWidget';
 // Hooks
 export * from './hooks/use-chat-theme';
 
+// Supported gateway models are exposed via the dedicated, server-safe subpath
+// '@mordn/chat-widget/models' (no "use client"), so server actions can import
+// the list too. There is intentionally NO default-model export: an agent's
+// model is an explicit, required developer choice (one model per agent).
+
 // Contexts
-export { ChatStorageProvider, useChatStorageKey } from './contexts/chat-storage-context';
+export { ChatStorageProvider, useChatStorageKey, clearChatStorage } from './contexts/chat-storage-context';
 
 // UI Components (for advanced customization)
 export { Button } from './ui/button';

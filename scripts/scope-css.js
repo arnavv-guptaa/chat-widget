@@ -61,7 +61,55 @@ for (let i = 0; i < parts.length; i++) {
   }
 }
 
-// Write the scoped CSS back
+// ── Unlayer everything ───────────────────────────────────────────────────────
+// The widget's CSS must be SELF-CONTAINED: it should win against any host app's
+// CSS regardless of the host's resets, Tailwind layers, or stylesheet load order.
+//
+// Tailwind v4 emits our rules inside `@layer chat-widget` (+ chat-widget-base,
+// properties). But per the CSS cascade, UNLAYERED styles always beat LAYERED
+// ones — so a host's unlayered preflight (`*{border-width:0}`, element resets)
+// silently overrides every layered widget rule, and the widget renders unstyled.
+// (It only "worked" in some hosts by accident of <head> stylesheet order.)
+//
+// Fix: strip the @layer wrappers so our rules become unlayered. They're already
+// scoped to `.chat-widget-container`, so they now win on SPECIFICITY instead:
+// `.chat-widget-container .border` (0,2,0) beats a host `*{border-width:0}`
+// (0,0,0) and a host `.border` (0,1,0). This is immune to host resets, layer
+// config, AND load order. Safe because the widget ships no preflight of its own
+// (styles.src.css imports only tailwindcss/theme + /utilities), so the layers
+// carry no internal ordering we depend on. Theming via the documented `--chat-*`
+// CSS variables is unaffected (custom-property inheritance ignores layers).
+function stripLayers(input) {
+  let out = '';
+  let i = 0;
+  while (i < input.length) {
+    const m = /@layer\s+[\w-]+\s*\{/.exec(input.slice(i));
+    if (!m) {
+      out += input.slice(i);
+      break;
+    }
+    out += input.slice(i, i + m.index); // text before the layer opener
+    let depth = 1;
+    let k = i + m.index + m[0].length; // first char inside the layer
+    let body = '';
+    for (; k < input.length && depth > 0; k++) {
+      const ch = input[k];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+      body += ch;
+    }
+    out += stripLayers(body); // recurse: unwrap nested layers too
+    i = k + 1; // skip past the matched close brace
+  }
+  return out;
+}
+
+result = stripLayers(result);
+
+// Write the scoped, unlayered CSS back
 fs.writeFileSync(cssPath, result);
 
-console.log('✓ All CSS scoped to .chat-widget-container');
+console.log('✓ All CSS scoped to .chat-widget-container and unlayered (host-independent)');

@@ -50,6 +50,18 @@ export interface ChatRequestContext {
 }
 
 /**
+ * Per-agent declarative config returned by a hosted control plane. All fields
+ * optional — only what the dashboard has set is present; the rest falls through
+ * to code/defaults. `model` is a gateway model string (e.g. "anthropic/…").
+ */
+export interface HostedAgentConfig {
+  model?: string | null;
+  systemPrompt?: string | null;
+  greeting?: string | null;
+  appearance?: Record<string, unknown> | null;
+}
+
+/**
  * What `buildTools` returns. The `cleanup` callback is the critical piece the
  * naive "just return a ToolSet" design misses: tools backed by a per-request
  * resource (an MCP client holding a socket, a DB transaction, a temp scope)
@@ -135,6 +147,23 @@ export interface CreateChatHandlerOptions {
   storage?: StorageAdapterFactory;
 
   // ── HOOKS (loop runs without them) ───────────────────────────────────────
+
+  /**
+   * Fetch per-agent declarative config (model / systemPrompt / greeting /
+   * appearance) from a hosted control plane (mordn's GET /v1/config). This is
+   * how dashboard-managed config reaches the loop WITHOUT a redeploy.
+   *
+   * Precedence is always **code > hosted > package default**: any `model` /
+   * `buildSystemPrompt` you pass here in code takes priority; the hosted value
+   * only fills what code leaves unset. Returning `null` (or throwing) falls
+   * through to code/defaults — a control-plane hiccup never breaks a turn.
+   *
+   * Use `createHostedConfig({ apiKey })` from `@mordn/chat-widget/server/hosted`
+   * to get a ready-made fetcher.
+   */
+  getHostedConfig?: (
+    ctx: ChatRequestContext,
+  ) => Promise<HostedAgentConfig | null> | HostedAgentConfig | null;
 
   /**
    * Produce the system prompt for this request. Receives the context so it
