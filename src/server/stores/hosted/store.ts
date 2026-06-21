@@ -19,6 +19,7 @@ import {
   type ChatStore,
 } from '../../chat-store';
 import type { StorageAdapter, UploadInput, UploadResult } from '../../storage-adapter';
+import type { ChatRequestContext, HostedAgentConfig } from '../../handler-types';
 import type {
   ListMessagesOptions,
   SaveTurnInput,
@@ -230,4 +231,52 @@ export function createHostedStorage(options: HostedOptions) {
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const fetchImpl = options.fetch ?? fetch;
   return (userId: string): StorageAdapter => new HostedStorageAdapter(userId, options.apiKey, baseUrl, fetchImpl);
+}
+
+/**
+ * Create a `getHostedConfig` fetcher backed by the hosted service's
+ * `GET /v1/config`. Pass to
+ * `createChatHandler({ getHostedConfig: createHostedConfig({ apiKey }) })`.
+ *
+ * The agent is resolved server-side from the apiKey, so this returns THIS key's
+ * agent config. Results are cached in-process per apiKey for a short TTL so it
+ * isn't refetched every turn. Returns null on any failure → the handler falls
+ * through to code/defaults (a control-plane hiccup never breaks a turn).
+ */
+export function createHostedConfig(options: HostedOptions) {
+  if (!options.apiKey) throw new Error('[chat-widget] createHostedConfig requires an apiKey');
+  const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+  const fetchImpl = options.fetch ?? fetch;
+  const apiKey = options.apiKey;
+  const CONFIG_TTL_MS = 60_000;
+
+  let cached: { value: HostedAgentConfig | null; at: number } | null = null;
+
+  return async (ctx: ChatRequestContext): Promise<HostedAgentConfig | null> => {
+    const now = Date.now();
+    if (cached && now - cached.at < CONFIG_TTL_MS) return cached.value;
+
+    try {
+      const res = await fetchImpl(`${baseUrl}/v1/config`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}`, 'X-Chat-User': ctx.userId },
+      });
+      if (!res.ok) {
+        cached = { value: null, at: now };
+        return null;
+      }
+      const raw = (await res.json()) as HostedAgentConfig;
+      const value: HostedAgentConfig = {
+        model: raw.model ?? null,
+        systemPrompt: raw.systemPrompt ?? null,
+        greeting: raw.greeting ?? null,
+        appearance: raw.appearance ?? null,
+      };
+      cached = { value, at: now };
+      return value;
+    } catch {
+      cached = { value: null, at: now };
+      return null;
+    }
+  };
 }

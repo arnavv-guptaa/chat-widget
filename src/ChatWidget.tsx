@@ -40,13 +40,39 @@ export interface ChatWidgetProps extends ChatWidgetConfig {
   className?: string;
 
   /**
-   * Widget ID (for loading config from hosted service later)
+   * Agent ID — identifies which agent this widget talks to. Used to scope the
+   * browser cache to (agent, user) so the same browser never surfaces another
+   * agent's cached tabs/config, and (later) to load hosted per-agent config.
+   */
+  agentId?: string;
+
+  /**
+   * @deprecated Use `agentId`. Kept as an alias for one minor version.
    */
   widgetId?: string;
+
+  /**
+   * Base path the widget calls for chat / upload / history. Defaults to
+   * `/api/chat`. Override to mount the handler elsewhere (e.g. a dashboard
+   * preview at `/api/preview-chat/<agentId>`). The widget appends `/upload`
+   * and `/history` to this base.
+   */
+  apiBase?: string;
+
+  /**
+   * Extra headers sent on every chat request. Used by the dashboard playground
+   * to pass an unsaved draft (model / system prompt) for an owner-authed
+   * preview. Not for normal embeds.
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 export function ChatWidget({
   userId,
+  agentId,
+  apiBase,
+  extraHeaders,
+  widgetId,
   conversationId,
   initialMessages,
   className,
@@ -64,6 +90,8 @@ export function ChatWidget({
   inputPlugins,
   toolRenderers,
 }: ChatWidgetProps) {
+  // `agentId` is canonical; `widgetId` is the deprecated alias.
+  const effectiveAgentId = agentId ?? widgetId;
   const layout = display?.layout || 'popup';
   // Controlled mode: consumer provides `open` prop. We delegate state to
   // them and skip the built-in FAB so they can render their own trigger.
@@ -169,6 +197,8 @@ export function ChatWidget({
 
   const config = useMemo(() => ({
     userId,
+    apiBase: apiBase ?? '/api/chat',
+    extraHeaders,
     model,
     systemPrompt,
     temperature,
@@ -177,7 +207,7 @@ export function ChatWidget({
     starterPrompts,
     inputPlugins,
     toolRenderers,
-  }), [userId, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers]);
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 
@@ -189,7 +219,7 @@ export function ChatWidget({
   // parent CSS (e.g. wrap in a div with h-[600px] w-full).
   if (layout === 'inline') {
     return (
-      <ChatStorageProvider userId={userId}>
+      <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
         <div
           ref={containerRef}
           className={`chat-widget-container chat-widget-inline chat-widget-content ${themeClass} ${className || ''}`}
@@ -212,7 +242,7 @@ export function ChatWidget({
   // height: 100dvh and provides a dedicated chat route experience.
   if (layout === 'page') {
     return (
-      <ChatStorageProvider userId={userId}>
+      <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
         <div
           ref={containerRef}
           className={`chat-widget-container chat-widget-page chat-widget-content ${themeClass} ${className || ''}`}
@@ -233,7 +263,7 @@ export function ChatWidget({
   // POPUP layout (default, backward compatible): floating side panel with
   // FAB toggle and slide-in animation.
   return (
-    <ChatStorageProvider userId={userId}>
+    <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
       {showToggleButton && !isOpen && (
         <button
           onClick={() => setIsOpen(true)}

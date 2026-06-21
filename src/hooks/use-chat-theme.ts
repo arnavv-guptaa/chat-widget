@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { DEFAULT_MODEL } from '../utils/models';
+import { MODELS } from '../utils/models';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
 
 // Helper function to convert HEX to HSL format that Tailwind expects
@@ -97,15 +97,18 @@ const defaultConversationStarters: ConversationStarter[] = [
   { text: 'What features does this product offer?', enabled: true },
   { text: 'Tell me about your capabilities', enabled: true },
 ];
-const defaultModel = DEFAULT_MODEL;
+// The chat UI's model-picker shows this first; it's a local dropdown default,
+// not a system-wide "default model" (the server requires an explicit choice).
+const defaultModel = MODELS[0].value;
 const defaultSystemPrompt = 'You are a helpful AI assistant.';
 const defaultTemperature = 0.7;
 const defaultThemeMode: ThemeMode = 'light';
 
 export function useChatTheme() {
-  // Get storage key prefix from context to scope localStorage keys per user/deployment
+  // Scoped to (agent, user). `null` when identity is incomplete — in that case
+  // we neither read nor write localStorage (no shared/static bucket → no leak).
   const { storageKeyPrefix } = useChatStorageKey();
-  const keyPrefix = storageKeyPrefix ? `chat-${storageKeyPrefix}-` : 'chat-';
+  const keyPrefix = storageKeyPrefix ? `chat-${storageKeyPrefix}-` : null;
 
   const [theme, setTheme] = useState<ChatTheme>(defaultTheme);
   const [conversationStarters, setConversationStarters] = useState<ConversationStarter[]>(defaultConversationStarters);
@@ -116,6 +119,8 @@ export function useChatTheme() {
 
   // Load theme from localStorage on mount
   useEffect(() => {
+    // Without a complete (agent, user) identity, do not read any cached config.
+    if (!keyPrefix) return;
     const savedTheme = localStorage.getItem(`${keyPrefix}theme`);
     if (savedTheme) {
       try {
@@ -220,9 +225,9 @@ export function useChatTheme() {
 
   // Save theme to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}theme`, JSON.stringify(theme));
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}theme`, JSON.stringify(theme));
 
-    // Apply CSS variables to the document
+    // Apply CSS variables to the document (always — purely cosmetic, not persisted)
     const root = document.documentElement;
 
     // Apply the appropriate colors based on theme mode
@@ -247,7 +252,7 @@ export function useChatTheme() {
 
   // Save conversation starters to localStorage whenever they change
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}conversation-starters`, JSON.stringify(conversationStarters));
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}conversation-starters`, JSON.stringify(conversationStarters));
 
     // Dispatch custom event for same-page sync
     window.dispatchEvent(new CustomEvent('chat-starters-change', { detail: conversationStarters }));
@@ -255,7 +260,7 @@ export function useChatTheme() {
 
   // Save model to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}model`, model);
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}model`, model);
 
     // Dispatch custom event for same-page sync
     window.dispatchEvent(new CustomEvent('chat-model-change', { detail: model }));
@@ -263,7 +268,7 @@ export function useChatTheme() {
 
   // Save system prompt to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}system-prompt`, systemPrompt);
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}system-prompt`, systemPrompt);
 
     // Dispatch custom event for same-page sync
     window.dispatchEvent(new CustomEvent('chat-system-prompt-change', { detail: systemPrompt }));
@@ -271,7 +276,7 @@ export function useChatTheme() {
 
   // Save temperature to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}temperature`, temperature.toString());
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}temperature`, temperature.toString());
 
     // Dispatch custom event for same-page sync
     window.dispatchEvent(new CustomEvent('chat-temperature-change', { detail: temperature }));
@@ -279,7 +284,7 @@ export function useChatTheme() {
 
   // Save theme mode to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(`${keyPrefix}theme-mode`, themeMode);
+    if (keyPrefix) localStorage.setItem(`${keyPrefix}theme-mode`, themeMode);
 
     // Dispatch custom event for same-page sync
     window.dispatchEvent(new CustomEvent('chat-theme-mode-change', { detail: themeMode }));

@@ -33,6 +33,7 @@ export { createChatHandler } from './handler';
 export type {
   CreateChatHandlerOptions,
   ChatRequestContext,
+  HostedAgentConfig,
   BuiltTools,
   UploadPolicy,
 } from './handler-types';
