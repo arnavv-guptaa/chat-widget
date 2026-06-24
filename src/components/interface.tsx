@@ -33,7 +33,7 @@ import { useInputPlugins } from './input-plugin-popover';
 import { ChatErrorBanner } from './chat-error-banner';
 import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PlusIcon, XIcon } from 'lucide-react';
+import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PaperclipIcon, PlusIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -253,15 +253,23 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // StickToBottom handles scrolling automatically
   };
 
-  // Attachment button component that uses the attachments context
+  // Attachment button component that uses the attachments context.
+  // Compact ghost icon button on the left of the prompt row — sized to match
+  // the send button (size-9) so the row reads as balanced, with a muted
+  // paperclip that doesn't compete with the text or the send action.
   const AttachButton = () => {
     const attachments = usePromptInputAttachments();
     return (
       <PromptInputButton
         variant="ghost"
+        size="icon"
+        className="size-9 rounded-full text-muted-foreground"
+        aria-label="Attach files"
         onClick={() => attachments.openFileDialog()}
       >
-        <PlusIcon className="size-4" />
+        {/* lucide's Paperclip runs bottom-left→top-right; rotate -45° to
+            stand it upright (vertical). */}
+        <PaperclipIcon className="size-4 -rotate-45" />
       </PromptInputButton>
     );
   };
@@ -1270,19 +1278,22 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               {/* One row (matches the build-page PromptBar): editor grows on the
                   left, actions inline on the right. `items-end` keeps the send
                   button anchored to the bottom as the editor grows multi-line. */}
-              <div className="flex items-end gap-2 px-3 py-2">
+              <div className="flex items-end gap-1.5 px-2 py-2">
                 {config?.features?.fileUpload === true && <AttachButton />}
                 <PromptInputTextarea
                   ref={inputRef}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={inputPlugins.onKeyDown}
                   value={input}
-                  className="min-h-0 flex-1 px-0 py-1 leading-7"
+                  className="min-h-0 flex-1 px-1 py-1.5 leading-7"
                 />
                 <PromptInputSubmit
-                  // Always visible; muted+disabled when empty, active when there's
-                  // input. Stays enabled mid-stream so the stop click is reachable.
-                  className="size-7 [&_svg]:size-4"
+                  // Circular send button, sized to match the attach button
+                  // (size-9) so the row reads as balanced. Always visible; the
+                  // Button's disabled:opacity-50 mutes it when empty, full-strength
+                  // primary when there's input. Stays enabled mid-stream so the
+                  // stop click is reachable.
+                  className="size-9 rounded-full p-0 [&_svg]:size-4"
                   disabled={status === 'streaming' || status === 'submitted' ? false : !input}
                   status={status}
                   onStop={stop}
