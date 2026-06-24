@@ -1267,26 +1267,28 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <PromptInputAttachments>
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>
-              <PromptInputTextarea
-                ref={inputRef}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={inputPlugins.onKeyDown}
-                value={input}
-              />
-            </PromptInputBody>
-            <PromptInputToolbar>
-              <PromptInputTools>
+              {/* One row (matches the build-page PromptBar): editor grows on the
+                  left, actions inline on the right. `items-end` keeps the send
+                  button anchored to the bottom as the editor grows multi-line. */}
+              <div className="flex items-end gap-2 px-3 py-2">
                 {config?.features?.fileUpload === true && <AttachButton />}
-              </PromptInputTools>
-              <PromptInputSubmit
-                // Stay enabled mid-stream so the stop click is reachable
-                // even after the input was cleared on submit. In ready/
-                // error states keep the original "no message → disabled".
-                disabled={status === 'streaming' || status === 'submitted' ? false : !input}
-                status={status}
-                onStop={stop}
-              />
-            </PromptInputToolbar>
+                <PromptInputTextarea
+                  ref={inputRef}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={inputPlugins.onKeyDown}
+                  value={input}
+                  className="min-h-0 flex-1 px-0 py-1 leading-7"
+                />
+                <PromptInputSubmit
+                  // Always visible; muted+disabled when empty, active when there's
+                  // input. Stays enabled mid-stream so the stop click is reachable.
+                  className="size-7 [&_svg]:size-4"
+                  disabled={status === 'streaming' || status === 'submitted' ? false : !input}
+                  status={status}
+                  onStop={stop}
+                />
+              </div>
+            </PromptInputBody>
           </PromptInput>
         </div>
       </div>

@@ -554,6 +554,10 @@ export const PromptInputBody = ({
 
 export type PromptInputTextareaProps = ComponentProps<typeof Textarea>;
 
+// Resting height (empty, one line ≈ leading-7) and max height before scrolling.
+const TEXTAREA_MIN_HEIGHT = 28;
+const TEXTAREA_MAX_HEIGHT = 192;
+
 export const PromptInputTextarea = React.forwardRef<
   HTMLTextAreaElement,
   PromptInputTextareaProps
@@ -562,9 +566,32 @@ export const PromptInputTextarea = React.forwardRef<
   onKeyDown: externalOnKeyDown,
   className,
   placeholder = "What would you like to know?",
+  value,
   ...props
 }, ref) => {
   const attachments = usePromptInputAttachments();
+
+  // Auto-grow via JS scrollHeight measurement — works in every browser. (The
+  // CSS `field-sizing-content` property isn't supported in Safari/Firefox, so
+  // the textarea wouldn't grow there.) The textarea grows with content up to
+  // TEXTAREA_MAX_HEIGHT, then scrolls.
+  const innerRef = useRef<HTMLTextAreaElement | null>(null);
+  const setRefs = (node: HTMLTextAreaElement | null) => {
+    innerRef.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
+  };
+  const resize = () => {
+    const el = innerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT);
+    el.style.height = `${Math.max(next, TEXTAREA_MIN_HEIGHT)}px`;
+    el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  };
+  // Re-measure whenever the value changes (covers controlled value resets like
+  // clearing the input after send).
+  useLayoutEffect(resize, [value]);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     // Let external handlers (e.g. inputPlugins popover navigation) run
@@ -619,17 +646,19 @@ export const PromptInputTextarea = React.forwardRef<
 
   return (
     <Textarea
-      ref={ref}
+      ref={setRefs}
+      rows={1}
+      value={value}
       className={cn(
-        "w-full resize-none rounded-none border-none p-3 shadow-none outline-none ring-0",
-        "field-sizing-content",
-        "max-h-48 min-h-16",
+        "w-full resize-none rounded-none border-none px-3 py-2.5 shadow-none outline-none ring-0",
         "focus-visible:ring-0 focus-visible:shadow-none focus:ring-0 focus:shadow-none",
         className
       )}
+      style={{ minHeight: TEXTAREA_MIN_HEIGHT, maxHeight: TEXTAREA_MAX_HEIGHT, overflowY: "hidden" }}
       name="message"
       onChange={(e) => {
         onChange?.(e);
+        resize();
       }}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
