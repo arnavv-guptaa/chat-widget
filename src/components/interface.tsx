@@ -911,6 +911,29 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     };
   }, [showHistory]);
 
+  // Whether to show the "thinking" loader. Naively gating on status==='submitted'
+  // leaves a visible gap: the first token flips status to 'streaming' (loader
+  // unmounts) but experimental_throttle delays the text paint by up to 200ms, so
+  // the user sees an empty bubble for a beat. Keep the loader up through that
+  // window — while submitted, OR while streaming but the assistant's last turn
+  // has produced nothing renderable yet (no text/tool/source/file parts). Tool
+  // calls and text both clear it the instant they render, so a legit tool-using
+  // turn doesn't hang the loader.
+  const lastMessage = messages.at(-1);
+  const lastAssistantHasContent =
+    lastMessage?.role === 'assistant' &&
+    (lastMessage.parts ?? []).some(
+      (p) =>
+        (p.type === 'text' && p.text.length > 0) ||
+        (p.type === 'reasoning' && p.text.length > 0) ||
+        p.type === 'source-url' ||
+        p.type === 'file' ||
+        p.type === 'dynamic-tool' ||
+        p.type.startsWith('tool-'),
+    );
+  const showThinking =
+    status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
+
   return (
     <div className={cn("w-full h-full flex flex-col bg-white dark:bg-gray-900 overflow-hidden ring-1 ring-black/[0.02] dark:ring-white/[0.03]", themeMode === 'dark' && 'dark')}>
       <div
@@ -1191,7 +1214,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         <Conversation className="flex-1 max-w-full ai-assistant-scrollbar">
           <ConversationContent className="max-w-[96%] mx-auto py-6">
             {renderMessages()}
-            {status === 'submitted' && (
+            {showThinking && (
               <div className="mt-6">
                 <Message from="assistant">
                   <MessageContent>
