@@ -109,6 +109,24 @@ function subSegments(url: URL): string[] {
   return [];
 }
 
+/**
+ * True when the final message set ends with an assistant message that actually
+ * produced something — non-empty text/reasoning, or any tool call. Used to
+ * decide whether an ABORTED turn is worth persisting: a stop AFTER content
+ * arrived should be kept; a stop BEFORE the first token produced nothing and
+ * must not leave an empty assistant bubble in history.
+ */
+function hasAssistantContent(messages: ReadonlyArray<{ role: string; parts?: unknown }>): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'assistant' || !Array.isArray(last.parts)) return false;
+  return (last.parts as Array<{ type?: string; text?: string }>).some((p) => {
+    if (!p || typeof p.type !== 'string') return false;
+    if (p.type === 'text' || p.type === 'reasoning') return Boolean(p.text && p.text.trim());
+    // Any tool call / source / file part counts as real output.
+    return p.type.startsWith('tool-') || p.type === 'dynamic-tool' || p.type === 'source-url' || p.type === 'file';
+  });
+}
+
 // ── The handler ─────────────────────────────────────────────────────────────
 
 export function createChatHandler(options: CreateChatHandlerOptions) {
@@ -292,10 +310,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       originalMessages: incoming,
       generateMessageId: generateId,
       onFinish: async ({ messages: finalMessages, isAborted }) => {
-        // Don't persist a turn the client aborted mid-stream — the assistant
-        // message is partial and the user didn't receive it. The idempotent
-        // user-message save already happened before streaming.
-        if (!isAborted && finalMessages.length > 0) {
+        // Persist the assistant turn on EVERY settled path — finish AND client
+        // abort (stop button). When a user stops a long answer they did so
+        // because they had what they needed; discarding the partial reply makes
+        // it vanish on reload, which reads as data loss. So we save the partial
+        // too — it's a normal message with fewer parts.
+        //
+        // The one case we must NOT persist is an abort that produced no content
+        // (stopped before the first token): that would leave an empty assistant
+        // bubble in history. Guard on the turn actually having assistant output.
+        const shouldPersist =
+          finalMessages.length > 0 && (!isAborted || hasAssistantContent(finalMessages));
+        if (shouldPersist) {
           // Persist the assistant turn. Errors here are logged loudly — a
           // silently-dropped turn is the exact failure we designed against —
           // but never thrown, because the user already has their answer.
@@ -307,6 +333,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 event: 'chat.save_failed',
                 userId: ctx.userId,
                 conversationId,
+                aborted: isAborted,
                 error: err instanceof Error ? err.message : String(err),
               }),
             );

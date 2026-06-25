@@ -66,6 +66,7 @@ import {
   Suggestions,
 } from './suggestion';
 import { StarterMessages } from './suggestion2';
+import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
 
 type Conversation = {
@@ -145,8 +146,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         ...(config?.extraHeaders ?? {}),
       },
     }),
-    // Throttle UI updates to 200ms to prevent hanging during streaming
-    experimental_throttle: 200,
+    // Throttle UI updates while streaming. Default 50ms (~20Hz) for snappy
+    // streaming — safe because rendering is targeted (only the active message
+    // bubble re-renders per tick; see message-item.tsx). Host-tunable.
+    experimental_throttle: config?.streamingThrottleMs ?? 50,
   });
 
   const handleSubmit = async (message: PromptInputMessage) => {
@@ -672,183 +675,31 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     return sortedGroups;
   }, [conversations, searchQuery]);
 
-  // Render messages directly - AI SDK Elements components handle optimization
-  const renderMessages = () => messages.map((message, index) => {
-      // Pre-filter parts once to avoid redundant filtering on every render
-      const sourceParts = message.parts?.filter((part) => part.type === 'source-url') || [];
-      const fileParts = message.parts?.filter((part) => part.type === 'file') || [];
+  // Stable regenerate handler so the memoized list / MessageItem don't see a
+  // new function reference each render.
+  const handleRegenerate = useCallback(() => {
+    regenerate?.();
+  }, [regenerate]);
 
-      // Action row appears only under the LAST assistant message and
-      // only when the chat is idle — avoids cluttering historical turns
-      // and prevents click-during-stream races. The plain-text version
-      // for "copy" is the concatenated text parts; tool/reasoning parts
-      // are deliberately excluded.
-      // Action row visibility:
-      //   - Copy: every completed assistant message (including history).
-      //   - Regenerate: only the LAST assistant message AND only when
-      //     idle, since regenerate replays the most recent turn — it
-      //     doesn't make sense on older turns.
-      // We hide the row entirely while the latest turn is still
-      // streaming to avoid click-during-stream races on that message.
-      const isLastMessage = index === messages.length - 1;
-      const isStreamingThisMessage =
-        isLastMessage && message.role === 'assistant' && status !== 'ready';
-      const showActions =
-        message.role === 'assistant' && !isStreamingThisMessage;
-      const showRegenerate = showActions && isLastMessage && status === 'ready';
-      const messageText = showActions
-        ? (message.parts ?? [])
-            .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-            .map((p) => p.text)
-            .join('\n\n')
-        : '';
-
-      return (
-      <div key={message.id} className={index > 0 ? "mt-6" : ""}>
-        {/* Render sources if available. All sources go inside ONE
-            SourcesContent — Radix Collapsible expects a single Content
-            child to toggle, and emitting one per source caused the
-            collapsed state to occupy vertical space (visible as a big
-            empty gap below the "Used N sources" trigger). */}
-        {message.role === 'assistant' && sourceParts.length > 0 && (
-          <Sources>
-            <SourcesTrigger count={sourceParts.length} />
-            <SourcesContent>
-              {sourceParts.map((part, i) => (
-                <Source
-                  key={`${message.id}-source-${i}`}
-                  href={part.url}
-                  title={part.url}
-                />
-              ))}
-            </SourcesContent>
-          </Sources>
-        )}
-
-        {/* Render file attachments above the message */}
-        {fileParts.length > 0 && (
-          <div className={cn(
-            "flex mb-1",
-            message.role === 'user' ? 'justify-end' : 'justify-start'
-          )}>
-            <MessageAttachments
-              attachments={fileParts.map(part => ({
-                filename: part.filename || 'unknown',
-                mediaType: part.mediaType,
-                url: part.url,
-                size: (part as any).size || 0
-              }))}
-            />
-          </div>
-        )}
-
-        {/* Handle messages with parts array */}
-        {message.parts ? (
-          <div className="space-y-2">
-            {message.parts.map((part, i) => {
-              switch (part.type) {
-                case 'text':
-                  const isTextStreaming = status === 'streaming' && i === message.parts.length - 1 && message.id === messages.at(-1)?.id;
-                  return (
-                    <Fragment key={`${message.id}-${i}`}>
-                      <Message from={message.role}>
-                        <MessageContent>
-                          <Response isStreaming={isTextStreaming}>
-                            {part.text}
-                          </Response>
-                        </MessageContent>
-                      </Message>
-                    </Fragment>
-                  );
-                case 'reasoning':
-                  const isCurrentlyStreaming = status === 'streaming' && i === message.parts.length - 1 && message.id === messages.at(-1)?.id;
-                  // Show open while streaming, closed when done (users can still manually reopen)
-                  return (
-                    <Reasoning
-                      key={`${message.id}-${i}`}
-                      className="w-full"
-                      isStreaming={isCurrentlyStreaming}
-                      defaultOpen={false}
-                      open={isCurrentlyStreaming ? true : undefined}
-                    >
-                      <ReasoningTrigger />
-                      <ReasoningContent>{part.text}</ReasoningContent>
-                    </Reasoning>
-                  );
-                default:
-                  // Handle tool calls
-                  if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
-                    const toolPart = part as any; // ToolUIPart | DynamicToolUIPart
-                    // Resolve a custom renderer keyed by tool name. Static
-                    // tool parts encode the name in the type (`tool-foo`);
-                    // dynamic tool parts carry it on `toolName`.
-                    const resolvedToolName: string =
-                      toolPart.toolName ??
-                      (part.type.startsWith('tool-') ? part.type.slice(5) : '');
-                    const customRenderer = config?.toolRenderers?.[resolvedToolName];
-                    if (customRenderer) {
-                      const rendered = customRenderer({
-                        type: part.type,
-                        toolName: resolvedToolName,
-                        toolCallId: toolPart.toolCallId,
-                        state: toolPart.state,
-                        input: toolPart.input,
-                        output: toolPart.output,
-                        errorText: toolPart.errorText,
-                      });
-                      if (rendered !== null && rendered !== undefined) {
-                        return (
-                          <Fragment key={`${message.id}-${i}`}>{rendered}</Fragment>
-                        );
-                      }
-                      // Renderer opted out (returned null) — fall through
-                      // to default rendering so users still see something.
-                    }
-                    return (
-                      <Tool key={`${message.id}-${i}`}>
-                        <ToolHeader
-                          type={part.type as any}
-                          toolName={toolPart.toolName}
-                          state={toolPart.state}
-                        />
-                        <ToolContent>
-                          <ToolInput input={toolPart.input} />
-                          <ToolOutput output={toolPart.output} errorText={toolPart.errorText} />
-                        </ToolContent>
-                      </Tool>
-                    );
-                  }
-                  return null;
-              }
-            })}
-          </div>
-        ) : (
-          /* Handle standard AI SDK messages with content or text property */
-          <Fragment key={`${message.id}-content`}>
-            <Message from={message.role}>
-              <MessageContent>
-                <Response>
-                  {(message as any).content || (message as any).text}
-                </Response>
-              </MessageContent>
-            </Message>
-          </Fragment>
-        )}
-
-        {/* Action row — Copy on every completed assistant message,
-            Regenerate only on the last (regenerate replays the most
-            recent turn, doesn't make sense on history). */}
-        {showActions && (
-          <MessageActions
-            text={messageText}
-            onRegenerate={
-              showRegenerate && regenerate ? () => regenerate() : undefined
-            }
-          />
-        )}
-      </div>
-      );
-    });
+  // Memoized message list. Each message is a memoized <MessageItem>; the SDK
+  // reuses old message refs and clones only the streaming (last) one, so only
+  // the active bubble re-renders per tick. Assistant turns render through the
+  // transcript (in-order text / compact tool rows / thinking) inside MessageItem.
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((m, i) => (
+        <MessageItem
+          key={m.id}
+          message={m}
+          isFirst={i === 0}
+          isLast={i === messages.length - 1}
+          status={status}
+          toolRenderers={config?.toolRenderers}
+          onRegenerate={handleRegenerate}
+        />
+      )),
+    [messages, status, config?.toolRenderers, handleRegenerate],
+  );
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
     if (!config?.userId) return; // Wait for userId
@@ -1213,7 +1064,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
         <Conversation className="flex-1 max-w-full ai-assistant-scrollbar">
           <ConversationContent className="max-w-[96%] mx-auto py-6">
-            {renderMessages()}
+            {renderedMessages}
             {showThinking && (
               <div className="mt-6">
                 <Message from="assistant">

@@ -112,6 +112,15 @@ export interface ChatWidgetConfig {
   inputPlugins?: InputPlugin[];
 
   /**
+   * Throttle (ms) for UI updates while a response streams. Lower = snappier,
+   * more frequent re-renders; higher = fewer re-renders. The widget renders
+   * streaming updates in a targeted way (only the active message bubble
+   * re-renders per tick), so a low value is safe. Default 50ms (~20Hz).
+   * Raise it on low-end devices or for very large tool payloads.
+   */
+  streamingThrottleMs?: number;
+
+  /**
    * Per-tool custom renderers. When a tool part appears in a message
    * (either a static `tool-<name>` part or a `dynamic-tool` part with
    * `toolName: <name>`), the widget looks up the renderer keyed by tool
