@@ -36,10 +36,11 @@ interface AgentToolCallProps {
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
 const SUBTLE = { color: 'hsl(var(--chat-text-subtle))' } as const;
 const HOVER = { backgroundColor: 'transparent' } as const;
-const SUCCESS_COLOR = { color: 'hsl(var(--chat-text-muted))' } as const;
-const ERROR_COLOR = { color: '#ef4444' } as const;
+// Match the jarvis PortfolioHoldingsEditor status colours: green-400 / red-400.
+const SUCCESS_COLOR = { color: '#4ade80' } as const; // Tailwind green-400
+const ERROR_COLOR = { color: '#f87171' } as const; // Tailwind red-400
 
-/** Leading status icon: spinner (running) → check (done) → cross (error). */
+/** Leading status icon: spinner (running) → green check (done) → red cross (error). */
 function StatusIcon({ isPending, isError }: { isPending: boolean; isError: boolean }) {
   if (isError) {
     return <X className="size-3.5 flex-shrink-0" style={ERROR_COLOR} strokeWidth={2.5} aria-hidden="true" />;
@@ -106,7 +107,7 @@ function AgentToolCallImpl({
           {errorText ? (
             <div
               className="rounded-md px-2.5 py-1.5 text-xs"
-              style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+              style={{ backgroundColor: 'rgba(248,113,113,0.12)', color: '#f87171' }}
             >
               {errorText}
             </div>
