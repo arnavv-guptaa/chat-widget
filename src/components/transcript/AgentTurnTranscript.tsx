@@ -1,4 +1,5 @@
 import { Fragment, memo, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
 import type { UIMessage } from 'ai';
 import { Message, MessageContent } from '../message';
 import { Response } from '../response';
@@ -142,7 +143,11 @@ function AgentTurnTranscriptImpl({
 
       {shouldShowPlanning && (
         <div className="flex items-center gap-2 px-2 py-1 -mx-2">
-          <span className="chat-status-dot is-running" aria-hidden="true" />
+          <Loader2
+            className="size-3.5 flex-shrink-0 animate-spin"
+            style={{ color: 'hsl(var(--chat-text-subtle))' }}
+            aria-hidden="true"
+          />
           <TextShimmer as="span" className="text-[13px] font-medium leading-5">
             {planningVerb}
           </TextShimmer>

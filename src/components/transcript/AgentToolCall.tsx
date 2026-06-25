@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Loader2, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { CodeBlock } from '../code-block';
 import { TextShimmer } from './TextShimmer';
@@ -8,9 +8,12 @@ import { TextShimmer } from './TextShimmer';
  * One assistant tool call, as a single compact row. Reads like "here's what I
  * did for you", not a developer work-log:
  *
- *   ● Pulled up your portfolios   13 results        ⌄
+ *   ⟳ Pulling up your portfolios …        (running — spinner)
+ *   ✓ Pulled up your portfolios   13 results        ⌄   (done — check)
+ *   ✕ Couldn't search the web                            (error — cross)
  *
- * - a small status dot (pulsing while running, settled when done, red on error)
+ * - a leading status icon: a small spinner while running, a check once done, a
+ *   cross on error — explicit and unambiguous
  * - a friendly verb that shimmers while the tool is running, then settles to
  *   past-tense once it completes
  * - a muted subtitle (the salient input) or, once done, a short result summary
@@ -33,6 +36,19 @@ interface AgentToolCallProps {
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
 const SUBTLE = { color: 'hsl(var(--chat-text-subtle))' } as const;
 const HOVER = { backgroundColor: 'transparent' } as const;
+const SUCCESS_COLOR = { color: 'hsl(var(--chat-text-muted))' } as const;
+const ERROR_COLOR = { color: '#ef4444' } as const;
+
+/** Leading status icon: spinner (running) → check (done) → cross (error). */
+function StatusIcon({ isPending, isError }: { isPending: boolean; isError: boolean }) {
+  if (isError) {
+    return <X className="size-3.5 flex-shrink-0" style={ERROR_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+  }
+  if (isPending) {
+    return <Loader2 className="size-3.5 flex-shrink-0 animate-spin" style={SUBTLE} aria-hidden="true" />;
+  }
+  return <Check className="size-3.5 flex-shrink-0" style={SUCCESS_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+}
 
 function AgentToolCallImpl({
   verb,
@@ -44,7 +60,6 @@ function AgentToolCallImpl({
 }: AgentToolCallProps) {
   const [expanded, setExpanded] = useState(false);
   const hasDetail = Boolean((detail && detail.trim()) || errorText);
-  const dotClass = isError ? 'is-error' : isPending ? 'is-running' : 'is-done';
 
   return (
     <div className="group/tool select-text">
@@ -56,7 +71,7 @@ function AgentToolCallImpl({
         style={HOVER}
         onClick={hasDetail ? () => setExpanded((v) => !v) : undefined}
       >
-        <span className={cn('chat-status-dot', dotClass)} aria-hidden="true" />
+        <StatusIcon isPending={isPending} isError={isError} />
 
         <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
           {isPending ? (

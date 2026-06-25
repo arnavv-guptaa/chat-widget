@@ -513,30 +513,6 @@
   55%, 100% { opacity: 0.15; }
 }
 
-/* Small status dot on a tool row — pulses while the tool is running. */
-.chat-widget-container .chat-status-dot {
-  display: inline-block;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 9999px;
-  flex-shrink: 0;
-}
-.chat-widget-container .chat-status-dot.is-running {
-  background-color: hsl(var(--chat-text-muted));
-  animation: chat-dot-pulse 1.2s ease-in-out infinite;
-}
-.chat-widget-container .chat-status-dot.is-done {
-  background-color: hsl(var(--chat-text-subtle));
-}
-.chat-widget-container .chat-status-dot.is-error {
-  background-color: #ef4444;
-}
-
-@keyframes chat-dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.4; transform: scale(0.8); }
-}
-
 /* Smooth height/opacity reveal for a tool row's expanded detail. */
 .chat-widget-container .chat-tool-detail {
   animation: chat-detail-in 0.18s ease-out;
@@ -549,7 +525,6 @@
 @media (prefers-reduced-motion: reduce) {
   .chat-widget-container .chat-text-shimmer { animation: none; background-position: 100% center; }
   .chat-widget-container .chat-caret { animation: none; opacity: 0.6; }
-  .chat-widget-container .chat-status-dot.is-running { animation: none; }
   .chat-widget-container .chat-tool-detail { animation: none; }
 }
 
