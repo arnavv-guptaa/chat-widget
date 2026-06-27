@@ -1,17 +1,40 @@
 'use client';
 
 import { Button } from '../ui/button';
-import { useChatTheme, colorPalettes } from '../hooks/use-chat-theme';
+import { useChatTheme } from '../hooks/use-chat-theme';
 import { RotateCcw, Check } from 'lucide-react';
 
-const colorNames = ['Blue', 'Purple', 'Green', 'Amber', 'Red', 'Pink', 'Cyan', 'Slate'];
+// Preset accent colors shown as swatches. These map onto the hook's
+// primary color (`lightPrimary` / `darkPrimary`) — the color used for
+// buttons, user messages and accents — for the currently active theme mode.
+const colorPalettes = [
+  { name: 'Blue', accentColor: '#3b82f6' },
+  { name: 'Purple', accentColor: '#8b5cf6' },
+  { name: 'Green', accentColor: '#22c55e' },
+  { name: 'Amber', accentColor: '#f59e0b' },
+  { name: 'Red', accentColor: '#ef4444' },
+  { name: 'Pink', accentColor: '#ec4899' },
+  { name: 'Cyan', accentColor: '#06b6d4' },
+  { name: 'Slate', accentColor: '#64748b' },
+];
 
 export function AppearanceSettings() {
-  const { theme, updateColor, setPalette, resetTheme } = useChatTheme();
+  const { theme, updateLightColors, updateDarkColors, resetTheme, themeMode } = useChatTheme();
+
+  // The "accent" color is the primary color for the active theme mode.
+  const accentColor = themeMode === 'light' ? theme.lightPrimary : theme.darkPrimary;
+
+  const setAccentColor = (color: string) => {
+    if (themeMode === 'light') {
+      updateLightColors({ primary: color });
+    } else {
+      updateDarkColors({ primary: color });
+    }
+  };
 
   const isActivePalette = (paletteIndex: number) => {
     const palette = colorPalettes[paletteIndex];
-    return theme.accentColor === palette.accentColor;
+    return accentColor.toLowerCase() === palette.accentColor.toLowerCase();
   };
 
   return (
@@ -38,9 +61,9 @@ export function AppearanceSettings() {
           {colorPalettes.map((palette, index) => (
             <button
               key={index}
-              onClick={() => setPalette(palette)}
+              onClick={() => setAccentColor(palette.accentColor)}
               className="relative group focus:outline-none"
-              title={colorNames[index]}
+              title={palette.name}
             >
               <div
                 className={`w-10 h-10 rounded-full transition-all duration-200 ${
@@ -48,10 +71,7 @@ export function AppearanceSettings() {
                     ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900 shadow-md scale-100'
                     : 'shadow-sm hover:shadow-md hover:scale-105'
                 }`}
-                style={{
-                  backgroundColor: palette.accentColor,
-                  ringColor: isActivePalette(index) ? palette.accentColor : undefined,
-                }}
+                style={{ backgroundColor: palette.accentColor }}
               >
                 {/* Active indicator */}
                 {isActivePalette(index) && (
@@ -73,8 +93,8 @@ export function AppearanceSettings() {
           <div className="relative group" title="Custom Color">
             <input
               type="color"
-              value={theme.accentColor}
-              onChange={(e) => updateColor('accentColor', e.target.value)}
+              value={accentColor}
+              onChange={(e) => setAccentColor(e.target.value)}
               className="w-10 h-10 rounded-full cursor-pointer border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 transition-all duration-200 hover:shadow-md hover:scale-105"
             />
           </div>
@@ -85,8 +105,8 @@ export function AppearanceSettings() {
           <span className="text-xs text-gray-500 dark:text-gray-400">HEX:</span>
           <input
             type="text"
-            value={theme.accentColor}
-            onChange={(e) => updateColor('accentColor', e.target.value)}
+            value={accentColor}
+            onChange={(e) => setAccentColor(e.target.value)}
             className="flex-1 h-8 px-3 text-xs font-mono font-medium rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-900/50 focus:border-gray-300 dark:focus:border-gray-600 focus:bg-white dark:focus:bg-gray-900 transition-all duration-200 outline-none"
             placeholder="#3b82f6"
           />
