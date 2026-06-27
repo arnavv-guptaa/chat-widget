@@ -36,4 +36,40 @@ export type {
   HostedAgentConfig,
   BuiltTools,
   UploadPolicy,
+  RetrievalConfig,
+  MemoryConfig,
 } from './handler-types';
+
+// ── Knowledge (RAG) contracts ───────────────────────────────────────────────
+// The interfaces + ingestion vocabulary. Concrete stores live behind
+// `/server/knowledge`, `/server/knowledge/drizzle`, `/server/knowledge/hosted`.
+export type {
+  Namespace,
+  ChunkMetadata,
+  RetrievedChunk,
+  QueryOptions,
+  KnowledgeDoc,
+  SourceInfo,
+  UpsertResult,
+  Retriever,
+  KnowledgeStore,
+  RetrieverFactory,
+  KnowledgeStoreFactory,
+  Embedder,
+  IngestSource,
+  IngestProgress,
+  IngestOptions,
+  IngestReport,
+} from './knowledge/types';
+export { NamespaceAccessError } from './knowledge/types';
+
+// ── Memory contracts ─────────────────────────────────────────────────────────
+// The interface; concrete adapters live behind `/server/memory`,
+// `/server/memory/drizzle`, `/server/memory/mem0`, `/server/memory/hosted`.
+export type {
+  Memory,
+  RetrieveOptions,
+  RecordOptions,
+  MemoryAdapter,
+  MemoryAdapterFactory,
+} from './memory/types';
