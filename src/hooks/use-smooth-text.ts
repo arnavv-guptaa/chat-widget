@@ -32,7 +32,31 @@ const MIN_CPS = 25; // floor reveal speed (chars/sec) so slow streams still move
 const MAX_CPS = 1400; // ceiling so a huge backlog reveals fast but not instantly
 const RATE_SMOOTHING = 0.15; // EMA factor for the arrival-rate estimate (lower = smoother)
 
+/**
+ * Whether the user has requested reduced motion. Read once per hook instance
+ * (the preference effectively never flips mid-stream). SSR-safe: defaults to
+ * `false` when matchMedia is unavailable, so server render === first client
+ * render and there's no hydration mismatch.
+ */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function useSmoothText(target: string, enabled: boolean): string {
+  // ACCESSIBILITY: the per-character RAF drip below mutates the DOM dozens of
+  // times per second. Inside a live region, screen readers that batch
+  // announcements (NVDA+Chrome, VoiceOver+Safari) sample mid-drip and announce
+  // only a fragment — or nothing. Users who set "reduce motion" (commonly SR
+  // users) get the full text immediately instead, so the live region announces
+  // coherent chunks as they arrive from the model. This also disables the
+  // purely-decorative typing animation, which is the documented intent of the
+  // preference. Visual layout and stick-to-bottom are unaffected.
+  const reduceMotion = prefersReducedMotion();
+  const animate = enabled && !reduceMotion;
+
   const [displayed, setDisplayed] = useState(target);
 
   const targetRef = useRef(target);
@@ -49,7 +73,7 @@ export function useSmoothText(target: string, enabled: boolean): string {
   targetRef.current = target;
 
   useEffect(() => {
-    if (!enabled) {
+    if (!animate) {
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -139,9 +163,9 @@ export function useSmoothText(target: string, enabled: boolean): string {
         rafRef.current = null;
       }
     };
-    // Loop reads latest target via ref; only restart when streaming toggles.
+    // Loop reads latest target via ref; only restart when animation toggles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [animate]);
 
-  return enabled ? displayed : target;
+  return animate ? displayed : target;
 }
