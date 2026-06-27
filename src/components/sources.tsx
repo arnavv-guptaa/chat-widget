@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from "../ui/collapsible";
 import { cn } from "../utils/cn";
+import { safeUrl } from "../utils/url-safety";
 import { BookIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -59,19 +60,24 @@ export const SourcesContent = ({
 
 export type SourceProps = ComponentProps<"a">;
 
-export const Source = ({ href, title, children, ...props }: SourceProps) => (
-  <a
-    className="flex items-center gap-2"
-    href={href}
-    rel="noreferrer"
-    target="_blank"
-    {...props}
-  >
-    {children ?? (
-      <>
-        <BookIcon className="h-4 w-4" />
-        <span className="block font-medium">{title}</span>
-      </>
-    )}
-  </a>
-);
+export const Source = ({ href, title, children, ...props }: SourceProps) => {
+  // Citation hrefs come from the AI message stream; only allow safe schemes
+  // (http/https/...) so a `javascript:`/`data:` URL can't run on click.
+  const safeHref = safeUrl(href);
+  return (
+    <a
+      className="flex items-center gap-2"
+      href={safeHref}
+      rel="noopener noreferrer"
+      target="_blank"
+      {...props}
+    >
+      {children ?? (
+        <>
+          <BookIcon className="h-4 w-4" />
+          <span className="block font-medium">{title}</span>
+        </>
+      )}
+    </a>
+  );
+};

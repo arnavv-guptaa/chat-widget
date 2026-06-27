@@ -1,4 +1,5 @@
 import { cn } from "../utils/cn";
+import { isSafeDataImage, safeUrl } from "../utils/url-safety";
 import {
   FileIcon,
   FileSpreadsheetIcon,
@@ -18,28 +19,38 @@ export type MessageAttachmentsProps = {
   className?: string;
 };
 
-// Open the file's URL in a new tab. Handles data: and blob: URLs that
-// browsers won't navigate to directly by wrapping data URLs in a tiny
-// HTML viewer so the image at least renders. http(s) URLs (signed
-// Supabase URLs included) just open straight.
+// Open the file's URL in a new tab. The filename and URL come from the
+// (untrusted) AI message stream, so both are validated here to prevent
+// DOM-based XSS. http(s)/blob URLs open directly; inline image data: URLs
+// are rendered in a tiny viewer built with safe DOM APIs — the filename is
+// set via the title/alt properties (assigned as text, never parsed as HTML)
+// instead of raw document.write of unescaped values. Disallowed schemes
+// (javascript:, vbscript:, non-image data:, ...) are dropped.
 function openAttachment(attachment: MessageAttachment) {
-  if (attachment.url.startsWith("data:")) {
-    const w = window.open("", "_blank");
-    if (w) {
-      w.document.write(
-        `<html><head><title>${attachment.filename}</title></head>` +
-          `<body style="margin:0;padding:20px;background:#f5f5f5;` +
-          `display:flex;justify-content:center;align-items:center;min-height:100vh;">` +
-          `<img src="${attachment.url}" alt="${attachment.filename}" ` +
-          `style="max-width:100%;max-height:100%;object-fit:contain;` +
-          `border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);" />` +
-          `</body></html>`,
-      );
-      w.document.close();
-    }
+  const safe = safeUrl(attachment.url);
+  if (!safe) return;
+
+  // Inline image previews: browsers won't navigate to a data: image as a
+  // top-level document, so render it in a minimal viewer page.
+  if (isSafeDataImage(safe)) {
+    const w = window.open("", "_blank", "noopener,noreferrer");
+    if (!w) return;
+    const doc = w.document;
+    doc.title = attachment.filename; // assigned as text, not parsed as HTML
+    doc.body.style.cssText =
+      "margin:0;padding:20px;background:#f5f5f5;display:flex;" +
+      "justify-content:center;align-items:center;min-height:100vh;";
+    const img = doc.createElement("img");
+    img.setAttribute("src", safe); // validated as a data:image above
+    img.setAttribute("alt", attachment.filename);
+    img.style.cssText =
+      "max-width:100%;max-height:100%;object-fit:contain;" +
+      "border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);";
+    doc.body.appendChild(img);
     return;
   }
-  window.open(attachment.url, "_blank");
+
+  window.open(safe, "_blank", "noopener,noreferrer");
 }
 
 function describeFile(att: MessageAttachment): {
@@ -90,11 +101,14 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
     <div className={cn("flex flex-wrap gap-2", className)}>
       {attachments.map((attachment, index) => {
         const isImage = attachment.mediaType.startsWith("image/");
-        if (isImage) {
+        // Only render the inline preview if the URL passes the protocol
+        // allowlist; otherwise fall back to the (guarded) file button.
+        const safeImageSrc = isImage ? safeUrl(attachment.url) : undefined;
+        if (isImage && safeImageSrc) {
           return (
             <div key={index} className="group relative h-14 w-14 rounded-lg">
               <img
-                src={attachment.url}
+                src={safeImageSrc}
                 alt={attachment.filename}
                 className="size-full rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() => openAttachment(attachment)}
