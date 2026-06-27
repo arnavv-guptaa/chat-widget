@@ -24,7 +24,7 @@ yours: **who the user is** (auth), **which model**, and **which tools**.
 
 ```bash
 # 1. Install
-npm install @mordn/chat-widget drizzle-kit
+npm install @mordn/chat-widget @ai-sdk/react drizzle-kit
 
 # 2. Run the setup wizard
 npx @mordn/chat-widget
@@ -44,6 +44,8 @@ Peer dependencies (you provide these in your app):
 - **Next.js** 14, 15, or 16 (App Router)
 - **React** 18 or 19
 - **`ai`** v5 or v6 (Vercel AI SDK)
+- **`@ai-sdk/react`** v3 — the AI SDK's React bindings the widget renders with
+  (install it alongside `ai`)
 - **`drizzle-orm`** ^0.44 and **`postgres`** ^3.4 — only if you use the default
   Drizzle store (skip if you bring your own `ChatStore`)
 - A **PostgreSQL** database (Supabase recommended) — for the default store

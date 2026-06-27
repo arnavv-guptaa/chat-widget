@@ -219,12 +219,16 @@ async function init() {
   console.log(`\n✓ Created ${filesCreated} files\n`);
 
   console.log('Next steps:');
-  console.log('  1. Copy .env.example to .env.local and fill in your credentials');
-  console.log('  2. Implement getChatUserId() in lib/chat-auth.ts');
+  console.log('  1. Install the required peer deps and an AI provider for your model:');
+  console.log('       npm install @ai-sdk/react @ai-sdk/anthropic');
+  console.log('     (@ai-sdk/react is a required peer dependency the widget renders with;');
+  console.log('      swap @ai-sdk/anthropic for your provider, e.g. @ai-sdk/openai.)');
+  console.log('  2. Copy .env.example to .env.local and fill in your credentials');
+  console.log('  3. Implement getChatUserId() in lib/chat-auth.ts');
   console.log('     ⚠  Until you do, every chat request will throw — by design.');
-  console.log('  3. Run: npx drizzle-kit push   (creates the chat tables)');
-  console.log('  4. If using uploads: create a PRIVATE "chat-attachments" bucket in Supabase');
-  console.log('  5. Mount the widget in your app:\n');
+  console.log('  4. Run: npx drizzle-kit push   (creates the chat tables)');
+  console.log('  5. If using uploads: create a PRIVATE "chat-attachments" bucket in Supabase');
+  console.log('  6. Mount the widget in your app:\n');
   console.log("     import { ChatWidget } from '@mordn/chat-widget';");
   console.log("     import '@mordn/chat-widget/styles.css';");
   console.log('     <ChatWidget userId={/* your user id */} />\n');
