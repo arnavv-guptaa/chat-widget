@@ -192,15 +192,27 @@ export type RetrieverFactory = (namespaces: Namespace[]) => Retriever;
 export type KnowledgeStoreFactory = (namespace: Namespace) => KnowledgeStore;
 
 /**
- * The embedding seam, so the store stays model-agnostic. Wraps the AI SDK's
- * `embedMany` (and `embed`). The host controls the model + dimension, which must
- * match the vector column width.
+ * The embedding seam, so the store stays model-agnostic. The default
+ * implementation is Google Gemini (`gemini-embedding-2`, 1536-dim, L2-normalized)
+ * over REST; BYO consumers can wrap any AI SDK model via `createEmbedder`. The
+ * host controls the model + dimension, which must match the vector column width.
  */
 export interface Embedder {
   /** MUST equal the vector column width (e.g. 1536). */
   readonly dimensions: number;
-  /** Embed a batch (order-preserving). The hot path for ingestion. */
+  /**
+   * Embed a batch of DOCUMENT chunks (order-preserving). The hot path for
+   * ingestion — providers that support retrieval task types should frame these
+   * as `RETRIEVAL_DOCUMENT`.
+   */
   embed(texts: string[]): Promise<number[][]>;
+  /**
+   * OPTIONAL query-side embedding (order-preserving). Lets task-type-aware
+   * providers frame inputs as `RETRIEVAL_QUERY` for asymmetric retrieval. The
+   * store uses this for the query path when present and falls back to `embed`
+   * otherwise — so an embedder that only implements `embed` still works.
+   */
+  embedQuery?(texts: string[]): Promise<number[][]>;
 }
 
 /**

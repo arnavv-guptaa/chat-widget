@@ -50,9 +50,10 @@ export const vector = (name: string, dim: number) =>
   })(name);
 
 /**
- * Default embedding dimension (text-embedding-3-small). Override in a host
- * migration if you pick a different model — the column width is the source of
- * truth and must equal the embedder's `dimensions`.
+ * Default embedding dimension (Gemini gemini-embedding-2 at output
+ * dimensionality 1536, L2-normalized). Override in a host migration if you pick
+ * a different model — the column width is the source of truth and must equal the
+ * embedder's `dimensions`.
  */
 export const EMBED_DIM = 1536;
 

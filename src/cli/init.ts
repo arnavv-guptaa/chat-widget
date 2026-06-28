@@ -170,6 +170,12 @@ DATABASE_URL="postgresql://postgres.xxx:[PASSWORD]@aws-0-region.pooler.supabase.
 # The bucket MUST be created as a PRIVATE bucket.
 NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+
+# Knowledge base / RAG embeddings (required only if you use the knowledge module).
+# The default embedder is Google Gemini "gemini-embedding-2" (1536-dim, REST).
+# Get a key at https://aistudio.google.com/apikey
+GEMINI_API_KEY="your-gemini-api-key"
+# Or set GOOGLE_GENERATIVE_AI_API_KEY instead — both are accepted.
 `;
 
 // ============================================================================

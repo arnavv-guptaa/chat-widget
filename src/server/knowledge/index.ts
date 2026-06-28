@@ -33,11 +33,17 @@ export type {
 } from './types';
 export { NamespaceAccessError } from './types';
 
-// Embedder seam
+// Embedder seam. Default is Google Gemini `gemini-embedding-2` (REST, 1536-dim,
+// L2-normalized); `createEmbedder` still wraps any AI SDK model for BYO.
 export {
   createEmbedder,
+  createGeminiEmbedder,
+  getDefaultEmbedder,
   DEFAULT_EMBEDDING_MODEL,
+  FALLBACK_EMBEDDING_MODEL,
   DEFAULT_EMBEDDING_DIMENSIONS,
+  type GeminiEmbedderOptions,
+  type EmbeddingTaskType,
 } from './embedder';
 
 // Ingestion pipeline (admin/server only)

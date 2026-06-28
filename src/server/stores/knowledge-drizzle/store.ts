@@ -80,7 +80,10 @@ class PgVectorKnowledgeStore implements KnowledgeStore {
     const minScore = opts.minScore ?? DEFAULT_MIN_SCORE;
     const w = opts.vectorWeight ?? 1;
 
-    const [embedding] = await this.embedder.embed([input]);
+    // Query path → use the embedder's query-framing when it offers one
+    // (RETRIEVAL_QUERY for asymmetric retrieval), else fall back to embed().
+    const embedFn = this.embedder.embedQuery ?? this.embedder.embed;
+    const [embedding] = await embedFn.call(this.embedder, [input]);
     if (!embedding) return [];
     const vec = sql.raw(`'${vectorLiteral(embedding)}'::vector`);
 

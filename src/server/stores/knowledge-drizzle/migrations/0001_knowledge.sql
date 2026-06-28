@@ -11,9 +11,10 @@
 --   index — so those live here in raw SQL.
 --
 -- DIMENSION
---   The embedding column is vector(1536) (text-embedding-3-small). If you swap to
---   a model with a different dimension, change BOTH this column and the schema's
---   EMBED_DIM, then re-embed (a model swap is an operational event, not a toggle).
+--   The embedding column is vector(1536) (Gemini gemini-embedding-2, output
+--   dimensionality 1536, L2-normalized). If you swap to a model with a different
+--   dimension, change BOTH this column and the schema's EMBED_DIM, then re-embed
+--   (a model swap is an operational event, not a toggle).
 --
 -- SAFETY
 --   • Wrapped in a transaction.

@@ -103,6 +103,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
+    "@ai-sdk/google": "^1.0.0 || ^2.0.0",
     "ai": "^5.0.0 || ^6.0.0",
     "drizzle-orm": "^0.44.0",
     "next": "^14.0.0 || ^15.0.0 || ^16.0.0",
@@ -112,6 +113,9 @@
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/google": {
+      "optional": true
+    },
     "zod": {
       "optional": true
     }
