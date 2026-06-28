@@ -613,6 +613,18 @@
   animation: chat-backdrop-fade-in 0.2s ease-out forwards;
 }
 
+/* Honor reduced-motion for the large entrance animations — the side panel
+   sliding in and the backdrop fade. Each animation ends at the element's
+   resting position/opacity, so disabling it simply shows the element in place
+   with no movement. (The shimmer/caret/tool-detail micro-animations have their
+   own reduced-motion block in the activity section above.) */
+@media (prefers-reduced-motion: reduce) {
+  .chat-widget-container.chat-widget-popup,
+  .chat-backdrop-fade-in {
+    animation: none !important;
+  }
+}
+
 .chat-widget-container[style*="animation"] {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
