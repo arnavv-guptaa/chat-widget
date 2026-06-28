@@ -210,12 +210,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // Filter out null results (failed uploads)
         uploadedFiles = results.filter(result => result !== null);
 
-        // If no files uploaded successfully, show error to user
+        // If no files uploaded successfully, abort the send. Throwing (rather
+        // than returning) lets PromptInput keep the attachments mounted so the
+        // user can retry instead of having to re-pick every file.
         if (uploadedFiles.length === 0) {
-          const errorMsg = 'All file uploads failed. Please try again.';
-          setUploadError(errorMsg);
-          console.error(errorMsg);
-          return;
+          throw new Error('All file uploads failed. Please try again.');
         }
 
         // If only some files uploaded, show warning to user
@@ -226,10 +225,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         }
 
       } catch (error) {
-        const errorMsg = 'Error uploading files. Please try again.';
+        const errorMsg =
+          error instanceof Error
+            ? error.message
+            : 'Error uploading files. Please try again.';
         setUploadError(errorMsg);
         console.error('Error in file upload process:', error);
-        return;
+        // Re-throw so PromptInput's submit handler preserves the attachments
+        // for retry instead of clearing them.
+        throw error instanceof Error ? error : new Error(errorMsg);
       }
     }
 
