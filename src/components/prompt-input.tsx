@@ -595,6 +595,10 @@ export const PromptInputTextarea = React.forwardRef<
   ...props
 }, ref) => {
   const attachments = usePromptInputAttachments();
+  // Track IME composition so Enter doesn't submit mid-composition. Some
+  // browsers only surface this through composition events rather than
+  // KeyboardEvent.isComposing, so we track both.
+  const [isComposing, setIsComposing] = useState(false);
 
   // Auto-grow via JS scrollHeight measurement — works in every browser. (The
   // CSS `field-sizing-content` property isn't supported in Safari/Firefox, so
@@ -627,7 +631,7 @@ export const PromptInputTextarea = React.forwardRef<
 
     if (e.key === "Enter") {
       // Don't submit if IME composition is in progress
-      if (e.nativeEvent.isComposing) {
+      if (isComposing || e.nativeEvent.isComposing) {
         return;
       }
 
@@ -639,8 +643,31 @@ export const PromptInputTextarea = React.forwardRef<
       // Submit on Enter (without Shift)
       e.preventDefault();
       const form = e.currentTarget.form;
+      // Respect a disabled submit button — Enter shouldn't bypass the guard
+      // the button already enforces (e.g. empty input, or send disabled).
+      const submitButton = form?.querySelector(
+        'button[type="submit"]'
+      ) as HTMLButtonElement | null;
+      if (submitButton?.disabled) {
+        return;
+      }
       if (form) {
         form.requestSubmit();
+      }
+      return;
+    }
+
+    // Backspace on an empty textarea removes the most recent attachment, so a
+    // mistaken attachment can be undone without reaching for the mouse.
+    if (
+      e.key === "Backspace" &&
+      e.currentTarget.value === "" &&
+      attachments.files.length > 0
+    ) {
+      e.preventDefault();
+      const lastAttachment = attachments.files.at(-1);
+      if (lastAttachment) {
+        attachments.remove(lastAttachment.id);
       }
     }
   };
@@ -686,6 +713,8 @@ export const PromptInputTextarea = React.forwardRef<
         resize();
       }}
       onKeyDown={handleKeyDown}
+      onCompositionStart={() => setIsComposing(true)}
+      onCompositionEnd={() => setIsComposing(false)}
       onPaste={handlePaste}
       placeholder={placeholder}
       {...props}
