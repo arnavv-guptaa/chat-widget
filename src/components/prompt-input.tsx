@@ -284,7 +284,7 @@ export type PromptInputProps = Omit<
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>
-  ) => void;
+  ) => void | Promise<void>;
 };
 
 export const PromptInput = ({
@@ -489,17 +489,38 @@ export const PromptInput = ({
     }
   };
 
-  const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
+  const handleSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
+
+    // Capture text + files synchronously, before any await. Once we await the
+    // (possibly async) onSubmit, `event.currentTarget` is null and the
+    // controlled value may already have changed.
+    const form = event.currentTarget;
+    const messageEl = form.elements.namedItem(
+      "message"
+    ) as HTMLTextAreaElement | null;
+    const text = messageEl?.value ?? "";
 
     const files: FileUIPart[] = items.map(({ ...item }) => ({
       ...item,
     }));
 
-    onSubmit({ text: event.currentTarget.message.value, files }, event);
-    
-    // Clear files after submission
-    clear();
+    try {
+      // `onSubmit` is frequently async — e.g. it uploads the attachments to a
+      // server before sending. Await it so the attachments are only released
+      // once the send has actually succeeded. Clearing eagerly (the previous
+      // behaviour) revoked the blob: object URLs while the upload was still
+      // reading them, and dropped the user's attachments on a failed send so
+      // they had nothing to retry with.
+      const result = onSubmit({ text, files }, event);
+      if (result instanceof Promise) {
+        await result;
+      }
+      // Success — safe to clear and revoke the now-unused object URLs.
+      clear();
+    } catch {
+      // Keep the attachments mounted so the user can retry after a failed send.
+    }
   };
 
   const ctx = useMemo<AttachmentsContext>(
