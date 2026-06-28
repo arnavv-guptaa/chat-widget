@@ -232,6 +232,16 @@
   color: hsl(var(--chat-text));
 }
 
+/* Long, unbreakable content (URLs, hashes, file paths, code-y tokens) must wrap
+   inside the bubble instead of being clipped by overflow-hidden or forcing the
+   whole column to scroll sideways. `min-width: 0` is the flex-shrink companion
+   to the `min-w-0` utility on MessageContent. Applies to user + assistant. */
+.chat-widget-container .chat-message-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* ============================================
    ASSISTANT MARKDOWN TYPOGRAPHY
    A senior-analyst reading rhythm: headings carry full weight + colour and

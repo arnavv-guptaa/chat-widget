@@ -24,7 +24,11 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
 );
 
 const messageContentVariants = cva(
-  "flex flex-col gap-2 overflow-hidden leading-relaxed chat-message-content",
+  // `min-w-0` lets the bubble shrink inside its flex row instead of being forced
+  // to its content's intrinsic width; `break-words` wraps long unbreakable
+  // tokens (URLs, hashes) rather than overflowing. See styles.src.css for the
+  // matching `overflow-wrap: anywhere` rule.
+  "flex min-w-0 flex-col gap-2 overflow-hidden break-words leading-relaxed chat-message-content",
   {
     variants: {
       variant: {
