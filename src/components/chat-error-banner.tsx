@@ -58,7 +58,7 @@ export function ChatErrorBanner({
         <button
           type="button"
           onClick={onRetry}
-          className="text-[12px] font-medium underline-offset-2 hover:underline"
+          className="text-[12px] font-medium underline-offset-2 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)]"
           style={{ color: "hsl(var(--chat-text)/0.85)" }}
         >
           Try again
@@ -69,7 +69,7 @@ export function ChatErrorBanner({
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="flex-shrink-0 -mr-1 -mt-0.5 p-1 rounded hover:bg-[hsl(var(--chat-text)/0.06)] transition-colors"
+          className="flex-shrink-0 -mr-1 -mt-0.5 p-1 rounded hover:bg-[hsl(var(--chat-text)/0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)] transition-colors"
           style={{ color: "hsl(var(--chat-text)/0.5)" }}
         >
           <XIcon className="size-3.5" />

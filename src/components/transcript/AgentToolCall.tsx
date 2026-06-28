@@ -67,10 +67,26 @@ function AgentToolCallImpl({
       <div
         className={cn(
           'flex items-center gap-2 rounded-md px-2 py-1 -mx-2 transition-colors',
-          hasDetail && 'cursor-pointer hover:bg-[var(--chat-hover-bg)]',
+          hasDetail &&
+            'cursor-pointer hover:bg-[var(--chat-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]',
         )}
         style={HOVER}
+        // Only the rows that actually expand a payload are interactive — expose
+        // them as keyboard-operable disclosures; leave static rows as plain text.
+        role={hasDetail ? 'button' : undefined}
+        tabIndex={hasDetail ? 0 : undefined}
+        aria-expanded={hasDetail ? expanded : undefined}
         onClick={hasDetail ? () => setExpanded((v) => !v) : undefined}
+        onKeyDown={
+          hasDetail
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setExpanded((v) => !v);
+                }
+              }
+            : undefined
+        }
       >
         <StatusIcon isPending={isPending} isError={isError} />
 

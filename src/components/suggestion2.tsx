@@ -63,6 +63,7 @@ export function StarterMessageItem({
         "w-full text-left px-3 py-2.5 rounded-lg",
         "bg-transparent",
         "hover:bg-[hsl(var(--chat-text)/0.03)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]",
         "transition-colors duration-150 ease-out",
         "cursor-pointer",
         className
