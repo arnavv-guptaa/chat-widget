@@ -487,6 +487,10 @@ export const PromptInput = ({
     if (event.currentTarget.files) {
       add(event.currentTarget.files);
     }
+    // Reset the input value so picking the same file again still fires a
+    // change event. Without this, selecting file A, removing it, then trying
+    // to add A again is silently dropped (the value hasn't changed).
+    event.currentTarget.value = "";
   };
 
   const handleSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
