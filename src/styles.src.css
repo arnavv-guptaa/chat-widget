@@ -113,6 +113,12 @@
   --chat-widget-width: clamp(320px, 28vw, 500px);
   --chat-widget-height: 100dvh;
 
+  /* Base max-width for user message bubbles. Inherited by every bubble and
+     overridden — directly on .chat-message-content — by the container-width
+     queries below, so the bubble adapts to the widget's own width (not the
+     viewport). Falls back to this value where container queries are unsupported. */
+  --chat-message-max-width: 85%;
+
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   background-color: hsl(var(--chat-background));
@@ -185,8 +191,14 @@
 
 /* Compact layout for narrow containers */
 @container chat-widget (max-width: 380px) {
-  .chat-widget-content {
+  /* Target the bubble itself (a descendant of the container) — container
+     queries never match the container element, which is why setting this on
+     .chat-widget-content (same node as .chat-widget-container) had no effect. */
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 95%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 0.5rem;
   }
 
@@ -201,16 +213,22 @@
 
 /* Standard layout */
 @container chat-widget (min-width: 381px) and (max-width: 500px) {
-  .chat-widget-content {
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 88%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 0.75rem;
   }
 }
 
 /* Spacious layout for wider containers */
 @container chat-widget (min-width: 501px) {
-  .chat-widget-content {
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 85%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 1rem;
   }
 }

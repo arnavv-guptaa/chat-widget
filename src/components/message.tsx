@@ -34,13 +34,13 @@ const messageContentVariants = cva(
       variant: {
         contained: [
           // User messages: compact bubbles on the right (max 85% width)
-          "group-[.is-user]:max-w-[85%] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
           // Assistant messages: no bubble, just text on background (max 100% width)
           "group-[.is-assistant]:max-w-full",
         ],
         flat: [
           // User messages: compact on the right
-          "group-[.is-user]:max-w-[85%] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
           // Assistant messages: full width
           "group-[.is-assistant]:max-w-full",
         ],
