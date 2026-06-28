@@ -66,6 +66,11 @@ export function MessageActions({
           <RotateCcwIcon className="size-3.5" />
         </ActionButton>
       )}
+      {/* The icon swap (copy → check) is the visual cue; this polite live
+          region gives screen-reader users the same confirmation. */}
+      <span aria-live="polite" className="sr-only">
+        {copied ? "Copied to clipboard" : ""}
+      </span>
     </div>
   );
 }
@@ -84,7 +89,7 @@ function ActionButton({ onClick, disabled, ariaLabel, children }: ActionButtonPr
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
-      className="p-1.5 rounded-md transition-colors hover:bg-[hsl(var(--chat-text)/0.06)] disabled:opacity-40 disabled:cursor-not-allowed"
+      className="p-1.5 rounded-md transition-colors hover:bg-[hsl(var(--chat-text)/0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)] disabled:opacity-40 disabled:cursor-not-allowed"
       style={{ color: "hsl(var(--chat-text)/0.55)" }}
     >
       {children}
