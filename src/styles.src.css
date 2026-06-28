@@ -113,6 +113,12 @@
   --chat-widget-width: clamp(320px, 28vw, 500px);
   --chat-widget-height: 100dvh;
 
+  /* Base max-width for user message bubbles. Inherited by every bubble and
+     overridden — directly on .chat-message-content — by the container-width
+     queries below, so the bubble adapts to the widget's own width (not the
+     viewport). Falls back to this value where container queries are unsupported. */
+  --chat-message-max-width: 85%;
+
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   background-color: hsl(var(--chat-background));
@@ -185,8 +191,14 @@
 
 /* Compact layout for narrow containers */
 @container chat-widget (max-width: 380px) {
-  .chat-widget-content {
+  /* Target the bubble itself (a descendant of the container) — container
+     queries never match the container element, which is why setting this on
+     .chat-widget-content (same node as .chat-widget-container) had no effect. */
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 95%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 0.5rem;
   }
 
@@ -201,16 +213,22 @@
 
 /* Standard layout */
 @container chat-widget (min-width: 381px) and (max-width: 500px) {
-  .chat-widget-content {
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 88%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 0.75rem;
   }
 }
 
 /* Spacious layout for wider containers */
 @container chat-widget (min-width: 501px) {
-  .chat-widget-content {
+  .chat-widget-container .chat-message-content {
     --chat-message-max-width: 85%;
+  }
+
+  .chat-widget-content {
     --chat-input-padding: 1rem;
   }
 }
@@ -230,6 +248,16 @@
 
 .chat-widget-container .is-assistant .chat-message-content * {
   color: hsl(var(--chat-text));
+}
+
+/* Long, unbreakable content (URLs, hashes, file paths, code-y tokens) must wrap
+   inside the bubble instead of being clipped by overflow-hidden or forcing the
+   whole column to scroll sideways. `min-width: 0` is the flex-shrink companion
+   to the `min-w-0` utility on MessageContent. Applies to user + assistant. */
+.chat-widget-container .chat-message-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ============================================
@@ -311,8 +339,15 @@
 }
 
 /* Tables — clean hairlines, subtle header. */
+/* Tables can be arbitrarily wide; in a narrow embed `width: 100%` still let a
+   many-column table overflow and get clipped by the bubble's overflow-hidden
+   (losing columns). `display: block` + `overflow-x: auto` makes the table itself
+   a horizontal scroll region, so wide tables stay fully readable at any width. */
 .chat-widget-container .is-assistant .chat-message-content table {
-  width: 100%;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-collapse: collapse;
   margin: 0.6em 0;
   font-size: 0.92em;
@@ -332,6 +367,12 @@
   border: none;
   border-top: 1px solid var(--chat-divider);
   margin: 1em 0;
+}
+
+/* Media — never let an image/embed push past the column; scale it to fit. */
+.chat-widget-container .is-assistant .chat-message-content :is(img, video, canvas, svg) {
+  max-width: 100%;
+  height: auto;
 }
 
 /* ============================================
@@ -428,6 +469,7 @@
   padding: 1rem;
   margin: 0.75rem 0;
   max-height: 24rem;
+  overflow-x: auto;
   overflow-y: auto;
   overflow-anchor: none;
   font-size: 0.8125rem;
@@ -569,6 +611,18 @@
 
 .chat-backdrop-fade-in {
   animation: chat-backdrop-fade-in 0.2s ease-out forwards;
+}
+
+/* Honor reduced-motion for the large entrance animations — the side panel
+   sliding in and the backdrop fade. Each animation ends at the element's
+   resting position/opacity, so disabling it simply shows the element in place
+   with no movement. (The shimmer/caret/tool-detail micro-animations have their
+   own reduced-motion block in the activity section above.) */
+@media (prefers-reduced-motion: reduce) {
+  .chat-widget-container.chat-widget-popup,
+  .chat-backdrop-fade-in {
+    animation: none !important;
+  }
 }
 
 .chat-widget-container[style*="animation"] {
