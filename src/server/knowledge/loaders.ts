@@ -5,7 +5,15 @@
  * SECURITY (ingest runs admin-side, but defence-in-depth still applies):
  *   • url/sitemap/crawl fetch with a timeout + custom UA and an SSRF guard:
  *     reject `file:`/`localhost`/private/loopback/link-local IP ranges and cloud
- *     metadata endpoints; resolve DNS and re-check the resolved IP before fetch.
+ *     metadata endpoints. The validated IP is PINNED to the socket via a custom
+ *     `safeLookup` dispatcher, so the address we vetted is the address we
+ *     connect to — no second, unvalidated DNS resolution (closes the
+ *     DNS-rebinding TOCTOU window where a host re-resolves to an internal IP
+ *     between the check and the connect).
+ *   • redirects are followed MANUALLY (`redirect: 'manual'`), capped at
+ *     `MAX_REDIRECTS` hops, and EVERY hop is re-validated (host + http(s)-only +
+ *     pinned lookup) before it is followed — a 3xx to `http://169.254.169.254`
+ *     or `http://localhost` can't smuggle us into the internal network.
  *   • crawl enforces maxDepth, maxPages, and same-origin / allowDomains so one
  *     ingest can't walk the internet or be steered into the internal network.
  *   • file sources read through the host's StorageAdapter (private, user-bound),
@@ -16,6 +24,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { Agent } from 'undici';
 import type { IngestOptions, IngestSource } from './types';
 import type { StorageAdapter } from '../storage-adapter';
 import { extractTitle, htmlToCleanText } from './extract';
@@ -24,6 +33,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_UA = 'mordn-chat-widget-ingest/1.0 (+https://github.com/arnavv-guptaa/chat-widget)';
 const DEFAULT_MAX_PAGES = 50;
 const DEFAULT_MAX_DEPTH = 2;
+/** Cap redirect hops so a redirect chain can't be used to loop or stall. */
+const MAX_REDIRECTS = 5;
 
 /** A concrete unit to fetch+extract+chunk. */
 export interface LeafSource {
@@ -82,10 +93,94 @@ function isBlockedHostname(host: string): boolean {
 }
 
 /**
- * Validate a URL is safe to fetch: https/http only, not a blocked hostname, and
- * its DNS-resolved address is public. Throws on violation.
+ * A `dns.lookup`-shaped resolver (the shape undici's `connect.lookup` expects)
+ * that RESOLVES the host, rejects if ANY resolved address is non-public, and
+ * hands back the vetted addresses. Because the connector dials these exact
+ * addresses, the IP we validated is the IP we connect to — there is no second
+ * DNS round-trip the attacker can race (DNS-rebinding TOCTOU). A literal-IP host
+ * is validated directly without a resolution.
  */
-async function assertSafeUrl(raw: string, allowDomains?: string[]): Promise<URL> {
+function safeLookup(
+  hostname: string,
+  options: unknown,
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address: string | Array<{ address: string; family: number }>,
+    family?: number,
+  ) => void,
+): void {
+  // undici always calls with { all: true }; honour the requested shape anyway.
+  const wantAll =
+    typeof options === 'object' && options !== null && (options as { all?: boolean }).all === true;
+
+  if (isBlockedHostname(hostname)) {
+    callback(new Error(`Blocked internal hostname: ${hostname}`) as NodeJS.ErrnoException, '');
+    return;
+  }
+
+  // Literal IP: validate in place, no resolution (and so no rebinding window).
+  const literal = isIP(hostname);
+  if (literal !== 0) {
+    if (isBlockedIp(hostname)) {
+      callback(new Error(`Blocked IP: ${hostname}`) as NodeJS.ErrnoException, '');
+      return;
+    }
+    if (wantAll) callback(null, [{ address: hostname, family: literal }]);
+    else callback(null, hostname, literal);
+    return;
+  }
+
+  lookup(hostname, { all: true })
+    .then((results) => {
+      if (results.length === 0) {
+        callback(new Error(`DNS resolution failed: ${hostname}`) as NodeJS.ErrnoException, '');
+        return;
+      }
+      for (const r of results) {
+        if (isBlockedIp(r.address)) {
+          callback(
+            new Error(`Host ${hostname} resolves to blocked IP ${r.address}`) as NodeJS.ErrnoException,
+            '',
+          );
+          return;
+        }
+      }
+      if (wantAll) {
+        callback(
+          null,
+          results.map((r) => ({ address: r.address, family: r.family })),
+        );
+      } else {
+        callback(null, results[0].address, results[0].family);
+      }
+    })
+    .catch((err: unknown) => {
+      callback(
+        err instanceof Error ? (err as NodeJS.ErrnoException) : new Error(String(err)),
+        '',
+      );
+    });
+}
+
+/**
+ * One shared dispatcher whose connector pins every TCP connection (initial
+ * request AND each redirect hop) to a `safeLookup`-validated address. The cast
+ * keeps us decoupled from the exact `LookupFunction` overload shape across
+ * undici/@types versions; `safeLookup` already matches it structurally (the
+ * `net.LookupFunction` signature undici's connector invokes).
+ */
+const safeAgent = new Agent({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connect: { lookup: safeLookup as any },
+});
+
+/**
+ * Validate a URL is safe to *attempt*: https/http only, not a blocked hostname,
+ * and (if a literal IP) public. The authoritative public-IP enforcement happens
+ * at connect time via `safeLookup`; this is the cheap, fail-fast pre-check that
+ * also applies the `allowDomains` policy. Throws on violation.
+ */
+function assertSafeUrl(raw: string, allowDomains?: string[]): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -104,35 +199,55 @@ async function assertSafeUrl(raw: string, allowDomains?: string[]): Promise<URL>
     );
     if (!ok) throw new Error(`Host ${url.hostname} not in allowDomains`);
   }
-  // If the host is a literal IP, check it directly; else resolve and re-check.
-  if (isIP(url.hostname)) {
-    if (isBlockedIp(url.hostname)) throw new Error(`Blocked IP: ${url.hostname}`);
-  } else {
-    const results = await lookup(url.hostname, { all: true }).catch(() => []);
-    if (results.length === 0) throw new Error(`DNS resolution failed: ${url.hostname}`);
-    for (const r of results) {
-      if (isBlockedIp(r.address)) {
-        throw new Error(`Host ${url.hostname} resolves to blocked IP ${r.address}`);
-      }
-    }
+  if (isIP(url.hostname) && isBlockedIp(url.hostname)) {
+    throw new Error(`Blocked IP: ${url.hostname}`);
   }
   return url;
 }
 
+/**
+ * The ONE fetch seam. Centralises every ingestion network rail:
+ *   • per-URL SSRF pre-check (`assertSafeUrl`) + connect-time pinned `safeLookup`
+ *   • manual redirect following with a hop cap, re-validating EACH target
+ *   • request timeout
+ * `allowDomains` (when set) is enforced on the initial URL *and* every redirect
+ * target, so a redirect can't escape the allowlist.
+ */
 async function safeFetch(raw: string, opts: IngestOptions['crawl']): Promise<LoadedContent> {
-  await assertSafeUrl(raw, opts?.allowDomains);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts?.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const res = await fetch(raw, {
+    let current = assertSafeUrl(raw, opts?.allowDomains).toString();
+
+    // `dispatcher` is an undici extension to RequestInit (Node's global fetch is
+    // undici-backed) and isn't in the lib.dom `RequestInit` type — widen here.
+    const init: RequestInit & { dispatcher?: unknown } = {
       signal: controller.signal,
-      redirect: 'follow',
+      redirect: 'manual', // we follow by hand so each target is re-validated
+      dispatcher: safeAgent,
       headers: { 'User-Agent': opts?.userAgent ?? DEFAULT_UA, Accept: 'text/html,text/plain,*/*' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${raw}`);
-    const mediaType = (res.headers.get('content-type') ?? 'text/plain').split(';')[0].trim();
-    const body = await res.text();
-    return { body, mediaType, title: mediaType.includes('html') ? extractTitle(body) : undefined };
+    };
+
+    for (let hop = 0; ; hop++) {
+      const res = await fetch(current, init);
+
+      // Redirect: validate the next hop (host + http(s) + allowDomains + pinned
+      // lookup) BEFORE following it, and cap the chain length.
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location');
+        if (!location) throw new Error(`Redirect without Location from ${current}`);
+        if (hop >= MAX_REDIRECTS) throw new Error(`Too many redirects (>${MAX_REDIRECTS}) for ${raw}`);
+        // Resolve relative redirects against the current URL, then re-vet.
+        const nextUrl = new URL(location, current).toString();
+        current = assertSafeUrl(nextUrl, opts?.allowDomains).toString();
+        continue;
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${current}`);
+      const mediaType = (res.headers.get('content-type') ?? 'text/plain').split(';')[0].trim();
+      const body = await res.text();
+      return { body, mediaType, title: mediaType.includes('html') ? extractTitle(body) : undefined };
+    }
   } finally {
     clearTimeout(timeout);
   }
