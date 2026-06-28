@@ -15,6 +15,12 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 import { cn } from "../utils/cn";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -544,10 +550,12 @@ export const PromptInput = ({
       <span aria-hidden="true" className="hidden" ref={anchorRef} />
       <input
         accept={accept}
+        aria-label="Upload files"
         className="hidden"
         multiple={multiple}
         onChange={handleChange}
         ref={inputRef}
+        title="Upload files"
         type="file"
       />
       <form
@@ -751,18 +759,26 @@ export const PromptInputTools = ({
   />
 );
 
-export type PromptInputButtonProps = ComponentProps<typeof Button>;
+export type PromptInputButtonProps = ComponentProps<typeof Button> & {
+  // Optional hover tooltip. Also rendered as an sr-only label so icon-only
+  // buttons are announced. Matches the Action component's tooltip convention.
+  tooltip?: string;
+  label?: string;
+};
 
 export const PromptInputButton = ({
   variant = "ghost",
   className,
   size,
+  tooltip,
+  label,
+  children,
   ...props
 }: PromptInputButtonProps) => {
   const newSize =
-    (size ?? Children.count(props.children) > 1) ? "default" : "icon";
+    (size ?? Children.count(children) > 1) ? "default" : "icon";
 
-  return (
+  const button = (
     <Button
       className={cn(
         "shrink-0 gap-1.5 rounded-lg",
@@ -774,7 +790,27 @@ export const PromptInputButton = ({
       type="button"
       variant={variant}
       {...props}
-    />
+    >
+      {children}
+      {(label || tooltip) && (
+        <span className="sr-only">{label || tooltip}</span>
+      )}
+    </Button>
+  );
+
+  if (!tooltip) {
+    return button;
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>
+          <p>{tooltip}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };
 
