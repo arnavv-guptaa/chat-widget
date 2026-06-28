@@ -43,6 +43,7 @@
  * in the config and we call that instead.
  */
 
+import 'server-only';
 import type { ModelMessage } from 'ai';
 import type { ChatRequestContext } from './handler-types';
 
@@ -169,7 +170,7 @@ const HEADROOM_STACK = 'mordn_chat_widget';
 export function normalizeCompression(
   option: CompressionOption | undefined,
 ): CompressionConfig | null {
-  if (option === undefined || option === null) return null;
+  if (option === undefined) return null;
   if (option === true) return { enabled: true };
   if (option === false) return null;
   return option.enabled ? option : null;
@@ -355,14 +356,23 @@ async function callHeadroom(
   };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const response = await fetch(`${baseUrl}/v1/compress`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new HeadroomHttpError(response.status);
-  return (await response.json()) as ProxyCompressResponse;
+  // Manual AbortController + timer (rather than AbortSignal.timeout) so the
+  // timeout works identically across runtimes/lib versions. An abort surfaces
+  // as an AbortError, which classifyError() maps to 'timeout'.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${baseUrl}/v1/compress`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new HeadroomHttpError(response.status);
+    return (await response.json()) as ProxyCompressResponse;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function classifyError(err: unknown): CompressionSkipReason {
