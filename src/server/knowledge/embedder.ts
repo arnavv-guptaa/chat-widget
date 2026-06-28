@@ -264,13 +264,13 @@ export function getDefaultEmbedder(opts: GeminiEmbedderOptions = {}): Embedder {
  * `@ai-sdk/google`) — when you'd rather route through the AI SDK than the
  * default REST embedder.
  *
- * @param model       An AI SDK `EmbeddingModel<string>`.
+ * @param model       An AI SDK `EmbeddingModel` (text).
  * @param dimensions  The model's output dimension. MUST equal the vector column
  *                    width of the store (default 1536). A mismatch silently
  *                    returns garbage, so the store asserts it at construction.
  */
 export function createEmbedder(
-  model: EmbeddingModel<string>,
+  model: EmbeddingModel,
   dimensions: number = DEFAULT_EMBEDDING_DIMENSIONS,
 ): Embedder {
   return {

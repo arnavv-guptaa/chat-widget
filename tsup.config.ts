@@ -59,6 +59,10 @@ export default defineConfig([
       'node:crypto',
       'node:dns/promises',
       'node:net',
+      // undici ships inside Node 18+ (global fetch is undici-backed); keep it
+      // external so the SSRF-safe loader resolves it at runtime instead of
+      // bundling it (it isn't a declared dependency).
+      'undici',
     ],
   },
   // CLI tool (chat-widget init + knowledge ingest/sync/status/list)

@@ -62,7 +62,7 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
     public readonly userId: string,
     private readonly db: DrizzleDb,
     private readonly agentId: string,
-    private readonly embeddingModel: EmbeddingModel<string> | null,
+    private readonly embeddingModel: EmbeddingModel | null,
     private readonly extractionModel: LanguageModel | null,
     private readonly ttlDays: number | null,
   ) {}
@@ -240,7 +240,7 @@ export interface DrizzleMemoryOptions {
   /** Agent namespace; scopes every query by (userId, agentId). Default 'default'. */
   agentId?: string;
   /** Embedding model. Omit → keyword-only mode (no embeddings stored). */
-  embeddingModel?: EmbeddingModel<string>;
+  embeddingModel?: EmbeddingModel;
   /** Extraction model. Omit → heuristic extraction (no extra model call). */
   extractionModel?: LanguageModel;
   /** Retention TTL in days. Omit → keep forever. */

@@ -157,7 +157,8 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",
     "tsup": "^8.0.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "undici": "^8.5.0"
   },
   "keywords": [
     "react",
