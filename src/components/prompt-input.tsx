@@ -443,6 +443,14 @@ export const PromptInput = ({
     if (!form) {
       return;
     }
+    // When globalDrop is enabled the document-level handler below already
+    // catches drops anywhere (including over the form). Running this form-level
+    // handler too would call add() twice for a single drop — bubbling fires the
+    // form listener and then the document listener — and attach every file
+    // twice. Let the document handler own drops in that mode.
+    if (globalDrop) {
+      return;
+    }
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
@@ -462,7 +470,7 @@ export const PromptInput = ({
       form.removeEventListener("dragover", onDragOver);
       form.removeEventListener("drop", onDrop);
     };
-  }, [add]);
+  }, [add, globalDrop]);
 
   useEffect(() => {
     if (!globalDrop) {
