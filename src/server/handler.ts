@@ -141,6 +141,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     transformMessages,
     onChatFinish,
     onError,
+    getContext,
+    trustClientContext,
     stopWhen,
     upload,
     maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES,
@@ -190,7 +192,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
   // ── POST /chat ─────────────────────────────────────────────────────────
   async function handleChat(request: Request): Promise<Response> {
-    let body: { messages?: UIMessage[]; id?: string };
+    let body: { messages?: UIMessage[]; id?: string; context?: unknown };
     try {
       body = await request.json();
     } catch {
@@ -262,9 +264,31 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
 
     // System prompt: code (buildSystemPrompt) > hosted > package default.
-    const system = buildSystemPrompt
+    const baseSystem = buildSystemPrompt
       ? await buildSystemPrompt(ctx)
       : hosted?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+
+    // First-class per-turn context (#162). The client-supplied `context` is
+    // UNTRUSTED; the server `getContext` is authoritative. Both paths are
+    // opt-in, so by default nothing is injected and behaviour is unchanged.
+    // The resolved object is rendered as a structured JSON preamble on the
+    // system prompt and is never echoed back to the client.
+    let injectedContext: Record<string, unknown> | null = null;
+    try {
+      if (getContext) {
+        const resolved = await getContext(ctx, body.context);
+        injectedContext = isPlainObject(resolved) ? resolved : null;
+      } else if (trustClientContext && isPlainObject(body.context)) {
+        injectedContext = body.context;
+      }
+    } catch (err) {
+      console.error(
+        '[chat-widget] getContext threw; continuing without injected context:',
+        err,
+      );
+    }
+    const contextPreamble = injectedContext ? formatContextPreamble(injectedContext) : '';
+    const system = contextPreamble ? `${contextPreamble}\n\n${baseSystem}` : baseSystem;
 
     // Single, guarded teardown of the tools' per-request resource. Fires
     // exactly once across all completion paths (finish / error / abort).
@@ -523,6 +547,43 @@ function methodNotAllowed(): Response {
 function defaultErrorMessage(err: unknown): string {
   console.error('[chat-widget] stream error:', err);
   return 'An error occurred while generating the response.';
+}
+
+/** Narrow to a plain (non-array, non-null) object — the only shape we inject as context. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// Cap injected context so a large payload can't dominate the context window.
+// Generous enough for real app state; anything beyond is truncated with a warn.
+const MAX_CONTEXT_CHARS = 8000;
+
+/**
+ * Render injected per-turn context as a clearly-delimited JSON preamble for the
+ * system prompt. Returns '' for an empty or unstringifiable object so the
+ * caller skips prepending. Defensive against oversized payloads.
+ */
+function formatContextPreamble(context: Record<string, unknown>): string {
+  let jsonText: string;
+  try {
+    jsonText = JSON.stringify(context, null, 2);
+  } catch {
+    return ''; // circular / unserialisable — drop rather than crash the turn
+  }
+  if (!jsonText || jsonText === '{}') return '';
+  if (jsonText.length > MAX_CONTEXT_CHARS) {
+    jsonText = `${jsonText.slice(0, MAX_CONTEXT_CHARS)}\n… (context truncated)`;
+    console.warn(
+      `[chat-widget] injected context exceeded ${MAX_CONTEXT_CHARS} chars and was truncated.`,
+    );
+  }
+  return [
+    'Structured, host-provided context about the current user and app state for THIS turn.',
+    'Treat it as authoritative background; do not repeat it verbatim unless asked.',
+    '<host_context>',
+    jsonText,
+    '</host_context>',
+  ].join('\n');
 }
 
 function resolveUploadPolicy(upload?: UploadPolicy): {

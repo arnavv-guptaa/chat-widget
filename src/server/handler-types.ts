@@ -204,6 +204,41 @@ export interface CreateChatHandlerOptions {
   onError?: (error: unknown) => string;
 
   /**
+   * Inject first-class, per-turn context into the system prompt (#162). Called
+   * after authentication with the request context and the widget's
+   * (UNTRUSTED) client-supplied `context`. Return a plain JSON-serialisable
+   * object to inject as authoritative background — this is where you fetch live
+   * server-side data (DB/API: the user's plan, open tickets, current record)
+   * that the model should know about for THIS turn.
+   *
+   * The merged object is rendered as a structured JSON preamble on the system
+   * prompt and is never echoed back to the client. The `clientContext` arg is
+   * passed in only so you can validate/merge it — never trust it blindly (the
+   * browser controls it). Return `null`/`undefined` to inject nothing.
+   * Per-request, not per-session, so long-lived sessions never go stale.
+   */
+  getContext?: (
+    ctx: ChatRequestContext,
+    clientContext: unknown,
+  ) =>
+    | Record<string, unknown>
+    | null
+    | undefined
+    | Promise<Record<string, unknown> | null | undefined>;
+
+  /**
+   * Inject the widget's client-supplied `context` prop directly when no
+   * `getContext` is provided. OFF by default because the browser controls that
+   * value (prompt-injection / data-spoofing risk). Enable only for
+   * non-sensitive context you're comfortable treating as model input. When
+   * `getContext` IS provided it is always authoritative and this flag is
+   * ignored.
+   *
+   * Default: `false`.
+   */
+  trustClientContext?: boolean;
+
+  /**
    * When the model may chain tool calls, how long to let it run before it
    * must answer. Defaults to a bounded step count so a misbehaving tool loop
    * can't run forever. Pass any AI SDK `StopCondition`.

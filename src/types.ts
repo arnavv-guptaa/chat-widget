@@ -62,6 +62,20 @@ export interface ChatWidgetConfig {
   starterPrompts?: StarterPrompt[];
 
   /**
+   * First-class per-turn context (#162). A typed, structured object describing
+   * the user's live app state — current route, the record they're viewing,
+   * their plan/role, etc. — sent alongside every message and injected into the
+   * model's system prompt server-side so answers are aware of what the user is
+   * actually doing (not just generic Q&A).
+   *
+   * SECURITY: the browser controls this value, so the server treats it as
+   * UNTRUSTED. It is only injected when the handler opts in — either via a
+   * server-side `getContext` (authoritative; can validate/merge/override) or
+   * `trustClientContext: true`. Never put secrets here.
+   */
+  context?: ChatContext;
+
+  /**
    * Called when the user dismisses the widget. The widget renders its own
    * close X inside the header (correctly stacked) when this is provided —
    * works in all layouts (popup, inline, page).
@@ -214,6 +228,13 @@ export interface InputPlugin {
    */
   emptyText?: string;
 }
+
+/**
+ * Structured, per-turn context passed from the host app to the model (#162).
+ * A plain JSON-serialisable object. Extend it with your own shape via the
+ * `context` prop, e.g. `context={{ route: '/billing', plan: 'pro' } satisfies ChatContext}`.
+ */
+export type ChatContext = Record<string, unknown>;
 
 export interface StarterPrompt {
   /**
