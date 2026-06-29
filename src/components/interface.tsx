@@ -696,6 +696,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           message={m}
           isFirst={i === 0}
           isLast={i === messages.length - 1}
+          prevRole={i > 0 ? messages[i - 1].role : undefined}
           status={status}
           toolRenderers={config?.toolRenderers}
           onRegenerate={handleRegenerate}

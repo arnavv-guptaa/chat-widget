@@ -37,6 +37,10 @@ interface MessageItemProps {
   isFirst: boolean;
   /** Is this the last message in the list? (drives streaming + regenerate UI) */
   isLast: boolean;
+  /** Role of the previous message — drives role-aware spacing: a new exchange
+   *  (user after assistant) gets a larger gap; an assistant reply to its user
+   *  sits tighter, so each Q&A reads as a pair. */
+  prevRole?: UIMessage['role'];
   /** Chat status — primitive; flips only at stream start/end. */
   status: ChatStatus;
   /** Host-supplied per-tool renderers (stable: memoized in ChatWidget config). */
@@ -45,7 +49,7 @@ interface MessageItemProps {
   onRegenerate?: () => void;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRegenerate }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, onRegenerate }: MessageItemProps) {
   // Derive part subsets once per message (recomputed only when parts change).
   const sourceParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'source-url') ?? [],
@@ -88,8 +92,21 @@ function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRe
   const turnState: TurnState =
     status === 'error' ? 'error' : isStreamingThisMessage ? 'streaming' : 'done';
 
+  // Role-aware spacing (assistant-ui rhythm): the assistant's reply sits CLOSE
+  // to the user message it answers (one exchange), while a NEW user turn after
+  // an assistant reply gets a LARGER gap to separate exchanges. First message
+  // has no top margin.
+  const spacing = isFirst
+    ? undefined
+    : message.role === 'assistant' && prevRole === 'user'
+      ? 'mt-4' // reply to a question — keep the pair tight (16px)
+      : 'mt-6'; // new exchange — a touch more room (24px), matching assistant-ui
+
   return (
-    <div className={isFirst ? undefined : 'mt-6'}>
+    // `group` so the action row can reveal on hover; `relative` so the
+    // absolutely-positioned action row anchors to this message and floats in the
+    // gap below it (instead of adding height).
+    <div className={cn('group relative', spacing)}>
       {/* Sources — all inside one SourcesContent (Radix Collapsible wants a
           single Content child to toggle). */}
       {message.role === 'assistant' && sourceParts.length > 0 && (
@@ -153,9 +170,15 @@ function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRe
       )}
 
       {/* Action row — Copy on every completed assistant message; Regenerate
-          only on the last (it replays the most recent turn). */}
+          only on the last (it replays the most recent turn). Hidden by default
+          and revealed on hover/focus of the message; the LAST message keeps them
+          visible (copy/regen are most-used on the newest reply). */}
       {showActions && (
-        <MessageActions text={messageText} onRegenerate={showRegenerate ? onRegenerate : undefined} />
+        <MessageActions
+          text={messageText}
+          onRegenerate={showRegenerate ? onRegenerate : undefined}
+          alwaysVisible={isLast}
+        />
       )}
     </div>
   );

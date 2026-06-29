@@ -23,6 +23,9 @@ export interface MessageActionsProps {
   onRegenerate?: () => void;
   /** Disabled state for regenerate (e.g. while a new turn is streaming). */
   regenerateDisabled?: boolean;
+  /** When true, actions stay visible; otherwise they reveal on hover/focus of
+   *  the parent message (which must be a `group`). Used for the last message. */
+  alwaysVisible?: boolean;
   className?: string;
 }
 
@@ -30,6 +33,7 @@ export function MessageActions({
   text,
   onRegenerate,
   regenerateDisabled,
+  alwaysVisible,
   className,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
@@ -48,9 +52,15 @@ export function MessageActions({
   return (
     <div
       className={cn(
-        "flex items-center gap-1 mt-1.5 -ml-1.5",
-        // Pulled left a touch so the icons line up with the message
-        // text edge instead of its padding box.
+        "flex items-center gap-1 -ml-1.5 transition-opacity duration-150",
+        alwaysVisible
+          // LAST message: in-flow (small top margin) so it never overlaps the
+          // composer sitting just below, and stays visible.
+          ? "mt-1.5 opacity-100"
+          // Other messages: ABSOLUTELY positioned in the gap below the message so
+          // the hidden row adds NO height (it was inflating the assistant→user
+          // gap). Reveals on hover/focus of the message group.
+          : "absolute left-0 top-full mt-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto",
         className,
       )}
     >
