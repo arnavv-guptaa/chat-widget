@@ -253,13 +253,19 @@ export async function compressModelMessages(
     const minChars = config.minChars ?? DEFAULT_MIN_CHARS;
     if (totalChars < minChars) return { messages, result: skip('below-threshold') };
 
-    // 2. Compress the batch in one call. Each slot becomes a standalone user
-    //    message; Headroom's ContentRouter still detects JSON/code/prose from
-    //    the content itself, so the right compressor runs per slot.
+    // 2. Compress the batch in one call. Each slot is sent UNDER ITS ORIGINAL
+    //    ROLE and in conversation order — Headroom's ContentRouter is both
+    //    role-aware (it protects user/system and the most-recent turn) and
+    //    recency-aware (it protects recent code, crushes older bulky JSON), so
+    //    the order and role carry the signal it needs. Sending everything as a
+    //    single `user` blob (the original behaviour) made Headroom protect the
+    //    whole batch and saved nothing. `candidates` preserves message order
+    //    because `collectSlots` walks messages in order, so the 1:1 index
+    //    write-back below still lines up exactly.
     let resp: ProxyCompressResponse;
     try {
       resp = await callHeadroom(
-        candidates.map((s) => ({ role: 'user' as const, content: s.text })),
+        candidates.map((s) => ({ role: s.role, content: s.text })),
         config,
         modelLabel,
       );
@@ -387,8 +393,16 @@ function classifyError(err: unknown): CompressionSkipReason {
 /**
  * A compressible string payload, plus a closure that writes a compressed
  * replacement back into a (cloned) message array at exactly the right place.
+ *
+ * `role` is the ORIGINAL message role this text came from. It is forwarded to
+ * Headroom verbatim because Headroom's ContentRouter keys its policy off the
+ * role: it PROTECTS `user`/`system` (and the most-recent turn / recent code)
+ * and only crushes bulky `assistant`/`tool` content. Sending everything as
+ * `user` (the original PR's behaviour) makes Headroom protect every slot, so
+ * nothing compresses. Preserving the real role is what unlocks the savings.
  */
 interface Slot {
+  role: 'system' | 'user' | 'assistant' | 'tool';
   text: string;
   apply: (out: ModelMessage[], compressed: string) => void;
 }
@@ -402,10 +416,12 @@ function collectSlots(messages: ModelMessage[]): Slot[] {
     const role = (msg as any).role as string;
     const content = (msg as any).content;
 
-    // system: content is a plain string.
+    // system: content is a plain string. (Headroom protects system messages —
+    // we still emit the slot so the batch maps 1:1; it comes back unchanged.)
     if (role === 'system') {
       if (typeof content === 'string') {
         slots.push({
+          role: 'system',
           text: content,
           apply: (out, c) => {
             out[i] = { ...(out[i] as any), content: c } as ModelMessage;
@@ -419,6 +435,7 @@ function collectSlots(messages: ModelMessage[]): Slot[] {
     if (role === 'user' || role === 'assistant') {
       if (typeof content === 'string') {
         slots.push({
+          role,
           text: content,
           apply: (out, c) => {
             out[i] = { ...(out[i] as any), content: c } as ModelMessage;
@@ -430,6 +447,7 @@ function collectSlots(messages: ModelMessage[]): Slot[] {
         content.forEach((part: any, p: number) => {
           if (part && part.type === 'text' && typeof part.text === 'string') {
             slots.push({
+              role,
               text: part.text,
               apply: (out, c) => replacePart(out, i, p, (prev) => ({ ...prev, text: c })),
             });
@@ -447,6 +465,7 @@ function collectSlots(messages: ModelMessage[]): Slot[] {
           const read = readToolOutput(part);
           if (read && read.text.length > 0) {
             slots.push({
+              role: 'tool',
               text: read.text,
               apply: (out, c) =>
                 replacePart(out, i, p, (prev) => ({
