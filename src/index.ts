@@ -39,7 +39,7 @@ export type {
   ToolPartLike,
 } from './types';
 
-export type { ChatWidgetProps } from './ChatWidget';
+export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';
 
 // Hooks
 export * from './hooks/use-chat-theme';
