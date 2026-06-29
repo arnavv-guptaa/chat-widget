@@ -68,6 +68,7 @@ import {
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
+import type { FollowUpMessage } from '../types';
 
 type Conversation = {
   id: string;
@@ -110,6 +111,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // AI follow-up chips (#134), computed once per completed assistant turn and
+  // cleared at the start of the next turn. The ref tracks which assistant
+  // message the current chips belong to, so generation runs exactly once.
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const followUpsForRef = useRef<string | null>(null);
 
   // Auto-dismiss upload errors after 5 seconds
   useEffect(() => {
@@ -701,6 +708,50 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [messages, status, config?.toolRenderers, handleRegenerate],
   );
 
+  // Follow-up chips (#134): after an assistant turn settles, derive up to
+  // `max` suggestions (host generator or static list). Off the hot path —
+  // only runs at status 'ready'. Cleared once when the next turn starts so the
+  // chips never linger over a fresh question or flicker during streaming.
+  useEffect(() => {
+    const fu = config?.followUps;
+    const last = messages[messages.length - 1];
+    const active =
+      !!fu && fu.enabled !== false && status === 'ready' && !!last && last.role === 'assistant';
+    if (!active) {
+      if (followUpsForRef.current !== null) {
+        followUpsForRef.current = null;
+        setFollowUps([]);
+      }
+      return;
+    }
+    if (followUpsForRef.current === last.id) return; // already computed this turn
+    followUpsForRef.current = last.id;
+    const max = fu.max ?? 3;
+    if (typeof fu.generate === 'function') {
+      const textOf = (m: { role: string; parts?: Array<{ type: string; text?: string }> }): FollowUpMessage => ({
+        role: m.role,
+        content: (m.parts ?? [])
+          .filter((p) => p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text as string)
+          .join('\n\n'),
+      });
+      const simplified = messages.map(textOf);
+      let cancelled = false;
+      Promise.resolve()
+        .then(() => fu.generate!(simplified))
+        .then((s) => {
+          if (!cancelled) setFollowUps((Array.isArray(s) ? s : []).filter(Boolean).slice(0, max));
+        })
+        .catch(() => {
+          if (!cancelled) setFollowUps([]);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setFollowUps((fu.suggestions ?? []).slice(0, max));
+  }, [messages, status, config?.followUps]);
+
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
     if (!config?.userId) return; // Wait for userId
 
@@ -1104,6 +1155,17 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 }}
               />
             )
+          )}
+
+          {/* AI follow-up chips (#134) — shown after a completed assistant
+              reply; tapping one sends it as the next message. Rendered as
+              rounded pills in the StarterMessages style. */}
+          {followUps.length > 0 && (
+            <Suggestions className="mb-3">
+              {followUps.map((s, i) => (
+                <Suggestion key={`${s}-${i}`} suggestion={s} onClick={(text) => handleSubmit({ text })} />
+              ))}
+            </Suggestions>
           )}
 
           {/* Inline error banner — appears between the message stream
