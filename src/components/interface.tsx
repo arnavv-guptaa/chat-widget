@@ -129,6 +129,17 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // empty-state gate stays closed during tab switches too.
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
+  // ── History lazy-loading (reverse pagination) ───────────────────────────────
+  // We load the most-recent page on open and fetch older pages when the user
+  // scrolls near the top. `hasMoreHistory` gates further fetches; `oldestTs` is
+  // the `before` cursor for the next page; the ref guards against concurrent /
+  // duplicate fetches. PAGE_SIZE is the per-request count.
+  const HISTORY_PAGE_SIZE = 30;
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const oldestTsRef = useRef<string | null>(null);
+  const loadingOlderRef = useRef(false);
+
   // Track last synced tab to prevent infinite loops
   const lastSyncedTabId = useRef<string>('');
 
@@ -302,10 +313,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     try {
-      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}`);
+      // Initial load: only the most-recent page. Older messages stream in as the
+      // user scrolls up (loadOlderMessages), so a long conversation opens fast
+      // and pinned to the bottom instead of pulling its whole history at once.
+      const response = await fetch(
+        `${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}&limit=${HISTORY_PAGE_SIZE}`,
+      );
       if (response.ok) {
         const data = await response.json();
         const loadedMessages = data.messages || [];
+
+        // Seed the reverse-pagination cursor from the oldest loaded message.
+        oldestTsRef.current = loadedMessages.length ? loadedMessages[0].created_at ?? null : null;
+        setHasMoreHistory(Boolean(data.hasMore));
 
         // Set messages after ensuring activeTabId state has updated
         setTimeout(() => {
@@ -315,6 +335,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // Conversation doesn't exist yet - this is normal for new chats
         console.log('Conversation not found in database yet (new chat)');
         // Clear messages for new chat
+        oldestTsRef.current = null;
+        setHasMoreHistory(false);
         setMessages([]);
       } else {
         console.error('Error loading messages:', response.status, response.statusText);
@@ -323,6 +345,55 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       console.error('Error loading conversation:', error);
     }
   };
+
+  // Fetch the previous page of history (older messages) and PREPEND it. Called
+  // when the user scrolls near the top. Compensates the scroll position so the
+  // viewport stays put as content is inserted above it (no jump). Guarded by a
+  // ref so overlapping scroll events don't double-fetch the same page.
+  const scrollViewportRef = useRef<HTMLElement | null>(null);
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreHistory || !oldestTsRef.current) return;
+    if (!config?.userId || !activeTabId) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    const viewport = scrollViewportRef.current;
+    const prevScrollHeight = viewport?.scrollHeight ?? 0;
+    const prevScrollTop = viewport?.scrollTop ?? 0;
+
+    try {
+      const res = await fetch(
+        `${config.apiBase ?? '/api/chat'}/history/${activeTabId}?userId=${config.userId}` +
+          `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const older = data.messages || [];
+      if (older.length === 0) {
+        setHasMoreHistory(false);
+        return;
+      }
+      oldestTsRef.current = older[0].created_at ?? oldestTsRef.current;
+      setHasMoreHistory(Boolean(data.hasMore));
+      // Prepend, de-duping by id (defensive against overlap at the boundary).
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id));
+        const fresh = older.filter((m: { id: string }) => !existing.has(m.id));
+        return [...fresh, ...prev];
+      });
+      // After the prepend renders, restore scroll so the viewport doesn't jump:
+      // new scrollTop = old scrollTop + (new height − old height).
+      requestAnimationFrame(() => {
+        const v = scrollViewportRef.current;
+        if (v) v.scrollTop = prevScrollTop + (v.scrollHeight - prevScrollHeight);
+      });
+    } catch (err) {
+      console.error('Error loading older messages:', err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [hasMoreHistory, config?.userId, config?.apiBase, activeTabId, setMessages]);
 
   // Tab management functions
   // Generate unique tab ID with better collision avoidance
@@ -1081,8 +1152,27 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           </div>
         </div>
 
-        <Conversation className="flex-1 max-w-full ai-assistant-scrollbar">
+        <Conversation
+          className="flex-1 max-w-full ai-assistant-scrollbar"
+          // Capture the scroll viewport (StickToBottom owns it) so reverse-
+          // pagination can read/restore scroll position; trigger loadOlderMessages
+          // when scrolled near the top.
+          onScrollRef={(el) => {
+            scrollViewportRef.current = el;
+          }}
+          onScroll={(e: React.UIEvent<HTMLElement>) => {
+            const el = e.currentTarget;
+            if (el.scrollTop < 120 && hasMoreHistory && !loadingOlderRef.current) {
+              void loadOlderMessages();
+            }
+          }}
+        >
           <ConversationContent className="max-w-[96%] mx-auto py-6">
+            {hasMoreHistory && (
+              <div className="flex justify-center py-2" aria-hidden={!loadingOlder}>
+                {loadingOlder && <Loader size={14} />}
+              </div>
+            )}
             {renderedMessages}
             {showThinking && (
               <div className="mt-6">

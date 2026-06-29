@@ -551,11 +551,29 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const conversation = await store.getConversation(conversationId);
     if (!conversation) return json({ error: 'Conversation not found' }, 404);
 
-    const messages = await store.listMessages(conversationId, { limit: 100 });
+    // Pagination for reverse-scroll history loading. `limit` = page size (the
+    // store clamps it); `before` = an ISO timestamp — return only messages
+    // OLDER than it, for "load earlier messages" when the user scrolls up. Omit
+    // `before` for the initial (most-recent) page. We fetch limit+1 to detect
+    // whether an older page exists (`hasMore`) without a second query.
+    const url = new URL(request.url);
+    const limitParam = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 30;
+    const beforeParam = url.searchParams.get('before');
+    const before = beforeParam ? new Date(beforeParam) : undefined;
+
+    // The store fetches newest-first then reverses → returns CHRONOLOGICAL
+    // (oldest→newest). We over-fetch by one to detect an older page; with
+    // chronological order, the overflow (oldest) message is at the FRONT, so we
+    // drop the first element and keep the newest `limit`.
+    const page = await store.listMessages(conversationId, { limit: limit + 1, before });
+    const hasMore = page.length > limit;
+    const ordered = hasMore ? page.slice(page.length - limit) : page;
+
     // Re-sign attachment URLs so reopened conversations show live thumbnails.
     const rehydrated = storage
-      ? await Promise.all(messages.map((m) => resignMessageAttachments(m, storage)))
-      : messages;
+      ? await Promise.all(ordered.map((m) => resignMessageAttachments(m, storage)))
+      : ordered;
 
     return jsonNoStore({
       conversation: {
@@ -563,6 +581,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         title: conversation.title,
         metadata: conversation.metadata,
       },
+      hasMore,
       messages: rehydrated.map((m) => ({
         id: m.id,
         role: m.role,
