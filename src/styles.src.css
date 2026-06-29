@@ -6,6 +6,30 @@
 @import "tailwindcss/utilities" layer(chat-widget);
 @source "./**/*.tsx";
 
+/* Register the shadcn color tokens with Tailwind so utilities like bg-popover /
+   bg-primary / bg-accent / text-muted-foreground are GENERATED. Tailwind v4 only
+   emits a color utility for names it knows via @theme — a bare --color-* custom
+   property on a selector isn't enough. The VALUES are indirected through
+   --chat-* vars set per light/dark in .chat-widget-container below, so the
+   utilities resolve to the right palette in each mode. Without this block these
+   surfaces rendered transparent (the ui/ primitives reference these classes). */
+@theme {
+  --color-primary: var(--chat-c-primary);
+  --color-primary-foreground: var(--chat-c-primary-foreground);
+  --color-background: var(--chat-c-background);
+  --color-foreground: var(--chat-c-foreground);
+  --color-popover: var(--chat-c-popover);
+  --color-popover-foreground: var(--chat-c-popover-foreground);
+  --color-card: var(--chat-c-card);
+  --color-card-foreground: var(--chat-c-card-foreground);
+  --color-muted: var(--chat-c-muted);
+  --color-muted-foreground: var(--chat-c-muted-foreground);
+  --color-accent: var(--chat-c-accent);
+  --color-accent-foreground: var(--chat-c-accent-foreground);
+  --color-input: var(--chat-c-input);
+  --color-ring: var(--chat-c-ring);
+}
+
 /* Streamdown uses border-border utility - define it to use our border color */
 .chat-widget-container .border-border {
   border-color: var(--color-border);
@@ -108,6 +132,28 @@
   /* Override Tailwind's border color for Streamdown compatibility */
   --color-border: var(--chat-divider);
 
+  /* shadcn theme tokens → mapped onto the widget's --chat-* values. The ui/
+     primitives (button, popover, tooltip, dialog, dropdown) are styled with
+     Tailwind utilities like bg-popover / bg-primary / bg-accent, which in
+     Tailwind v4 resolve from --color-<name>. Those were never defined, so every
+     such surface rendered TRANSPARENT/unstyled. Defining them here (once) fixes
+     all of them. These feed the @theme tokens above (so the utilities resolve to
+     these per-mode values). Full hsl() colors, not raw triplets. */
+  --chat-c-primary:              hsl(var(--chat-primary));
+  --chat-c-primary-foreground:   hsl(var(--chat-background));
+  --chat-c-background:           hsl(var(--chat-background));
+  --chat-c-foreground:           hsl(var(--chat-text));
+  --chat-c-popover:              hsl(var(--chat-surface-deep));
+  --chat-c-popover-foreground:   hsl(var(--chat-text));
+  --chat-c-card:                 hsl(var(--chat-surface-deep));
+  --chat-c-card-foreground:      hsl(var(--chat-text));
+  --chat-c-muted:                hsl(var(--chat-muted));
+  --chat-c-muted-foreground:     hsl(var(--chat-text-muted));
+  --chat-c-accent:               hsl(var(--chat-surface));
+  --chat-c-accent-foreground:    hsl(var(--chat-text));
+  --chat-c-input:                var(--chat-divider);
+  --chat-c-ring:                 hsl(var(--chat-primary) / 0.4);
+
   /* Sizing tokens - uses clamp() for responsive sizing with bounds
      clamp(min, preferred, max) - preferred is viewport-relative */
   --chat-widget-width: clamp(320px, 28vw, 500px);
@@ -151,6 +197,23 @@
 
   /* Override Tailwind's border color for Streamdown compatibility */
   --color-border: var(--chat-divider);
+
+  /* shadcn theme tokens (dark) — same mapping; the --chat-* values above already
+     hold the dark palette, so these resolve to dark colors automatically. */
+  --chat-c-primary:              hsl(var(--chat-primary));
+  --chat-c-primary-foreground:   hsl(var(--chat-background));
+  --chat-c-background:           hsl(var(--chat-background));
+  --chat-c-foreground:           hsl(var(--chat-text));
+  --chat-c-popover:              hsl(var(--chat-surface));
+  --chat-c-popover-foreground:   hsl(var(--chat-text));
+  --chat-c-card:                 hsl(var(--chat-surface));
+  --chat-c-card-foreground:      hsl(var(--chat-text));
+  --chat-c-muted:                hsl(var(--chat-muted));
+  --chat-c-muted-foreground:     hsl(var(--chat-text-muted));
+  --chat-c-accent:               hsl(var(--chat-surface-hover));
+  --chat-c-accent-foreground:    hsl(var(--chat-text));
+  --chat-c-input:                var(--chat-divider);
+  --chat-c-ring:                 hsl(var(--chat-primary) / 0.4);
 }
 
 /* ============================================
@@ -274,12 +337,18 @@
   font-weight: 600;
 }
 
-/* Lists — tight, readable, muted markers. */
+/* Lists — tight, readable, muted markers. Tailwind's preflight resets
+   `list-style: none` on ul/ol globally, which removed the bullet/number markers
+   (leaving only the hanging indent). Restore them explicitly per list type. */
 .chat-widget-container .is-assistant .chat-message-content :is(ul, ol) {
   color: hsl(var(--chat-text) / 0.88);
   margin: 0.4em 0;
   padding-left: 1.35em;
 }
+.chat-widget-container .is-assistant .chat-message-content ul { list-style-type: disc; }
+.chat-widget-container .is-assistant .chat-message-content ol { list-style-type: decimal; }
+/* Nested lists get the conventional second-level marker. */
+.chat-widget-container .is-assistant .chat-message-content ul ul { list-style-type: circle; }
 .chat-widget-container .is-assistant .chat-message-content li { margin: 0.2em 0; }
 .chat-widget-container .is-assistant .chat-message-content li::marker { color: hsl(var(--chat-text-subtle)); }
 
@@ -312,7 +381,13 @@
 
 /* Tables — clean hairlines, subtle header. */
 .chat-widget-container .is-assistant .chat-message-content table {
-  width: 100%;
+  /* `display: block` + overflow-x makes a wide (many-column) table its own
+     horizontal scroll region instead of overflowing/clipping the narrow widget
+     column. `width: max-content` lets it size to its content up to that scroll. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0.6em 0;
   font-size: 0.92em;
@@ -422,13 +497,17 @@
    CODE BLOCKS
    ============================================ */
 
+/* Streamdown already renders the code-block chrome (the bordered container, the
+   language header, and the copy/download buttons). So `pre` must NOT add its own
+   box — a background + border-radius here produced a SECOND nested box inside
+   Streamdown's. Keep this minimal: just code typography + horizontal scroll for
+   long lines. No background, no border, no rounded corners, no max-height (the
+   container owns those). */
 .chat-widget-container pre {
-  background-color: hsl(var(--chat-text) / 0.03);
-  border-radius: 0.75rem;
-  padding: 1rem;
-  margin: 0.75rem 0;
-  max-height: 24rem;
-  overflow-y: auto;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
   overflow-anchor: none;
   font-size: 0.8125rem;
   line-height: 1.6;
@@ -459,6 +538,91 @@
   display: block;
   height: 1px;
   overflow-anchor: auto;
+}
+
+/* ============================================
+   COLLAPSIBLE CODE BLOCK
+   A compact, collapsed-by-default pill for fenced code in assistant messages
+   (language · N lines · copy) that expands inline on click. Replaces the inline
+   code wall. See components/collapsible-code.tsx.
+   ============================================ */
+.chat-widget-container .chat-code-collapsible {
+  border: 1px solid hsl(var(--chat-border));
+  border-radius: 0.625rem;
+  overflow: hidden;
+  background-color: hsl(var(--chat-surface));
+}
+.chat-widget-container .chat-code-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+}
+.chat-widget-container .chat-code-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.1rem 0.2rem;
+  font-size: 0.78rem;
+  color: hsl(var(--chat-text));
+  text-align: left;
+}
+.chat-widget-container .chat-code-chevron {
+  transition: transform 0.15s ease;
+  flex: none;
+  color: hsl(var(--chat-text-muted));
+}
+.chat-widget-container .chat-code-chevron-open {
+  transform: rotate(90deg);
+}
+.chat-widget-container .chat-code-lang {
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.chat-widget-container .chat-code-meta {
+  color: hsl(var(--chat-text-muted));
+}
+.chat-widget-container .chat-code-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--chat-text-muted));
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.chat-widget-container .chat-code-copy:hover {
+  background-color: hsl(var(--chat-surface-hover));
+  color: hsl(var(--chat-text));
+}
+/* The expanded code body — its own scroll region, no extra box (the collapsible
+   container is the box). */
+.chat-widget-container .chat-code-body {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-top: 1px solid hsl(var(--chat-border));
+  background-color: hsl(var(--chat-surface-deep));
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: hsl(var(--chat-text));
+}
+.chat-widget-container .chat-code-body code {
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  white-space: pre;
 }
 
 /* ============================================
@@ -644,6 +808,73 @@
 .chat-widget-container .chat-widget-resize-handle:hover,
 .chat-widget-container .chat-widget-resize-handle:active {
   background-color: hsl(var(--chat-primary) / 0.2);
+}
+
+/* ============================================
+   PROMPT BOX (composer pill container)
+   The rounded, bordered, soft-shadowed container around the composer — the
+   prompt-kit / PromptBox look. Uses the widget's own theme tokens so it sits on
+   the surface color and themes in light/dark. The two-zone layout (textarea on
+   top, action row below) is structured in interface.tsx.
+   ============================================ */
+.chat-widget-container .chat-prompt-box {
+  border: 1px solid hsl(var(--chat-border));
+  border-radius: 1rem; /* 16px */
+  background-color: hsl(var(--chat-surface-deep));
+  box-shadow: var(--chat-shadow-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-widget-container .chat-prompt-box:focus-within {
+  border-color: hsl(var(--chat-primary) / 0.4);
+  box-shadow: var(--chat-shadow-md);
+}
+
+/* ============================================
+   SEND BUTTON
+   The Button `default` variant relies on bg-primary/text-primary-foreground,
+   which the widget's scoped theme doesn't define (it uses --chat-primary), so
+   the send button rendered with no fill. Style it explicitly: solid primary
+   circle with a contrasting icon, a slightly-dimmed hover, and a muted disabled
+   state (so it reads as inactive when the input is empty, without disappearing).
+   ============================================ */
+.chat-widget-container button.chat-send-button {
+  background-color: hsl(var(--chat-primary));
+  color: hsl(var(--chat-background));
+  /* Force a perfect circle — beat any rounded-md/rounded-lg from the Button base
+     so it never reads as "square with radius". */
+  border-radius: 9999px;
+  width: 2.25rem;   /* 36px */
+  height: 2.25rem;
+  flex: none;       /* don't let the flex row squish it into an oval */
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.chat-widget-container button.chat-send-button:hover:not(:disabled) {
+  background-color: hsl(var(--chat-primary) / 0.9);
+}
+
+.chat-widget-container button.chat-send-button:disabled {
+  background-color: hsl(var(--chat-primary) / 0.35);
+  color: hsl(var(--chat-background));
+  opacity: 1; /* override the Button's default disabled:opacity-50 — the muted fill already signals disabled */
+  cursor: not-allowed;
+}
+
+/* ============================================
+   ATTACH BUTTON
+   Plain icon button — no background fill, ever. The ghost variant added a
+   circular hover background that looked out of place next to the textarea; here
+   we keep it transparent and only darken the icon on hover.
+   ============================================ */
+.chat-widget-container .chat-attach-button,
+.chat-widget-container .chat-attach-button:hover,
+.chat-widget-container .chat-attach-button:focus-visible {
+  background-color: transparent;
+}
+
+.chat-widget-container .chat-attach-button:hover:not(:disabled) {
+  color: hsl(var(--chat-text));
 }
 
 /* ============================================

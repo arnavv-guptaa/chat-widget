@@ -266,7 +266,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       <PromptInputButton
         variant="ghost"
         size="icon"
-        className="size-9 rounded-full text-muted-foreground"
+        // No hover background (the ghost circle looked odd next to the textarea);
+        // just darken the icon on hover. `chat-attach-button` (styles.src.css)
+        // forces the transparent background over the ghost variant.
+        className="chat-attach-button size-9 text-muted-foreground"
         aria-label="Attach files"
         onClick={() => attachments.openFileDialog()}
       >
@@ -1125,6 +1128,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
           <PromptInput
             onSubmit={handleSubmit}
+            className="chat-prompt-box"
             globalDrop
             multiple
             accept={config?.features?.fileUploadAccept ?? 'image/*'}
@@ -1149,25 +1153,26 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <PromptInputAttachments>
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>
-              {/* One row (matches the build-page PromptBar): editor grows on the
-                  left, actions inline on the right. `items-end` keeps the send
-                  button anchored to the bottom as the editor grows multi-line. */}
-              <div className="flex items-end gap-1.5 px-2 py-2">
+              {/* Two-zone composer (prompt-kit / PromptBox style): the editor
+                  sits on its own row up top; a bottom action row carries attach
+                  on the left and send on the right. The outer `chat-prompt-box`
+                  rule (styles.src.css) gives the pill container + border + shadow,
+                  using the widget's --chat-* theme so it themes in light/dark. */}
+              <PromptInputTextarea
+                ref={inputRef}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={inputPlugins.onKeyDown}
+                value={input}
+                className="min-h-0 w-full px-3 pt-3 pb-1 leading-7"
+              />
+              <div className="flex items-center gap-1.5 px-2 pb-2">
                 {config?.features?.fileUpload === true && <AttachButton />}
-                <PromptInputTextarea
-                  ref={inputRef}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={inputPlugins.onKeyDown}
-                  value={input}
-                  className="min-h-0 flex-1 px-1 py-1.5 leading-7"
-                />
                 <PromptInputSubmit
-                  // Circular send button, sized to match the attach button
-                  // (size-9) so the row reads as balanced. Always visible; the
-                  // Button's disabled:opacity-50 mutes it when empty, full-strength
-                  // primary when there's input. Stays enabled mid-stream so the
-                  // stop click is reachable.
-                  className="size-9 rounded-full p-0 [&_svg]:size-4"
+                  // Filled circular send button, right-aligned in the action row.
+                  // The Button `default` variant's bg-primary now resolves (theme
+                  // tokens defined in styles.src.css), but we keep the explicit
+                  // `chat-send-button` rule for the muted-disabled treatment.
+                  className="chat-send-button ml-auto size-9 rounded-full p-0 [&_svg]:size-4"
                   disabled={status === 'streaming' || status === 'submitted' ? false : !input}
                   status={status}
                   onStop={stop}
