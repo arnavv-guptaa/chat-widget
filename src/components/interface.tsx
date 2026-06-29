@@ -68,6 +68,7 @@ import {
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
+import type { StarterPrompt } from '../types';
 
 type Conversation = {
   id: string;
@@ -110,6 +111,35 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Dynamic starter prompts (#164). Resolved once when first needed; falls
+  // back to the static config.starterPrompts on empty result or error. The
+  // one-shot ref guards against re-resolving if the host passes an inline
+  // (non-memoised) getStarterPrompts.
+  const [dynamicPrompts, setDynamicPrompts] = useState<StarterPrompt[] | null>(null);
+  const dynamicPromptsResolved = useRef(false);
+  useEffect(() => {
+    if (dynamicPromptsResolved.current) return;
+    const getPrompts = config?.getStarterPrompts;
+    if (typeof getPrompts !== 'function') return;
+    dynamicPromptsResolved.current = true;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => getPrompts())
+      .then((p: StarterPrompt[]) => {
+        if (!cancelled && Array.isArray(p) && p.length > 0) setDynamicPrompts(p);
+      })
+      .catch(() => {
+        /* fall back to static starterPrompts */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.getStarterPrompts]);
+
+  // Dynamic prompts win when present; otherwise the static list.
+  const effectiveStarterPrompts: StarterPrompt[] | undefined =
+    (dynamicPrompts && dynamicPrompts.length > 0 ? dynamicPrompts : config?.starterPrompts) ?? undefined;
 
   // Auto-dismiss upload errors after 5 seconds
   useEffect(() => {
@@ -1215,14 +1245,32 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <div className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" style={{ color: 'hsl(var(--chat-text-muted))' }} />
             </div>
           ) : (
-            messages.length === 0 && status !== 'submitted' && config?.starterPrompts && (
-              <StarterMessages
-                prompts={config.starterPrompts}
-                onPromptSelect={(prompt) => {
-                  handleSubmit({ text: prompt.title });
-                }}
-              />
-            )
+            messages.length === 0 && status !== 'submitted' &&
+            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt) ? (
+              <div className="mb-1">
+                {effectiveStarterPrompts && effectiveStarterPrompts.length > 0 && (
+                  <StarterMessages
+                    prompts={effectiveStarterPrompts}
+                    layout={config?.starterPromptsLayout ?? 'list'}
+                    onPromptSelect={(prompt) => {
+                      handleSubmit({ text: prompt.title });
+                    }}
+                  />
+                )}
+                {/* Always-available "capability discoverability" onramp (#164).
+                    Opt-in via config.capabilitiesPrompt; sends that prompt as
+                    the user's message so a blank input never strands the user. */}
+                {config?.capabilitiesPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit({ text: config.capabilitiesPrompt })}
+                    className="mx-3 mb-3 text-[12px] underline underline-offset-2 text-[hsl(var(--chat-text)/0.45)] hover:text-[hsl(var(--chat-text)/0.7)] transition-colors"
+                  >
+                    Not sure where to start?
+                  </button>
+                )}
+              </div>
+            ) : null
           )}
 
           {/* Inline error banner — appears between the message stream
