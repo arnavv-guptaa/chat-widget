@@ -16,10 +16,62 @@
  * everything else straight through.
  */
 
-import { useState, type ReactNode } from "react";
-import { CodeIcon, ChevronRightIcon, CheckIcon, CopyIcon } from "lucide-react";
+import { useState, type ComponentType, type ReactNode } from "react";
+import {
+  ChevronRightIcon,
+  CheckIcon,
+  CopyIcon,
+  FileCodeIcon,
+  FileJsonIcon,
+  FileTerminalIcon,
+  FileTextIcon,
+  FileTypeIcon,
+  BracesIcon,
+  HashIcon,
+  DatabaseIcon,
+  GlobeIcon,
+  PaletteIcon,
+  CoffeeIcon,
+  AtomIcon,
+  FeatherIcon,
+  type LucideProps,
+} from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "../utils/cn";
+
+/**
+ * Map a fenced-code language tag to a fitting file icon, so the collapsed pill
+ * reads "⌄ 🪶 python · 24 lines" instead of a generic "<>" for everything.
+ * Aliases (ts→typescript, py→python, sh→bash, …) collapse to one entry. Anything
+ * unknown falls back to a plain code-file icon — never a crash.
+ */
+const LANGUAGE_ICONS: Record<string, ComponentType<LucideProps>> = {
+  // JS / TS family
+  javascript: FileCodeIcon, js: FileCodeIcon, jsx: AtomIcon,
+  typescript: FileCodeIcon, ts: FileCodeIcon, tsx: AtomIcon,
+  // data / config
+  json: FileJsonIcon, jsonc: FileJsonIcon, json5: FileJsonIcon,
+  yaml: BracesIcon, yml: BracesIcon, toml: BracesIcon,
+  // shell
+  bash: FileTerminalIcon, sh: FileTerminalIcon, shell: FileTerminalIcon,
+  zsh: FileTerminalIcon, console: FileTerminalIcon, powershell: FileTerminalIcon,
+  // web
+  html: GlobeIcon, xml: GlobeIcon, svg: GlobeIcon,
+  css: PaletteIcon, scss: PaletteIcon, sass: PaletteIcon, less: PaletteIcon,
+  // db
+  sql: DatabaseIcon, postgres: DatabaseIcon, mysql: DatabaseIcon,
+  // languages with a closer-fitting glyph
+  python: FeatherIcon, py: FeatherIcon,
+  ruby: HashIcon, rb: HashIcon,
+  java: CoffeeIcon, kotlin: CoffeeIcon,
+  markdown: FileTextIcon, md: FileTextIcon, mdx: FileTextIcon, text: FileTextIcon,
+  c: FileTypeIcon, cpp: FileTypeIcon, "c++": FileTypeIcon, csharp: FileTypeIcon, "c#": FileTypeIcon,
+  go: FileCodeIcon, rust: FileCodeIcon, rs: FileCodeIcon, php: FileCodeIcon,
+};
+
+function iconForLanguage(language: string): ComponentType<LucideProps> {
+  return LANGUAGE_ICONS[language.toLowerCase()] ?? FileCodeIcon;
+}
 
 function extractText(children: ReactNode): string {
   if (typeof children === "string") return children;
@@ -59,6 +111,7 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const lineCount = code.split("\n").length;
+  const LanguageIcon = iconForLanguage(language);
 
   const copy = async () => {
     try {
@@ -77,7 +130,7 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
           <ChevronRightIcon
             className={cn("chat-code-chevron size-3.5", open && "chat-code-chevron-open")}
           />
-          <CodeIcon className="size-3.5 opacity-70" />
+          <LanguageIcon className="size-3.5 opacity-70" />
           <span className="chat-code-lang">{language || "code"}</span>
           <span className="chat-code-meta">
             · {lineCount} line{lineCount === 1 ? "" : "s"}
