@@ -90,6 +90,44 @@ export interface ChatWidgetConfig {
   onOpenChange?: (open: boolean) => void;
 
   /**
+   * Persist the popup panel's open/closed state across page navigations and
+   * reloads, scoped to (agentId, userId) in localStorage. Once the user
+   * explicitly closes the widget it STAYS closed — it is never silently
+   * re-opened on the next navigation or session.
+   *
+   * Only applies to the uncontrolled `popup` layout. Ignored in controlled
+   * mode (the host owns `open`) and for `inline` / `page`, which are
+   * always-open surfaces. Persistence requires a complete (agentId, userId)
+   * identity; with an incomplete identity nothing is written — the same
+   * no-shared-bucket rule the chat cache uses.
+   *
+   * Default: `true`. Set `false` to fall back to `display.defaultOpen` on
+   * every mount.
+   */
+  persistState?: boolean;
+
+  /**
+   * Allow the panel to be re-opened programmatically (via the widget ref's
+   * `open()` / `toggle()` methods) after the user has explicitly closed it.
+   * This is the master switch for any proactive, host-initiated re-open.
+   *
+   * Default: `false` — once the user dismisses the panel, only their own
+   * click on the toggle button reopens it. Set `true` only if your product
+   * genuinely needs to surface the assistant unprompted (e.g. a guided
+   * onboarding step) and you accept the intrusiveness tradeoff.
+   */
+  allowAutoReopen?: boolean;
+
+  /**
+   * Called whenever the panel's open state changes, with the new value.
+   * Fires for user actions and (allowed) programmatic changes, in both
+   * controlled and uncontrolled mode. Use it to persist the preference
+   * server-side so it survives across browsers / devices — the widget makes
+   * no opinionated server call of its own.
+   */
+  onStateChange?: (open: boolean) => void;
+
+  /**
    * Custom buttons rendered in the widget header next to the close X.
    * Use this for "expand to full page", "settings", or any consumer-defined
    * action that belongs in the widget's chrome — avoids absolute-positioning
