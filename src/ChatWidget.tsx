@@ -83,6 +83,8 @@ export function ChatWidget({
   features,
   display,
   starterPrompts,
+  getStarterPrompts,
+  capabilitiesPrompt,
   onClose,
   headerActions,
   open,
@@ -205,9 +207,12 @@ export function ChatWidget({
     theme,
     features,
     starterPrompts,
+    getStarterPrompts,
+    capabilitiesPrompt,
+    starterPromptsLayout: display?.starterPromptsLayout,
     inputPlugins,
     toolRenderers,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers]);
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, inputPlugins, toolRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 

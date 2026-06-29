@@ -62,6 +62,25 @@ export interface ChatWidgetConfig {
   starterPrompts?: StarterPrompt[];
 
   /**
+   * Dynamic starter prompts resolved at runtime. Use this instead of (or in
+   * addition to) the static `starterPrompts` when the right prompts depend on
+   * host state — the current route, the resource the user is viewing, their
+   * role. Called once when the empty state is first shown; may be async. When
+   * it resolves to a non-empty array it takes precedence over `starterPrompts`;
+   * errors or empty results fall back to the static list.
+   */
+  getStarterPrompts?: () => StarterPrompt[] | Promise<StarterPrompt[]>;
+
+  /**
+   * Enables the always-available "Not sure where to start?" affordance in the
+   * empty state. When set, a small secondary link appears below the starter
+   * prompts; clicking it sends this string as the user's message (e.g.
+   * "What can you help me with?"), giving users a guaranteed onramp when a
+   * blank input offers no direction. Omit to hide the affordance.
+   */
+  capabilitiesPrompt?: string;
+
+  /**
    * Called when the user dismisses the widget. The widget renders its own
    * close X inside the header (correctly stacked) when this is provided —
    * works in all layouts (popup, inline, page).
@@ -225,6 +244,13 @@ export interface StarterPrompt {
    * Optional subtitle for additional context
    */
   subtitle?: string;
+
+  /**
+   * Optional leading icon (e.g. a lucide icon element). Renders before the
+   * title; most impactful in the `grid` starter-prompt layout where chips have
+   * room for one.
+   */
+  icon?: ReactNode;
 }
 
 export interface ThemeConfig {
@@ -363,6 +389,15 @@ export interface DisplayConfig {
    * Default: false
    */
   defaultOpen?: boolean;
+
+  /**
+   * How starter prompts are laid out in the empty state.
+   * - `'list'` (default): full-width rows, good for descriptive prompts with
+   *   subtitles.
+   * - `'grid'`: a 2-column chip grid, good for short, scannable prompts
+   *   (optionally with an `icon`).
+   */
+  starterPromptsLayout?: 'list' | 'grid';
 
   /**
    * Show toggle button to open the chat
