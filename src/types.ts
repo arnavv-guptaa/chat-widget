@@ -158,10 +158,29 @@ export interface ToolPartLike {
   /** Always present on dynamic-tool parts; sometimes absent on static. */
   toolName?: string;
   toolCallId: string;
-  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+  /**
+   * AI SDK v6 tool lifecycle. The `approval-*` and `output-denied` states cover
+   * human-in-the-loop tools (`needsApproval`): the SDK pauses before `execute`
+   * and emits `approval-requested`; the UI shows Approve/Deny, the response
+   * moves it to `approval-responded`, then `output-available` (ran) or
+   * `output-denied` (skipped).
+   */
+  state:
+    | 'input-streaming'
+    | 'input-available'
+    | 'approval-requested'
+    | 'approval-responded'
+    | 'output-available'
+    | 'output-error'
+    | 'output-denied';
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  /**
+   * Present when `state === 'approval-requested'`: the approval to respond to.
+   * `isAutomatic` true means a policy auto-approved it (no user prompt needed).
+   */
+  approval?: { id: string; isAutomatic?: boolean };
 }
 
 /**

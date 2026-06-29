@@ -39,7 +39,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import { Response } from './response';
 import { GlobeIcon, RefreshCcwIcon, CopyIcon } from 'lucide-react';
 import {
@@ -135,7 +135,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Ref-based initialization guard to ensure initialization runs only once
   const hasInitialized = useRef(false);
 
-  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError } = useChat({
+  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
       api: `${config?.apiBase ?? '/api/chat'}`,
@@ -146,11 +146,25 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         ...(config?.extraHeaders ?? {}),
       },
     }),
+    // Human-in-the-loop tool approval: once the user has answered all pending
+    // approval requests on the last assistant message, automatically send the
+    // responses back so the SDK resumes (runs or skips the tool). Without this
+    // the approve/deny clicks wouldn't continue the turn.
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     // Throttle UI updates while streaming. Default 50ms (~20Hz) for snappy
     // streaming — safe because rendering is targeted (only the active message
     // bubble re-renders per tick; see message-item.tsx). Host-tunable.
     experimental_throttle: config?.streamingThrottleMs ?? 50,
   });
+
+  // Approve / deny a paused tool (human-in-the-loop). Passed down to the tool
+  // renderer; the SDK auto-resumes via sendAutomaticallyWhen above.
+  const handleToolApproval = useCallback(
+    (approvalId: string, approved: boolean) => {
+      addToolApprovalResponse({ id: approvalId, approved });
+    },
+    [addToolApprovalResponse],
+  );
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -700,9 +714,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           status={status}
           toolRenderers={config?.toolRenderers}
           onRegenerate={handleRegenerate}
+          onToolApproval={handleToolApproval}
         />
       )),
-    [messages, status, config?.toolRenderers, handleRegenerate],
+    [messages, status, config?.toolRenderers, handleRegenerate, handleToolApproval],
   );
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {

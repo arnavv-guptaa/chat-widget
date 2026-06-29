@@ -541,6 +541,30 @@
 }
 
 /* ============================================
+   TOOL APPROVAL BUTTONS (human-in-the-loop)
+   Shown when a needsApproval tool pauses. Approve = filled primary; Deny =
+   subtle outline. Themed via --chat-* so they work light/dark.
+   ============================================ */
+.chat-widget-container .chat-tool-approve {
+  background-color: hsl(var(--chat-primary));
+  color: hsl(var(--chat-background));
+  transition: background-color 0.15s ease;
+}
+.chat-widget-container .chat-tool-approve:hover {
+  background-color: hsl(var(--chat-primary) / 0.9);
+}
+.chat-widget-container .chat-tool-deny {
+  background-color: transparent;
+  color: hsl(var(--chat-text-muted));
+  border: 1px solid hsl(var(--chat-border));
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.chat-widget-container .chat-tool-deny:hover {
+  background-color: hsl(var(--chat-surface-hover));
+  color: hsl(var(--chat-text));
+}
+
+/* ============================================
    COLLAPSIBLE CODE BLOCK
    A compact, collapsed-by-default pill for fenced code in assistant messages
    (language · N lines · copy) that expands inline on click. Replaces the inline

@@ -47,9 +47,11 @@ interface MessageItemProps {
   toolRenderers?: Record<string, ToolRenderer>;
   /** Stable regenerate handler (only used on the last assistant message). */
   onRegenerate?: () => void;
+  /** Approve/deny a paused (needsApproval) tool call. */
+  onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, onRegenerate }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, onRegenerate, onToolApproval }: MessageItemProps) {
   // Derive part subsets once per message (recomputed only when parts change).
   const sourceParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'source-url') ?? [],
@@ -141,6 +143,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
             isStreaming={status === 'streaming'}
             turn={turnState}
             toolRenderers={toolRenderers}
+            onToolApproval={onToolApproval}
           />
         ) : (
           // User turns: plain text parts in the user bubble.

@@ -16,6 +16,8 @@ export interface ToolPart {
     output?: unknown;
     errorText?: string;
   };
+  /** Carried from the SDK part — set when status is 'approval-requested'. */
+  approval?: { id: string; isAutomatic?: boolean };
 }
 
 export interface ToolStatus {
@@ -37,5 +39,6 @@ export function toToolPart(raw: ToolPartLike, fallbackId: string): ToolPart {
       output: raw.output,
       errorText: raw.errorText,
     },
+    approval: raw.approval,
   };
 }
