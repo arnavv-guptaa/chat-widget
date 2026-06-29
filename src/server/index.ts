@@ -37,3 +37,6 @@ export type {
   BuiltTools,
   UploadPolicy,
 } from './handler-types';
+
+export { streamHealthCheck } from './stream-health';
+export type { StreamHealthResult, StreamHealthCheckOptions } from './stream-health';
