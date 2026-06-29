@@ -695,10 +695,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           isLast={i === messages.length - 1}
           status={status}
           toolRenderers={config?.toolRenderers}
+          actionRenderers={config?.actionRenderers}
           onRegenerate={handleRegenerate}
         />
       )),
-    [messages, status, config?.toolRenderers, handleRegenerate],
+    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate],
   );
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {

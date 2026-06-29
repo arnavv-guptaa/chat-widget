@@ -89,6 +89,7 @@ export function ChatWidget({
   onOpenChange,
   inputPlugins,
   toolRenderers,
+  actionRenderers,
 }: ChatWidgetProps) {
   // `agentId` is canonical; `widgetId` is the deprecated alias.
   const effectiveAgentId = agentId ?? widgetId;
@@ -207,7 +208,8 @@ export function ChatWidget({
     starterPrompts,
     inputPlugins,
     toolRenderers,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers]);
+    actionRenderers,
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers, actionRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 
