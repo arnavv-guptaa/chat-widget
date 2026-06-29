@@ -37,6 +37,8 @@ export type {
   InputPluginItem,
   ToolRenderer,
   ToolPartLike,
+  FollowUpConfig,
+  FollowUpMessage,
 } from './types';
 
 export type { ChatWidgetProps } from './ChatWidget';

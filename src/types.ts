@@ -138,6 +138,16 @@ export interface ChatWidgetConfig {
    * native.
    */
   toolRenderers?: Record<string, ToolRenderer>;
+
+  /**
+   * AI-suggested follow-up question chips shown after each assistant reply
+   * (#134), rendered as tappable pills so users always have a next step and
+   * conversations don't dead-end. Off by default; enable by providing a
+   * `generate` function (a lightweight second model call) or static
+   * `suggestions`. Generated AFTER the reply finishes, so it never blocks
+   * streaming.
+   */
+  followUps?: FollowUpConfig;
 }
 
 /**
@@ -146,6 +156,37 @@ export interface ChatWidgetConfig {
  * output-error) and on the input/output shapes.
  */
 export type ToolRenderer = (part: ToolPartLike) => ReactNode | null;
+
+/**
+ * Simplified message handed to a follow-up generator — no AI SDK types to
+ * import. `content` is the concatenated text of the message's text parts.
+ */
+export interface FollowUpMessage {
+  role: string;
+  content: string;
+}
+
+/**
+ * AI-suggested follow-up chips shown after each assistant reply (#134).
+ */
+export interface FollowUpConfig {
+  /**
+   * Master switch. Default: enabled when `generate` or `suggestions` is set;
+   * disabled otherwise. Set `false` to force-disable.
+   */
+  enabled?: boolean;
+  /**
+   * Generate up to `max` contextual follow-up questions from the completed
+   * conversation. Runs AFTER the assistant reply finishes (off the hot path —
+   * never blocks the main response). Use a lightweight model call here; errors
+   * or a non-array result fall back to no chips.
+   */
+  generate?: (messages: FollowUpMessage[]) => string[] | Promise<string[]>;
+  /** Static follow-ups shown after every reply (used when `generate` is absent). */
+  suggestions?: string[];
+  /** Max chips to show. Default 3. */
+  max?: number;
+}
 
 /**
  * Loose shape of the tool parts the renderer will receive — covers
