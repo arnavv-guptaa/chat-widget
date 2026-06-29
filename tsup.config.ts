@@ -40,6 +40,8 @@ export default defineConfig([
       'server/memory/drizzle/index': 'src/server/stores/memory-drizzle/index.ts',
       'server/memory/mem0/index': 'src/server/stores/memory-mem0/index.ts',
       'server/memory/hosted/index': 'src/server/stores/memory-hosted/index.ts',
+      // MCP (Model Context Protocol): connect agent tools from remote MCP servers.
+      'server/mcp/index': 'src/server/mcp.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
@@ -51,6 +53,7 @@ export default defineConfig([
       'react-dom',
       'next',
       'ai',
+      '@ai-sdk/mcp',
       'postgres',
       'drizzle-orm',
       'drizzle-orm/postgres-js',
