@@ -319,6 +319,27 @@ export interface CreateChatHandlerOptions {
    */
   maxMessageChars?: number;
 
+  /**
+   * Context compaction. When a conversation grows past `maxHistoryMessages`, the
+   * sliding window DROPS the oldest messages from the model payload — by default
+   * that early context (the user's original goal, decisions made early on) is
+   * silently lost. Provide this to instead SUMMARIZE the dropped messages into a
+   * compact block that's prepended to the system prompt as non-authoritative
+   * background, so long conversations keep their thread.
+   *
+   * Receives the messages being dropped this turn (oldest-first) plus the request
+   * context; returns a short plain-text summary (or '' to add nothing). Called
+   * only when there's an overflow, so short chats pay nothing. Keep it cheap — a
+   * small/fast model is ideal. Throwing or returning '' falls back to plain drop;
+   * a summarizer hiccup must never break the turn.
+   *
+   * Omit to keep today's behavior (drop without summarizing).
+   */
+  summarizeHistory?: (
+    droppedMessages: ModelMessage[],
+    ctx: ChatRequestContext,
+  ) => Promise<string> | string;
+
   // ── Knowledge (RAG) + Memory (both opt-in, off by default) ────────────────
 
   /**

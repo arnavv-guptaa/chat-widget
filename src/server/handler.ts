@@ -158,6 +158,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     memory,
     maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES,
     maxMessageChars = DEFAULT_MAX_MESSAGE_CHARS,
+    summarizeHistory,
   } = options;
 
   // The hosted default store/storage are resolved lazily so a BYO consumer who
@@ -243,9 +244,31 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // Sliding-window prune + defensive char-cap, then the host's transform.
     const windowed = incoming.slice(-maxHistoryMessages);
+    const dropped = incoming.length > maxHistoryMessages ? incoming.slice(0, -maxHistoryMessages) : [];
     const capped = maxMessageChars > 0 ? capMessages(windowed, maxMessageChars) : windowed;
     let modelMessages: ModelMessage[] = await convertToModelMessages(capped);
     if (transformMessages) modelMessages = await transformMessages(modelMessages, ctx);
+
+    // Context compaction: when older messages fell out of the window, summarize
+    // them (if a summarizer is provided) so the early thread isn't silently lost.
+    // Best-effort — a failure or empty result falls back to a plain drop.
+    let historySystem = '';
+    if (summarizeHistory && dropped.length > 0) {
+      try {
+        const droppedModelMessages = await convertToModelMessages(
+          maxMessageChars > 0 ? capMessages(dropped, maxMessageChars) : dropped,
+        );
+        const summary = (await summarizeHistory(droppedModelMessages, ctx))?.trim();
+        if (summary) {
+          historySystem =
+            'Summary of earlier conversation (older messages, condensed for context — ' +
+            'treat as background, the live messages below are authoritative):\n' +
+            summary;
+        }
+      } catch (err) {
+        console.error('[chat-widget] history summarization failed:', err instanceof Error ? err.message : err);
+      }
+    }
 
     // Build tools (with their per-request resource). Retrieval tools (when
     // configured) are merged in later, after namespaces are resolved.
@@ -360,7 +383,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Fold retrieval + memory into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
-    const system = [baseSystem, retrievalSystem, memorySystem].filter(Boolean).join('\n\n');
+    const system = [baseSystem, historySystem, retrievalSystem, memorySystem].filter(Boolean).join('\n\n');
 
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     const tools: ToolSet = { ...retrievalTools, ...(built.tools ?? {}) };

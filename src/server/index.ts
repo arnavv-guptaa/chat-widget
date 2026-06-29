@@ -30,6 +30,7 @@ export type {
 } from './storage-adapter';
 
 export { createChatHandler } from './handler';
+export { createLlmSummarizer, type LlmSummarizerOptions } from './summarize';
 export type {
   CreateChatHandlerOptions,
   ChatRequestContext,
