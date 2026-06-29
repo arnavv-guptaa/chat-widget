@@ -37,3 +37,15 @@ export type {
   BuiltTools,
   UploadPolicy,
 } from './handler-types';
+
+export {
+  compressModelMessages,
+  resolveCompression,
+  normalizeCompression,
+} from './compression';
+export type {
+  CompressionConfig,
+  CompressionOption,
+  CompressionResult,
+  CompressionSkipReason,
+} from './compression';
