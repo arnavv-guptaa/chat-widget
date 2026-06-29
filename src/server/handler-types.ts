@@ -199,9 +199,26 @@ export interface CreateChatHandlerOptions {
   /**
    * Map a stream error to the user-facing string the widget shows. Lets you
    * downgrade benign post-finish teardown noise and localise messages.
-   * Defaults to a generic message + server-side error log.
+   *
+   * Note: providing this does NOT silence the server-side error log. Stream
+   * errors are logged by default (see `logErrors`) so a production failure
+   * (bad key, rate limit, wrong URL) never disappears into empty logs — the
+   * #1 documented streaming pitfall. This hook only controls the user-facing
+   * copy; use `logErrors: false` to opt out of the log.
    */
   onError?: (error: unknown) => string;
+
+  /**
+   * Log stream errors to the server console by default. The AI SDK swallows
+   * stream errors (to avoid crashing the server), which is exactly how broken
+   * production deployments end up with silent, empty logs. We surface them by
+   * default — independently of `onError`, which only maps the user-facing
+   * message. Set `false` only if you forward errors elsewhere and want to
+   * suppress the built-in console log.
+   *
+   * Default: `true`.
+   */
+  logErrors?: boolean;
 
   /**
    * When the model may chain tool calls, how long to let it run before it

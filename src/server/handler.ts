@@ -141,11 +141,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     transformMessages,
     onChatFinish,
     onError,
+    logErrors = true,
     stopWhen,
     upload,
     maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES,
     maxMessageChars = DEFAULT_MAX_MESSAGE_CHARS,
   } = options;
+
+  // One-time reverse-proxy / CDN buffering diagnostic. Flipped on the first
+  // authenticated chat request so the warning (if any) is logged once per
+  // process, not on every turn. See maybeWarnProxyBuffering.
+  let proxyDiagnosed = false;
 
   // The hosted default store/storage are resolved lazily so a BYO consumer who
   // passes their own never triggers our default's env-var requirements.
@@ -201,6 +207,15 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     const ctx = await authenticate(request, conversationId);
     if (!ctx) return new Response('Unauthorized', { status: 401 });
+
+    // First authenticated chat request: run a one-time reverse-proxy / CDN
+    // buffering diagnostic. A buffered SSE deployment "works locally, breaks in
+    // prod" by delivering the whole answer as one late blob — catch it in logs
+    // instead of mistaking it for a slow model.
+    if (!proxyDiagnosed) {
+      proxyDiagnosed = true;
+      maybeWarnProxyBuffering(request);
+    }
 
     // Sanitise the incoming array: drop anything that isn't a well-formed
     // message (null/undefined, missing role, missing parts). A malformed entry
@@ -301,6 +316,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return result.toUIMessageStreamResponse({
       sendSources: true,
       sendReasoning: true,
+      // Defeat reverse-proxy / CDN response buffering — the #1 cause of
+      // "streaming works locally but arrives as a single blob in production".
+      // `X-Accel-Buffering: no` disables nginx (and several CDNs') buffering
+      // for this response; `no-transform` stops intermediaries from
+      // re-chunking/compressing the SSE body. Hosts behind a proxy that ignores
+      // these still get the startup diagnostic logged above.
+      headers: {
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache, no-transform',
+      },
       // REQUIRED for correct persistence. Without `generateMessageId` the
       // assistant message comes back with an empty id, so every assistant turn
       // in a conversation collides on the same '' primary key and only the
@@ -354,7 +379,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         await runCleanup('on-finish');
       },
       onError: (err) => {
-        const message = onError ? onError(err) : defaultErrorMessage(err);
+        // Surface stream errors by DEFAULT. The AI SDK swallows them to avoid
+        // crashing the server, which is precisely how production failures (bad
+        // key, rate limit, wrong URL) end up with empty logs. We log unless the
+        // host opts out via `logErrors: false` — independently of `onError`,
+        // which only maps the user-facing copy.
+        if (logErrors) {
+          console.error(
+            '[chat-widget] stream error:',
+            err instanceof Error ? (err.stack ?? err.message) : err,
+          );
+        }
+        const message = onError ? onError(err) : GENERIC_STREAM_ERROR_MESSAGE;
         void runCleanup('on-error');
         return message;
       },
@@ -520,9 +556,37 @@ function methodNotAllowed(): Response {
   return json({ error: 'Method not allowed' }, 405);
 }
 
-function defaultErrorMessage(err: unknown): string {
-  console.error('[chat-widget] stream error:', err);
-  return 'An error occurred while generating the response.';
+const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the response.';
+
+/**
+ * Best-effort detection of a reverse proxy / CDN in front of the chat endpoint
+ * that may buffer SSE responses. Logs a single, actionable warning so a
+ * buffered deployment is diagnosable from logs instead of being mistaken for a
+ * slow model. Never throws — diagnostics must not break a turn.
+ */
+function maybeWarnProxyBuffering(request: Request): void {
+  try {
+    const h = request.headers;
+    const signals = new Set<string>();
+    if (h.get('x-amzn-trace-id')) signals.add('AWS ALB / API Gateway');
+    if (h.get('cf-ray')) signals.add('Cloudflare');
+    if (/\bnginx\b/i.test(h.get('via') || '')) signals.add('nginx');
+    const serverSoftware =
+      typeof process !== 'undefined' && process.env ? process.env.SERVER_SOFTWARE || '' : '';
+    if (/\bnginx\b/i.test(serverSoftware)) signals.add('nginx (SERVER_SOFTWARE)');
+    if (signals.size === 0) return;
+    console.warn(
+      `[chat-widget] Detected ${[...signals].join(', ')} in front of the chat endpoint. ` +
+        'Reverse proxies / CDNs often buffer SSE by default, delivering the whole ' +
+        'response as one late blob ("streams locally, breaks in prod"). The handler ' +
+        'sets `X-Accel-Buffering: no` + `Cache-Control: no-transform` (honoured by ' +
+        'nginx and many CDNs); if streaming still arrives all-at-once, disable ' +
+        'response buffering for this route (nginx: `proxy_buffering off;`). ' +
+        'See https://mordn.dev/docs/streaming-setup',
+    );
+  } catch {
+    /* diagnostics must never break a turn */
+  }
 }
 
 function resolveUploadPolicy(upload?: UploadPolicy): {
