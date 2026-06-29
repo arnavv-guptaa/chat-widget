@@ -11,14 +11,16 @@
  */
 
 import 'server-only';
-import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { embed, generateId, type EmbeddingModel, type LanguageModel } from 'ai';
 import { createHash } from 'node:crypto';
 
 import type {
+  ListOptions,
   Memory,
   MemoryAdapter,
   MemoryAdapterFactory,
+  MemoryScope,
   RecordOptions,
   RetrieveOptions,
 } from '../../memory/types';
@@ -48,10 +50,12 @@ function toMemory(row: MemoryRow, score?: number): Memory {
     id: row.id,
     text: row.text,
     score,
+    scope: (row.scope as MemoryScope) ?? 'user',
     createdAt: row.createdAt.toISOString(),
     metadata: {
       kind: row.kind,
       sourceConversationId: row.sourceConversationId ?? undefined,
+      orgId: row.orgId ?? undefined,
       ...((row.metadata as Record<string, unknown>) ?? {}),
     },
   };
@@ -77,19 +81,50 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
     return or(isNull(memories.expiresAt), gt(memories.expiresAt, new Date()));
   }
 
+  /**
+   * Build the WHERE predicate for a set of tiers (#167). 'user'/'session' are
+   * scoped to the bound (user, agent); 'org' is shared by (org_id, agent) and
+   * therefore requires a server-verified `orgId`. A requested tier missing its
+   * required key (session→conversationId, org→orgId) is dropped — a mis-config
+   * never widens access — and if nothing resolves we fall back to the bound
+   * user's own 'user' tier.
+   */
+  private scopeWhere(scopes: MemoryScope[], conversationId?: string, orgId?: string): SQL {
+    const agent = this.agentId;
+    const want = new Set<MemoryScope>(scopes.length ? scopes : ['user']);
+    const clauses: SQL[] = [];
+    if (want.has('user')) {
+      clauses.push(sql`(user_id = ${this.userId} AND agent_id = ${agent} AND scope = 'user')`);
+    }
+    if (want.has('session') && conversationId) {
+      clauses.push(
+        sql`(user_id = ${this.userId} AND agent_id = ${agent} AND scope = 'session' AND source_conversation_id = ${conversationId})`,
+      );
+    }
+    if (want.has('org') && orgId) {
+      clauses.push(sql`(org_id = ${orgId} AND agent_id = ${agent} AND scope = 'org')`);
+    }
+    if (clauses.length === 0) {
+      clauses.push(sql`(user_id = ${this.userId} AND agent_id = ${agent} AND scope = 'user')`);
+    }
+    return sql`(${sql.join(clauses, sql` OR `)})`;
+  }
+
   async retrieve(opts: RetrieveOptions): Promise<Memory[]> {
     const limit = Math.min(Math.max(opts.limit ?? MAX_RETRIEVE, 1), MAX_RETRIEVE);
+    // Tiers to search (#167). Default ['user'] preserves Phase-1 behaviour.
+    const where = this.scopeWhere(opts.scopes ?? ['user'], opts.conversationId, opts.orgId);
     try {
       // Semantic path when we have both an embedding model and a query.
       if (this.embeddingModel && opts.query) {
         const { embedding } = await embed({ model: this.embeddingModel, value: opts.query });
         const vec = sql.raw(`'[${embedding.join(',')}]'::vector`);
         const rows = await this.db.execute(sql`
-          SELECT id, user_id, agent_id, text, kind, content_hash, source_conversation_id,
+          SELECT id, user_id, agent_id, scope, org_id, text, kind, content_hash, source_conversation_id,
                  metadata, expires_at, created_at, updated_at,
                  (1 - (embedding <=> ${vec})) AS score
           FROM ${memories}
-          WHERE user_id = ${this.userId} AND agent_id = ${this.agentId}
+          WHERE ${where}
             AND embedding IS NOT NULL
             AND (expires_at IS NULL OR expires_at > now())
           ORDER BY score DESC
@@ -105,11 +140,11 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
       // Keyword fallback (no embedding model): Postgres FTS, or most-recent.
       if (opts.query) {
         const rows = await this.db.execute(sql`
-          SELECT id, user_id, agent_id, text, kind, content_hash, source_conversation_id,
+          SELECT id, user_id, agent_id, scope, org_id, text, kind, content_hash, source_conversation_id,
                  metadata, expires_at, created_at, updated_at,
                  ts_rank(to_tsvector('english', text), plainto_tsquery('english', ${opts.query})) AS score
           FROM ${memories}
-          WHERE user_id = ${this.userId} AND agent_id = ${this.agentId}
+          WHERE ${where}
             AND (expires_at IS NULL OR expires_at > now())
             AND to_tsvector('english', text) @@ plainto_tsquery('english', ${opts.query})
           ORDER BY score DESC
@@ -126,7 +161,7 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
       const recent = await this.db
         .select()
         .from(memories)
-        .where(and(this.base(), this.notExpired()))
+        .where(and(where, this.notExpired()))
         .orderBy(desc(memories.updatedAt))
         .limit(limit);
       return recent.map((r) => toMemory(r));
@@ -140,11 +175,17 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
     const turnText = renderTurn(opts.messages);
     if (!turnText.trim()) return;
 
-    // Pull a small slice of existing memories so the extractor can dedupe/supersede.
+    // Tier to extract into (#167). Default 'user' preserves Phase-1 behaviour.
+    const scope: MemoryScope = opts.scope ?? 'user';
+    const orgId = scope === 'org' ? opts.orgId ?? null : null;
+
+    // Pull a small slice of existing SAME-TIER memories so the extractor can
+    // dedupe/supersede within the tier (a session note never supersedes a
+    // durable user preference, and vice-versa).
     const existing = await this.db
       .select({ id: memories.id, text: memories.text })
       .from(memories)
-      .where(this.base())
+      .where(and(this.base(), eq(memories.scope, scope)))
       .orderBy(desc(memories.updatedAt))
       .limit(EXISTING_SLICE);
 
@@ -183,6 +224,8 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
           id: generateId(),
           userId: this.userId,
           agentId: this.agentId,
+          scope,
+          orgId,
           text: u.text,
           kind: u.kind,
           embedding: vectors[i] ?? null,
@@ -192,17 +235,25 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
           metadata: {},
         })
         .onConflictDoUpdate({
-          target: [memories.userId, memories.agentId, memories.contentHash],
+          target: [memories.userId, memories.agentId, memories.scope, memories.contentHash],
           set: { updatedAt: new Date(), sourceConversationId: opts.conversationId },
         });
     }
   }
 
-  async list(): Promise<Memory[]> {
+  async list(opts?: ListOptions): Promise<Memory[]> {
+    // Default to the bound user's own 'user' tier (Phase-1 behaviour). Callers
+    // pass `scope` to broaden; 'org' additionally needs `orgId`.
+    const scopes: MemoryScope[] = opts?.scope
+      ? Array.isArray(opts.scope)
+        ? opts.scope
+        : [opts.scope]
+      : ['user'];
+    const where = this.scopeWhere(scopes, undefined, opts?.orgId);
     const rows = await this.db
       .select()
       .from(memories)
-      .where(and(this.base(), this.notExpired()))
+      .where(and(where, this.notExpired()))
       .orderBy(desc(memories.createdAt))
       .limit(MAX_LIST);
     return rows.map((r) => toMemory(r));
@@ -213,8 +264,11 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
     await this.db.delete(memories).where(and(eq(memories.id, id), this.base()));
   }
 
-  async forgetAll(): Promise<void> {
-    await this.db.delete(memories).where(this.base());
+  async forgetAll(opts?: { scope?: MemoryScope }): Promise<void> {
+    // Always scoped to the bound user (base) so a user erasure never bulk-deletes
+    // another user's shared 'org' memories. `opts.scope` narrows to one tier.
+    const where = opts?.scope ? and(this.base(), eq(memories.scope, opts.scope)) : this.base();
+    await this.db.delete(memories).where(where);
   }
 }
 
@@ -224,6 +278,8 @@ function rawToRow(r: Record<string, unknown>): MemoryRow {
     id: String(r.id),
     userId: String(r.user_id),
     agentId: String(r.agent_id),
+    scope: String(r.scope ?? 'user'),
+    orgId: (r.org_id as string) ?? null,
     text: String(r.text),
     kind: String(r.kind),
     embedding: null,

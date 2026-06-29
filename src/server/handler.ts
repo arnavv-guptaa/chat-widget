@@ -331,10 +331,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let memoryAdapter: MemoryAdapter | null = null;
     let memorySystem = '';
     let memoryEnabled = false;
+    let memoryOrgId: string | undefined;
     if (memory) {
       memoryEnabled = memory.isEnabledForUser ? await memory.isEnabledForUser(ctx) : true;
       if (memoryEnabled) {
         memoryAdapter = memory.adapter(ctx.userId); // bound to the verified id
+        // Resolve the verified org id once (used by both recall + extraction for
+        // the 'org' tier). Server-derived only — never from the request body —
+        // and fail-soft so a resolver hiccup never breaks the turn.
+        try {
+          memoryOrgId = memory.resolveOrgId
+            ? (await memory.resolveOrgId(ctx)) ?? undefined
+            : undefined;
+        } catch {
+          memoryOrgId = undefined;
+        }
         if (memory.inject !== false) {
           const q = latestUserText(incoming);
           const recalled = await withTimeout(
@@ -343,6 +354,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 query: q,
                 limit: memory.limit ?? DEFAULT_MEMORY_LIMIT,
                 minScore: memory.minScore ?? 0,
+                scopes: memory.scopes ?? ['user'],
+                conversationId,
+                orgId: memoryOrgId,
               })
               .catch(() => [] as Memory[]),
             memory.retrieveTimeoutMs ?? DEFAULT_MEMORY_TIMEOUT_MS,
@@ -468,7 +482,12 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // mid-flight; on long-lived runtimes the cost is post-response anyway.
         if (memoryAdapter && memoryEnabled && memory?.extract !== false && !isAborted) {
           try {
-            await memoryAdapter.record({ conversationId, messages: finalMessages });
+            await memoryAdapter.record({
+              conversationId,
+              messages: finalMessages,
+              scope: memory?.autoSaveScope ?? 'user',
+              orgId: memoryOrgId,
+            });
           } catch (err) {
             console.error(
               JSON.stringify({

@@ -22,6 +22,10 @@ export const memories = pgTable(
     userId: text('user_id').notNull(),
     /** Agent namespace so multiple bots don't share a user's memory. */
     agentId: text('agent_id').notNull().default('default'),
+    /** Semantic horizon (#167): 'session' | 'user' | 'org'. Phase-1 rows = 'user'. */
+    scope: text('scope').notNull().default('user'),
+    /** Tenant id for 'org'-tier memories (shared across users). NULL otherwise. */
+    orgId: text('org_id'),
     /** The self-contained remembered statement. */
     text: text('text').notNull(),
     /** Coarse kind for filtering/UI (preference/fact/goal/context/instruction). */
@@ -41,8 +45,12 @@ export const memories = pgTable(
   (t) => [
     // Drives retrieval + list (WHERE user_id = ? AND agent_id = ?).
     index('chat_memories_user_agent_idx').on(t.userId, t.agentId),
-    // Idempotent upsert / dedupe key — one fact per (user, agent, hash).
-    uniqueIndex('chat_memories_dedupe_idx').on(t.userId, t.agentId, t.contentHash),
+    // Tier-aware retrieval/list for the bound user (#167).
+    index('chat_memories_user_agent_scope_idx').on(t.userId, t.agentId, t.scope),
+    // Shared 'org'-tier reads (WHERE org_id = ? AND agent_id = ? AND scope = 'org').
+    index('chat_memories_org_idx').on(t.orgId, t.agentId, t.scope),
+    // Idempotent upsert / dedupe key — one fact per (user, agent, scope, hash).
+    uniqueIndex('chat_memories_dedupe_idx').on(t.userId, t.agentId, t.scope, t.contentHash),
     // ANN index (created only when pgvector is available; the migration guards
     // on the extension). Cosine distance.
   ],
