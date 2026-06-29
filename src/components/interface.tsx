@@ -178,11 +178,21 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   );
 
   const handleSubmit = async (message: PromptInputMessage) => {
+    // Ignore submits while a turn is in flight. The send button already swaps to
+    // a Stop button when streaming, but pressing Enter bypasses the button and
+    // calls form.requestSubmit() directly — so without this guard a user could
+    // queue a second message (or several) mid-response. This is the single choke
+    // point both Enter and the button funnel through, so guarding here covers
+    // every submission path. To interrupt, the user uses the Stop button.
+    if (status === 'submitted' || status === 'streaming') {
+      return false;
+    }
+
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
     if (!(hasText || hasAttachments)) {
-      return;
+      return false;
     }
 
     // Upload files to Supabase first if there are attachments
