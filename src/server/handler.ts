@@ -70,6 +70,13 @@ const DEFAULT_ALLOWED_MEDIA_TYPES = [
 ];
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant.';
 
+// Per-turn context injection (#162). Cap the injected context's rendered size,
+// and skip injection entirely when the request body exceeds this byte budget —
+// a cheap Content-Length guard so a malicious client can't force an unbounded
+// JSON.stringify of the `context` field (DoS).
+const MAX_CONTEXT_CHARS = 8000;
+const MAX_CONTEXT_BYTES = 256 * 1024;
+
 // Internal: the base path the handler is mounted under, used to compute the
 // sub-route from the request URL. Derived from the request, not hardcoded, so
 // the handler works whether mounted at /api/chat or somewhere else.
@@ -152,6 +159,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     transformMessages,
     onChatFinish,
     onError,
+    getContext,
+    trustClientContext,
     stopWhen,
     upload,
     retrieval,
@@ -203,7 +212,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
   // ── POST /chat ─────────────────────────────────────────────────────────
   async function handleChat(request: Request): Promise<Response> {
-    let body: { messages?: UIMessage[]; id?: string };
+    let body: { messages?: UIMessage[]; id?: string; context?: unknown };
     try {
       body = await request.json();
     } catch {
@@ -278,6 +287,41 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const baseSystem = buildSystemPrompt
       ? await buildSystemPrompt(ctx)
       : hosted?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+
+    // First-class per-turn context (#162). The client-supplied `context` is
+    // UNTRUSTED; the server `getContext` is authoritative. Both paths are
+    // opt-in, so by default nothing is injected. DoS guard: skip entirely when
+    // the request body exceeds MAX_CONTEXT_BYTES (a cheap Content-Length check)
+    // so a malicious client can't force an unbounded JSON.stringify of
+    // `context`. The resolved object is folded into the system-prompt join
+    // below as `contextSystem`, and is never echoed back to the client.
+    let contextSystem = '';
+    {
+      const bodyBytes = Number(request.headers.get('content-length') || '0');
+      if (bodyBytes > MAX_CONTEXT_BYTES) {
+        if (body.context !== undefined) {
+          console.warn(
+            `[chat-widget] request body (${bodyBytes}B) exceeds the ${MAX_CONTEXT_BYTES}B context budget — context injection skipped.`,
+          );
+        }
+      } else {
+        let injectedContext: Record<string, unknown> | null = null;
+        try {
+          if (getContext) {
+            const resolved = await getContext(ctx, body.context);
+            injectedContext = isPlainObject(resolved) ? resolved : null;
+          } else if (trustClientContext && isPlainObject(body.context)) {
+            injectedContext = body.context;
+          }
+        } catch (err) {
+          console.error(
+            '[chat-widget] getContext threw; continuing without injected context:',
+            err,
+          );
+        }
+        if (injectedContext) contextSystem = formatContextPreamble(injectedContext);
+      }
+    }
 
     // ── Knowledge (RAG) retrieval ─────────────────────────────────────────
     // Read-only by construction: the handler is given a RetrieverFactory, never
@@ -360,7 +404,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Fold retrieval + memory into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
-    const system = [baseSystem, retrievalSystem, memorySystem].filter(Boolean).join('\n\n');
+    const system = [baseSystem, contextSystem, retrievalSystem, memorySystem]
+      .filter(Boolean)
+      .join('\n\n');
 
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     const tools: ToolSet = { ...retrievalTools, ...(built.tools ?? {}) };
@@ -687,6 +733,40 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
 function methodNotAllowed(): Response {
   return json({ error: 'Method not allowed' }, 405);
+}
+
+/** Narrow to a plain (non-array, non-null) object — the only shape we inject as context (#162). */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Render injected per-turn context (#162) as a clearly-delimited JSON preamble
+ * for the system prompt. Returns '' for an empty or unstringifiable object so
+ * the caller skips it. Output is capped at MAX_CONTEXT_CHARS (the request-body
+ * size is already guarded upstream before we get here).
+ */
+function formatContextPreamble(context: Record<string, unknown>): string {
+  let jsonText: string;
+  try {
+    jsonText = JSON.stringify(context, null, 2);
+  } catch {
+    return ''; // circular / unserialisable — drop rather than crash the turn
+  }
+  if (!jsonText || jsonText === '{}') return '';
+  if (jsonText.length > MAX_CONTEXT_CHARS) {
+    jsonText = `${jsonText.slice(0, MAX_CONTEXT_CHARS)}\n… (context truncated)`;
+    console.warn(
+      `[chat-widget] injected context exceeded ${MAX_CONTEXT_CHARS} chars and was truncated.`,
+    );
+  }
+  return [
+    'Structured, host-provided context about the current user and app state for THIS turn.',
+    'Treat it as authoritative background; do not repeat it verbatim unless asked.',
+    '<host_context>',
+    jsonText,
+    '</host_context>',
+  ].join('\n');
 }
 
 function defaultErrorMessage(err: unknown): string {
