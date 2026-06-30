@@ -24,6 +24,28 @@
 
 import 'server-only';
 
+/**
+ * Semantic memory horizon (#167). Phase 1 was a flat store (everything 'user');
+ * tiers separate short-lived session context, medium-lived per-user
+ * preferences, and long-lived org/tenant knowledge.
+ *
+ * - 'session' — one conversation; ephemeral working context ("debugging a
+ *   payments bug"). Scoped to (user, conversation).
+ * - 'user'    — across a user's sessions; durable preferences / role. The
+ *   Phase-1 default, so existing rows and callers keep working unchanged.
+ * - 'org'     — shared across all users in a tenant; team conventions / stack.
+ *   Requires a server-verified `orgId`.
+ */
+export type MemoryScope = 'session' | 'user' | 'org';
+
+/** Options for listing stored memories (transparency UI). */
+export interface ListOptions {
+  /** Restrict to one or more tiers. Default: every tier the bound user owns. */
+  scope?: MemoryScope | MemoryScope[];
+  /** Verified tenant/org id — required to include 'org'-tier memories. */
+  orgId?: string;
+}
+
 /** A single durable memory about the bound user. */
 export interface Memory {
   /** Opaque, stable id. Used for `forget(id)` and user-facing controls. */
@@ -44,6 +66,8 @@ export interface Memory {
   createdAt: string;
   /** Free-form metadata (kind, source conversation id, model, …). */
   metadata?: Record<string, unknown>;
+  /** Semantic horizon this memory belongs to (#167). Defaults to 'user'. */
+  scope?: MemoryScope;
 }
 
 /** Options for the hot-path retrieve (before generation). */
@@ -54,6 +78,16 @@ export interface RetrieveOptions {
   limit?: number;
   /** Drop memories below this relevance (when the backend scores). Default 0. */
   minScore?: number;
+  /**
+   * Which tiers to search (#167). Default ['user'] — Phase-1 behaviour. Include
+   * 'session' (needs `conversationId`) and/or 'org' (needs `orgId`) to recall
+   * across horizons. An adapter that doesn't tier may ignore this.
+   */
+  scopes?: MemoryScope[];
+  /** Current conversation — required to scope 'session'-tier recall. */
+  conversationId?: string;
+  /** Verified tenant/org id — required to recall 'org'-tier memories. */
+  orgId?: string;
 }
 
 /** Input for post-turn extraction. */
@@ -62,6 +96,13 @@ export interface RecordOptions {
   messages: unknown[];
   /** The conversation these came from — stamped for provenance / cascade. */
   conversationId: string;
+  /**
+   * Tier to persist extracted facts under (#167). Default 'user' — Phase-1
+   * behaviour. 'session' stamps the conversation; 'org' requires `orgId`.
+   */
+  scope?: MemoryScope;
+  /** Verified tenant/org id — required when `scope` is 'org'. */
+  orgId?: string;
 }
 
 export interface MemoryAdapter {
@@ -83,14 +124,22 @@ export interface MemoryAdapter {
    */
   record(opts: RecordOptions): Promise<void>;
 
-  /** List the bound user's stored memories (transparency UI). Newest-first, unscored. */
-  list(): Promise<Memory[]>;
+  /**
+   * List the bound user's stored memories (transparency UI). Newest-first,
+   * unscored. Pass `opts.scope` to filter by tier (#167); omit for every tier
+   * the bound user owns. Backward compatible — `list()` still works.
+   */
+  list(opts?: ListOptions): Promise<Memory[]>;
 
   /** Delete one memory by id, scoped to the bound user. No-op if not theirs. */
   forget(id: string): Promise<void>;
 
-  /** Delete ALL of the bound user's memories (GDPR erasure). Idempotent. */
-  forgetAll(): Promise<void>;
+  /**
+   * Delete the bound user's memories (GDPR erasure). Idempotent. Pass
+   * `opts.scope` to erase a single tier; omit to erase all of the user's own
+   * memories. Never bulk-deletes shared 'org' memories created by others.
+   */
+  forgetAll(opts?: { scope?: MemoryScope }): Promise<void>;
 }
 
 /**

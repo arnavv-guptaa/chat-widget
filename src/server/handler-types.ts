@@ -31,7 +31,7 @@ import type { LanguageModel, ModelMessage, ToolSet, UIMessage, StopCondition } f
 import type { ChatStoreFactory } from './chat-store';
 import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
-import type { Memory, MemoryAdapterFactory } from './memory/types';
+import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -186,6 +186,33 @@ export interface MemoryConfig {
    * ctx.userId). Default: always on.
    */
   isEnabledForUser?: (ctx: ChatRequestContext) => boolean | Promise<boolean>;
+
+  /**
+   * Which memory tiers to retrieve and inject each turn (#167). Default
+   * ['user'] — the Phase-1 behaviour. Add 'session' for ephemeral,
+   * conversation-scoped context and 'org' for shared tenant knowledge (the
+   * latter requires `resolveOrgId`). Adapters that don't tier ignore this.
+   */
+  scopes?: MemoryScope[];
+
+  /**
+   * Which tier post-turn extraction writes to (#167). Default 'user'. Use
+   * 'session' to remember only within the current conversation, or 'org' to
+   * contribute to shared tenant memory (needs `resolveOrgId`). Orthogonal to
+   * `extract` (set that `false` to disable extraction entirely).
+   */
+  autoSaveScope?: MemoryScope;
+
+  /**
+   * Resolve the verified tenant/org id for the 'org' tier from the request
+   * context (e.g. look up the user's org server-side). REQUIRED for 'org' —
+   * org reads/writes are skipped when this is absent or returns null. Like
+   * `getUserId`, it MUST derive from server-verified state, never the request
+   * body, since it widens reads beyond the bound user.
+   */
+  resolveOrgId?: (
+    ctx: ChatRequestContext,
+  ) => string | null | undefined | Promise<string | null | undefined>;
 }
 
 export interface CreateChatHandlerOptions {

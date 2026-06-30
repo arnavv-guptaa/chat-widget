@@ -10,6 +10,8 @@ import 'server-only';
 
 export type {
   Memory,
+  MemoryScope,
+  ListOptions,
   RetrieveOptions,
   RecordOptions,
   MemoryAdapter,

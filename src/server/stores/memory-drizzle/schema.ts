@@ -11,6 +11,7 @@
  * NULLABLE — one column, one code-path choice at construction.
  */
 
+import { sql } from 'drizzle-orm';
 import { pgTable, text, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { vector, EMBED_DIM } from '../knowledge-drizzle/schema';
 
@@ -22,6 +23,10 @@ export const memories = pgTable(
     userId: text('user_id').notNull(),
     /** Agent namespace so multiple bots don't share a user's memory. */
     agentId: text('agent_id').notNull().default('default'),
+    /** Semantic horizon (#167): 'session' | 'user' | 'org'. Phase-1 rows = 'user'. */
+    scope: text('scope').notNull().default('user'),
+    /** Tenant id for 'org'-tier memories (shared across users). NULL otherwise. */
+    orgId: text('org_id'),
     /** The self-contained remembered statement. */
     text: text('text').notNull(),
     /** Coarse kind for filtering/UI (preference/fact/goal/context/instruction). */
@@ -41,8 +46,22 @@ export const memories = pgTable(
   (t) => [
     // Drives retrieval + list (WHERE user_id = ? AND agent_id = ?).
     index('chat_memories_user_agent_idx').on(t.userId, t.agentId),
-    // Idempotent upsert / dedupe key — one fact per (user, agent, hash).
-    uniqueIndex('chat_memories_dedupe_idx').on(t.userId, t.agentId, t.contentHash),
+    // Tier-aware retrieval/list for the bound user (#167).
+    index('chat_memories_user_agent_scope_idx').on(t.userId, t.agentId, t.scope),
+    // Shared 'org'-tier reads (WHERE org_id = ? AND agent_id = ? AND scope = 'org').
+    index('chat_memories_org_idx').on(t.orgId, t.agentId, t.scope),
+    // Dedupe keys (#167/#172). Two PARTIAL unique indexes so each tier dedupes
+    // by its real owner:
+    //   • non-org tiers (session/user) dedupe per WRITER → (user, agent, scope, hash).
+    //   • org tier dedupes per TENANT → (org_id, agent, hash). Keying org rows by
+    //     user_id would let the same shared fact accumulate one row per user and
+    //     never converge; org_id is the owner of org-tier memory.
+    uniqueIndex('chat_memories_dedupe_idx')
+      .on(t.userId, t.agentId, t.scope, t.contentHash)
+      .where(sql`${t.scope} <> 'org'`),
+    uniqueIndex('chat_memories_org_dedupe_idx')
+      .on(t.orgId, t.agentId, t.contentHash)
+      .where(sql`${t.scope} = 'org'`),
     // ANN index (created only when pgvector is available; the migration guards
     // on the extension). Cosine distance.
   ],
