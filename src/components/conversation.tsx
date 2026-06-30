@@ -7,12 +7,27 @@ import type { ComponentProps } from "react";
 import { useCallback } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
-export type ConversationProps = ComponentProps<typeof StickToBottom>;
+export type ConversationProps = ComponentProps<typeof StickToBottom> & {
+  /** Receives the actual scroll viewport element (StickToBottom owns it and
+   *  exposes it via contextRef.scrollRef — a plain `ref` won't reach it). Used
+   *  for reverse-pagination scroll-position management. */
+  onScrollRef?: (el: HTMLElement | null) => void;
+};
 
-export const Conversation = ({ className, ...props }: ConversationProps) => (
+export const Conversation = ({ className, onScrollRef, ...props }: ConversationProps) => (
   <StickToBottom
+    contextRef={
+      onScrollRef
+        ? (ctx) => onScrollRef(ctx?.scrollRef.current ?? null)
+        : undefined
+    }
     className={cn("relative flex-1 overflow-y-auto", className)}
-    initial="smooth"
+    // `instant` (not `smooth`) for the INITIAL position: when a conversation
+    // loads (first mount / tab switch) it should appear already pinned to the
+    // bottom, NOT paint at the top and then animate a scroll down — that read as
+    // a flashy re-scroll on every tab switch. Live streaming still follows
+    // smoothly via `resize`.
+    initial="instant"
     resize="smooth"
     role="log"
     {...props}

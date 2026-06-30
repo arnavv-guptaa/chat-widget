@@ -39,7 +39,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import { Response } from './response';
 import { GlobeIcon, RefreshCcwIcon, CopyIcon } from 'lucide-react';
 import {
@@ -68,6 +68,7 @@ import {
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
+import type { StarterPrompt } from '../types';
 
 type Conversation = {
   id: string;
@@ -111,6 +112,35 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Dynamic starter prompts (#164). Resolved once when first needed; falls
+  // back to the static config.starterPrompts on empty result or error. The
+  // one-shot ref guards against re-resolving if the host passes an inline
+  // (non-memoised) getStarterPrompts.
+  const [dynamicPrompts, setDynamicPrompts] = useState<StarterPrompt[] | null>(null);
+  const dynamicPromptsResolved = useRef(false);
+  useEffect(() => {
+    if (dynamicPromptsResolved.current) return;
+    const getPrompts = config?.getStarterPrompts;
+    if (typeof getPrompts !== 'function') return;
+    dynamicPromptsResolved.current = true;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => getPrompts())
+      .then((p: StarterPrompt[]) => {
+        if (!cancelled && Array.isArray(p) && p.length > 0) setDynamicPrompts(p);
+      })
+      .catch(() => {
+        /* fall back to static starterPrompts */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.getStarterPrompts]);
+
+  // Dynamic prompts win when present; otherwise the static list.
+  const effectiveStarterPrompts: StarterPrompt[] | undefined =
+    (dynamicPrompts && dynamicPrompts.length > 0 ? dynamicPrompts : config?.starterPrompts) ?? undefined;
+
   // Auto-dismiss upload errors after 5 seconds
   useEffect(() => {
     if (uploadError) {
@@ -129,13 +159,32 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // empty-state gate stays closed during tab switches too.
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
+  // ── History lazy-loading (reverse pagination) ───────────────────────────────
+  // We load the most-recent page on open and fetch older pages when the user
+  // scrolls near the top. `hasMoreHistory` gates further fetches; `oldestTs` is
+  // the `before` cursor for the next page; the ref guards against concurrent /
+  // duplicate fetches. PAGE_SIZE is the per-request count.
+  const HISTORY_PAGE_SIZE = 30;
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const oldestTsRef = useRef<string | null>(null);
+  const loadingOlderRef = useRef(false);
+
   // Track last synced tab to prevent infinite loops
   const lastSyncedTabId = useRef<string>('');
 
   // Ref-based initialization guard to ensure initialization runs only once
   const hasInitialized = useRef(false);
 
-  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError } = useChat({
+  // First-class per-turn context (#162). Held in a ref so the transport's
+  // prepareSendMessagesRequest always reads the latest value without
+  // re-creating the chat (and resetting the stream) on every context change.
+  const contextRef = useRef<unknown>(config?.context);
+  useEffect(() => {
+    contextRef.current = config?.context;
+  }, [config?.context]);
+
+  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
       api: `${config?.apiBase ?? '/api/chat'}`,
@@ -145,19 +194,49 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // its unsaved draft model/system-prompt for an owner-authed preview).
         ...(config?.extraHeaders ?? {}),
       },
+      // Attach first-class per-turn context (#162) to the request body. Read
+      // from a ref so the latest context is sent without re-creating the chat.
+      // When `context` is undefined it serialises away — zero overhead.
+      prepareSendMessagesRequest: ({ body }) => ({
+        body: { ...body, context: contextRef.current },
+      }),
     }),
+    // Human-in-the-loop tool approval: once the user has answered all pending
+    // approval requests on the last assistant message, automatically send the
+    // responses back so the SDK resumes (runs or skips the tool). Without this
+    // the approve/deny clicks wouldn't continue the turn.
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     // Throttle UI updates while streaming. Default 50ms (~20Hz) for snappy
     // streaming — safe because rendering is targeted (only the active message
     // bubble re-renders per tick; see message-item.tsx). Host-tunable.
     experimental_throttle: config?.streamingThrottleMs ?? 50,
   });
 
+  // Approve / deny a paused tool (human-in-the-loop). Passed down to the tool
+  // renderer; the SDK auto-resumes via sendAutomaticallyWhen above.
+  const handleToolApproval = useCallback(
+    (approvalId: string, approved: boolean) => {
+      addToolApprovalResponse({ id: approvalId, approved });
+    },
+    [addToolApprovalResponse],
+  );
+
   const handleSubmit = async (message: PromptInputMessage) => {
+    // Ignore submits while a turn is in flight. The send button already swaps to
+    // a Stop button when streaming, but pressing Enter bypasses the button and
+    // calls form.requestSubmit() directly — so without this guard a user could
+    // queue a second message (or several) mid-response. This is the single choke
+    // point both Enter and the button funnel through, so guarding here covers
+    // every submission path. To interrupt, the user uses the Stop button.
+    if (status === 'submitted' || status === 'streaming') {
+      return false;
+    }
+
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
     if (!(hasText || hasAttachments)) {
-      return;
+      return false;
     }
 
     // Upload files to Supabase first if there are attachments
@@ -266,7 +345,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       <PromptInputButton
         variant="ghost"
         size="icon"
-        className="size-9 rounded-full text-muted-foreground"
+        // No hover background (the ghost circle looked odd next to the textarea);
+        // just darken the icon on hover. `chat-attach-button` (styles.src.css)
+        // forces the transparent background over the ghost variant.
+        className="chat-attach-button size-9 text-muted-foreground"
         aria-label="Attach files"
         onClick={() => attachments.openFileDialog()}
       >
@@ -285,10 +367,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     try {
-      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}`);
+      // Initial load: only the most-recent page. Older messages stream in as the
+      // user scrolls up (loadOlderMessages), so a long conversation opens fast
+      // and pinned to the bottom instead of pulling its whole history at once.
+      const response = await fetch(
+        `${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}&limit=${HISTORY_PAGE_SIZE}`,
+      );
       if (response.ok) {
         const data = await response.json();
         const loadedMessages = data.messages || [];
+
+        // Seed the reverse-pagination cursor from the oldest loaded message.
+        oldestTsRef.current = loadedMessages.length ? loadedMessages[0].created_at ?? null : null;
+        setHasMoreHistory(Boolean(data.hasMore));
 
         // Set messages after ensuring activeTabId state has updated
         setTimeout(() => {
@@ -298,6 +389,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // Conversation doesn't exist yet - this is normal for new chats
         console.log('Conversation not found in database yet (new chat)');
         // Clear messages for new chat
+        oldestTsRef.current = null;
+        setHasMoreHistory(false);
         setMessages([]);
       } else {
         console.error('Error loading messages:', response.status, response.statusText);
@@ -306,6 +399,55 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       console.error('Error loading conversation:', error);
     }
   };
+
+  // Fetch the previous page of history (older messages) and PREPEND it. Called
+  // when the user scrolls near the top. Compensates the scroll position so the
+  // viewport stays put as content is inserted above it (no jump). Guarded by a
+  // ref so overlapping scroll events don't double-fetch the same page.
+  const scrollViewportRef = useRef<HTMLElement | null>(null);
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreHistory || !oldestTsRef.current) return;
+    if (!config?.userId || !activeTabId) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    const viewport = scrollViewportRef.current;
+    const prevScrollHeight = viewport?.scrollHeight ?? 0;
+    const prevScrollTop = viewport?.scrollTop ?? 0;
+
+    try {
+      const res = await fetch(
+        `${config.apiBase ?? '/api/chat'}/history/${activeTabId}?userId=${config.userId}` +
+          `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const older = data.messages || [];
+      if (older.length === 0) {
+        setHasMoreHistory(false);
+        return;
+      }
+      oldestTsRef.current = older[0].created_at ?? oldestTsRef.current;
+      setHasMoreHistory(Boolean(data.hasMore));
+      // Prepend, de-duping by id (defensive against overlap at the boundary).
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id));
+        const fresh = older.filter((m: { id: string }) => !existing.has(m.id));
+        return [...fresh, ...prev];
+      });
+      // After the prepend renders, restore scroll so the viewport doesn't jump:
+      // new scrollTop = old scrollTop + (new height − old height).
+      requestAnimationFrame(() => {
+        const v = scrollViewportRef.current;
+        if (v) v.scrollTop = prevScrollTop + (v.scrollHeight - prevScrollHeight);
+      });
+    } catch (err) {
+      console.error('Error loading older messages:', err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [hasMoreHistory, config?.userId, config?.apiBase, activeTabId, setMessages]);
 
   // Tab management functions
   // Generate unique tab ID with better collision avoidance
@@ -693,12 +835,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           message={m}
           isFirst={i === 0}
           isLast={i === messages.length - 1}
+          prevRole={i > 0 ? messages[i - 1].role : undefined}
           status={status}
           toolRenderers={config?.toolRenderers}
           onRegenerate={handleRegenerate}
+          onToolApproval={handleToolApproval}
         />
       )),
-    [messages, status, config?.toolRenderers, handleRegenerate],
+    [messages, status, config?.toolRenderers, handleRegenerate, handleToolApproval],
   );
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
@@ -1062,8 +1206,27 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           </div>
         </div>
 
-        <Conversation className="flex-1 max-w-full ai-assistant-scrollbar">
+        <Conversation
+          className="flex-1 max-w-full ai-assistant-scrollbar"
+          // Capture the scroll viewport (StickToBottom owns it) so reverse-
+          // pagination can read/restore scroll position; trigger loadOlderMessages
+          // when scrolled near the top.
+          onScrollRef={(el) => {
+            scrollViewportRef.current = el;
+          }}
+          onScroll={(e: React.UIEvent<HTMLElement>) => {
+            const el = e.currentTarget;
+            if (el.scrollTop < 120 && hasMoreHistory && !loadingOlderRef.current) {
+              void loadOlderMessages();
+            }
+          }}
+        >
           <ConversationContent className="max-w-[96%] mx-auto py-6">
+            {hasMoreHistory && (
+              <div className="flex justify-center py-2" aria-hidden={!loadingOlder}>
+                {loadingOlder && <Loader size={14} />}
+              </div>
+            )}
             {renderedMessages}
             {showThinking && (
               <div className="mt-6">
@@ -1096,14 +1259,32 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <div className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" style={{ color: 'hsl(var(--chat-text-muted))' }} />
             </div>
           ) : (
-            messages.length === 0 && status !== 'submitted' && config?.starterPrompts && (
-              <StarterMessages
-                prompts={config.starterPrompts}
-                onPromptSelect={(prompt) => {
-                  handleSubmit({ text: prompt.title });
-                }}
-              />
-            )
+            messages.length === 0 && status !== 'submitted' &&
+            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt) ? (
+              <div className="mb-1">
+                {effectiveStarterPrompts && effectiveStarterPrompts.length > 0 && (
+                  <StarterMessages
+                    prompts={effectiveStarterPrompts}
+                    layout={config?.starterPromptsLayout ?? 'list'}
+                    onPromptSelect={(prompt) => {
+                      handleSubmit({ text: prompt.title });
+                    }}
+                  />
+                )}
+                {/* Always-available "capability discoverability" onramp (#164).
+                    Opt-in via config.capabilitiesPrompt; sends that prompt as
+                    the user's message so a blank input never strands the user. */}
+                {config?.capabilitiesPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit({ text: config.capabilitiesPrompt })}
+                    className="mx-3 mb-3 text-[12px] underline underline-offset-2 text-[hsl(var(--chat-text)/0.45)] hover:text-[hsl(var(--chat-text)/0.7)] transition-colors"
+                  >
+                    Not sure where to start?
+                  </button>
+                )}
+              </div>
+            ) : null
           )}
 
           {/* Inline error banner — appears between the message stream
@@ -1125,6 +1306,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
           <PromptInput
             onSubmit={handleSubmit}
+            className="chat-prompt-box"
             globalDrop
             multiple
             accept={config?.features?.fileUploadAccept ?? 'image/*'}
@@ -1149,25 +1331,26 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <PromptInputAttachments>
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>
-              {/* One row (matches the build-page PromptBar): editor grows on the
-                  left, actions inline on the right. `items-end` keeps the send
-                  button anchored to the bottom as the editor grows multi-line. */}
-              <div className="flex items-end gap-1.5 px-2 py-2">
+              {/* Two-zone composer (prompt-kit / PromptBox style): the editor
+                  sits on its own row up top; a bottom action row carries attach
+                  on the left and send on the right. The outer `chat-prompt-box`
+                  rule (styles.src.css) gives the pill container + border + shadow,
+                  using the widget's --chat-* theme so it themes in light/dark. */}
+              <PromptInputTextarea
+                ref={inputRef}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={inputPlugins.onKeyDown}
+                value={input}
+                className="min-h-0 w-full px-3 pt-3 pb-1 leading-7"
+              />
+              <div className="flex items-center gap-1.5 px-2 pb-2">
                 {config?.features?.fileUpload === true && <AttachButton />}
-                <PromptInputTextarea
-                  ref={inputRef}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={inputPlugins.onKeyDown}
-                  value={input}
-                  className="min-h-0 flex-1 px-1 py-1.5 leading-7"
-                />
                 <PromptInputSubmit
-                  // Circular send button, sized to match the attach button
-                  // (size-9) so the row reads as balanced. Always visible; the
-                  // Button's disabled:opacity-50 mutes it when empty, full-strength
-                  // primary when there's input. Stays enabled mid-stream so the
-                  // stop click is reachable.
-                  className="size-9 rounded-full p-0 [&_svg]:size-4"
+                  // Filled circular send button, right-aligned in the action row.
+                  // The Button `default` variant's bg-primary now resolves (theme
+                  // tokens defined in styles.src.css), but we keep the explicit
+                  // `chat-send-button` rule for the muted-disabled treatment.
+                  className="chat-send-button ml-auto size-9 rounded-full p-0 [&_svg]:size-4"
                   disabled={status === 'streaming' || status === 'submitted' ? false : !input}
                   status={status}
                   onStop={stop}

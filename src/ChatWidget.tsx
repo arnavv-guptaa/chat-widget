@@ -26,7 +26,7 @@
  * ```
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import ChatInterface from './components/interface';
 import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
@@ -67,7 +67,25 @@ export interface ChatWidgetProps extends ChatWidgetConfig {
   extraHeaders?: Record<string, string>;
 }
 
-export function ChatWidget({
+/**
+ * Imperative handle exposed via a ref on `<ChatWidget>`. Lets the host app
+ * drive the popup panel programmatically. Opening is gated by
+ * `allowAutoReopen` (see ChatWidgetConfig) so a dismissed panel is never
+ * re-surfaced without explicit opt-in; closing is always allowed. Only
+ * meaningful in the `popup` layout (inline/page are always-open surfaces).
+ */
+export interface ChatWidgetHandle {
+  /** Open the panel. No-op unless `allowAutoReopen` is set. */
+  open: () => void;
+  /** Close the panel. Always allowed. */
+  close: () => void;
+  /** Toggle the panel. Opening obeys the same `allowAutoReopen` gate as `open()`. */
+  toggle: () => void;
+  /** Whether the panel is currently open. */
+  readonly isOpen: boolean;
+}
+
+export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWidget({
   userId,
   agentId,
   apiBase,
@@ -83,13 +101,19 @@ export function ChatWidget({
   features,
   display,
   starterPrompts,
+  getStarterPrompts,
+  capabilitiesPrompt,
+  context,
   onClose,
   headerActions,
   open,
   onOpenChange,
+  persistState,
+  allowAutoReopen,
+  onStateChange,
   inputPlugins,
   toolRenderers,
-}: ChatWidgetProps) {
+}: ChatWidgetProps, ref) {
   // `agentId` is canonical; `widgetId` is the deprecated alias.
   const effectiveAgentId = agentId ?? widgetId;
   const layout = display?.layout || 'popup';
@@ -102,19 +126,91 @@ export function ChatWidget({
   const resizable = layout === 'popup' && display?.resizable !== false;
   const size = display?.size || 'default';
 
+  // Persist the panel's open/closed state. Default on; only meaningful for
+  // the uncontrolled popup layout (controlled mode → host owns `open`;
+  // inline/page are always open).
+  const persistEnabled = persistState !== false && !isControlled && layout === 'popup';
+  // localStorage key for the panel state, scoped to (agent, user) using the
+  // SAME `chat-<prefix>-` convention as the chat cache (chat-storage-context),
+  // so clearChatStorage() wipes it on sign-out and distinct identities never
+  // collide. `null` when identity is incomplete → we never persist (no
+  // shared/static fallback bucket; same cross-user-leak guard as the cache).
+  const panelStateKey =
+    persistEnabled && userId && effectiveAgentId
+      ? `chat-${encodeURIComponent(effectiveAgentId)}|${encodeURIComponent(userId)}-panel-open`
+      : null;
+
   // Open state is meaningful for popup layout only. Inline and page modes
   // are always "open" since they're embedded surfaces, not floating panels.
+  // Initialise from `defaultOpen` (SSR-safe — no localStorage read in the
+  // initialiser, which would cause a hydration mismatch); reconcile with any
+  // persisted preference in the effect below.
   const [internalIsOpen, setInternalIsOpen] = useState(
     layout !== 'popup' ? true : (display?.defaultOpen || false)
   );
   const isOpen = isControlled ? open : internalIsOpen;
-  const setIsOpen = (next: boolean) => {
-    if (isControlled) {
-      onOpenChange?.(next);
-    } else {
-      setInternalIsOpen(next);
+
+  // Hydrate the persisted open/closed preference once the (agent, user) scope
+  // is known. A stored 'closed' overrides `defaultOpen` — this is the
+  // "dismiss-and-stay-dismissed" guarantee. Client-side only; restoring the
+  // saved value is initialisation, so it deliberately does NOT fire
+  // onStateChange.
+  useEffect(() => {
+    if (!panelStateKey) return;
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const stored = window.localStorage.getItem(panelStateKey);
+      if (stored === 'open') setInternalIsOpen(true);
+      else if (stored === 'closed') setInternalIsOpen(false);
+      // stored === null → keep the defaultOpen-derived initial value.
+    } catch {
+      /* localStorage unavailable (private mode / quota) — ignore. */
     }
-  };
+  }, [panelStateKey]);
+
+  // Single entry point for changing open state: handles controlled vs
+  // uncontrolled, persistence, the onStateChange callback, and the
+  // allowAutoReopen gate for programmatic opens.
+  const setOpenState = useCallback(
+    (next: boolean, opts?: { programmatic?: boolean }) => {
+      if (next === isOpen) return; // no-op: nothing changed
+      // Gate programmatic *opening* behind allowAutoReopen. User actions
+      // (FAB / toggle / close X) pass programmatic:false and are always
+      // honoured. Closing is always allowed.
+      if (next && opts?.programmatic && !allowAutoReopen) return;
+      if (isControlled) {
+        onOpenChange?.(next);
+      } else {
+        setInternalIsOpen(next);
+        if (panelStateKey && typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.setItem(panelStateKey, next ? 'open' : 'closed');
+          } catch {
+            /* ignore persistence failure */
+          }
+        }
+      }
+      onStateChange?.(next);
+    },
+    [isOpen, allowAutoReopen, isControlled, onOpenChange, onStateChange, panelStateKey]
+  );
+
+  // User-driven open/close helper (always allowed). Used by the FAB and the
+  // panel's own close button.
+  const setIsOpen = useCallback((next: boolean) => setOpenState(next), [setOpenState]);
+
+  // Expose an imperative handle so hosts can drive the panel. Opening is
+  // gated by allowAutoReopen; closing and reading are always available.
+  useImperativeHandle(
+    ref,
+    (): ChatWidgetHandle => ({
+      open: () => setOpenState(true, { programmatic: true }),
+      close: () => setOpenState(false),
+      toggle: () => setOpenState(!isOpen, { programmatic: !isOpen }),
+      isOpen,
+    }),
+    [setOpenState, isOpen]
+  );
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -205,9 +301,13 @@ export function ChatWidget({
     theme,
     features,
     starterPrompts,
+    getStarterPrompts,
+    capabilitiesPrompt,
+    starterPromptsLayout: display?.starterPromptsLayout,
+    context,
     inputPlugins,
     toolRenderers,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, inputPlugins, toolRenderers]);
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 
@@ -308,7 +408,7 @@ export function ChatWidget({
       )}
     </ChatStorageProvider>
   );
-}
+});
 
 // Export ChatWidget as default
 export default ChatWidget;

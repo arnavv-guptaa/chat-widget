@@ -31,6 +31,17 @@ export default defineConfig([
       'server/drizzle/index': 'src/server/stores/drizzle/index.ts',
       'server/supabase/index': 'src/server/stores/supabase/index.ts',
       'server/hosted/index': 'src/server/stores/hosted/index.ts',
+      // Knowledge (RAG): interfaces + ingestion (light), pgvector default, hosted client.
+      'server/knowledge/index': 'src/server/knowledge/index.ts',
+      'server/knowledge/drizzle/index': 'src/server/stores/knowledge-drizzle/index.ts',
+      'server/knowledge/hosted/index': 'src/server/stores/knowledge-hosted/index.ts',
+      // Memory: interface + extraction (light), pgvector default, mem0 + hosted clients.
+      'server/memory/index': 'src/server/memory/index.ts',
+      'server/memory/drizzle/index': 'src/server/stores/memory-drizzle/index.ts',
+      'server/memory/mem0/index': 'src/server/stores/memory-mem0/index.ts',
+      'server/memory/hosted/index': 'src/server/stores/memory-hosted/index.ts',
+      // MCP (Model Context Protocol): connect agent tools from remote MCP servers.
+      'server/mcp/index': 'src/server/mcp.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
@@ -42,14 +53,22 @@ export default defineConfig([
       'react-dom',
       'next',
       'ai',
+      '@ai-sdk/mcp',
       'postgres',
       'drizzle-orm',
       'drizzle-orm/postgres-js',
       '@supabase/supabase-js',
       'server-only',
+      'node:crypto',
+      'node:dns/promises',
+      'node:net',
+      // undici ships inside Node 18+ (global fetch is undici-backed); keep it
+      // external so the SSRF-safe loader resolves it at runtime instead of
+      // bundling it (it isn't a declared dependency).
+      'undici',
     ],
   },
-  // CLI tool
+  // CLI tool (chat-widget init + knowledge ingest/sync/status/list)
   {
     entry: {
       'cli/init': 'src/cli/init.ts',

@@ -19,6 +19,7 @@ import { cn } from "../utils/cn";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
   FileIcon,
+  ArrowUpIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
   ImageIcon,
@@ -26,7 +27,6 @@ import {
   PaperclipIcon,
   PlusIcon,
   PresentationIcon,
-  SendIcon,
   SquareIcon,
   XIcon,
 } from "lucide-react";
@@ -284,7 +284,10 @@ export type PromptInputProps = Omit<
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>
-  ) => void;
+    // Returning `false` (or resolving to `false`) signals the submission was
+    // rejected — e.g. a turn is already streaming — so the composer keeps the
+    // typed text and attachments instead of clearing them.
+  ) => void | boolean | Promise<void | boolean>;
 };
 
 export const PromptInput = ({
@@ -489,17 +492,20 @@ export const PromptInput = ({
     }
   };
 
-  const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
+  const handleSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
 
     const files: FileUIPart[] = items.map(({ ...item }) => ({
       ...item,
     }));
 
-    onSubmit({ text: event.currentTarget.message.value, files }, event);
-    
-    // Clear files after submission
-    clear();
+    // Only clear attachments once the handler has ACCEPTED the submission. If it
+    // returns `false` (e.g. a turn is mid-stream), keep the files so the user
+    // doesn't silently lose them on a blocked Enter.
+    const accepted = await onSubmit({ text: event.currentTarget.message.value, files }, event);
+    if (accepted !== false) {
+      clear();
+    }
   };
 
   const ctx = useMemo<AttachmentsContext>(
@@ -792,7 +798,7 @@ export const PromptInputSubmit = ({
   children,
   ...props
 }: PromptInputSubmitProps) => {
-  let Icon = <SendIcon className="size-4" />;
+  let Icon = <ArrowUpIcon className="size-4" />;
 
   if (status === "submitted") {
     Icon = <Loader2Icon className="size-4 animate-spin" />;

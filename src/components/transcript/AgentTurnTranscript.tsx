@@ -30,6 +30,7 @@ interface AgentTurnTranscriptProps {
   isStreaming: boolean;
   turn: TurnState;
   toolRenderers?: Record<string, ToolRenderer>;
+  onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
@@ -45,6 +46,7 @@ function AgentTurnTranscriptImpl({
   isStreaming,
   turn,
   toolRenderers,
+  onToolApproval,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
 
@@ -128,6 +130,12 @@ function AgentTurnTranscriptImpl({
               ? part.state.output
               : JSON.stringify(part.state.output, null, 2)
             : undefined;
+        // Human-in-the-loop: a tool paused awaiting approval shows Approve/Deny
+        // (unless a policy already auto-approved it). onApprove resumes the turn.
+        const awaitingApproval =
+          part.state.status === 'approval-requested' &&
+          !!part.approval &&
+          !part.approval.isAutomatic;
         return (
           <AgentToolCall
             key={item.id}
@@ -137,6 +145,12 @@ function AgentTurnTranscriptImpl({
             isError={status.isError}
             detail={detail}
             errorText={part.state.errorText}
+            awaitingApproval={awaitingApproval}
+            onApprove={
+              awaitingApproval && onToolApproval && part.approval
+                ? (approved) => onToolApproval(part.approval!.id, approved)
+                : undefined
+            }
           />
         );
       })}

@@ -62,6 +62,39 @@ export interface ChatWidgetConfig {
   starterPrompts?: StarterPrompt[];
 
   /**
+   * Dynamic starter prompts resolved at runtime. Use this instead of (or in
+   * addition to) the static `starterPrompts` when the right prompts depend on
+   * host state — the current route, the resource the user is viewing, their
+   * role. Called once when the empty state is first shown; may be async. When
+   * it resolves to a non-empty array it takes precedence over `starterPrompts`;
+   * errors or empty results fall back to the static list.
+   */
+  getStarterPrompts?: () => StarterPrompt[] | Promise<StarterPrompt[]>;
+
+  /**
+   * Enables the always-available "Not sure where to start?" affordance in the
+   * empty state. When set, a small secondary link appears below the starter
+   * prompts; clicking it sends this string as the user's message (e.g.
+   * "What can you help me with?"), giving users a guaranteed onramp when a
+   * blank input offers no direction. Omit to hide the affordance.
+   */
+  capabilitiesPrompt?: string;
+
+  /**
+   * First-class per-turn context (#162). A typed, structured object describing
+   * the user's live app state — current route, the record they're viewing,
+   * their plan/role, etc. — sent alongside every message and folded into the
+   * model's system prompt server-side so answers are aware of what the user is
+   * actually doing (not just generic Q&A).
+   *
+   * SECURITY: the browser controls this value, so the server treats it as
+   * UNTRUSTED. It is only injected when the handler opts in — either via a
+   * server-side `getContext` (authoritative; can validate/merge/override) or
+   * `trustClientContext: true`. Never put secrets here.
+   */
+  context?: ChatContext;
+
+  /**
    * Called when the user dismisses the widget. The widget renders its own
    * close X inside the header (correctly stacked) when this is provided —
    * works in all layouts (popup, inline, page).
@@ -88,6 +121,44 @@ export interface ChatWidgetConfig {
    * clicked the close X). Required when using `open` (controlled mode).
    */
   onOpenChange?: (open: boolean) => void;
+
+  /**
+   * Persist the popup panel's open/closed state across page navigations and
+   * reloads, scoped to (agentId, userId) in localStorage. Once the user
+   * explicitly closes the widget it STAYS closed — it is never silently
+   * re-opened on the next navigation or session.
+   *
+   * Only applies to the uncontrolled `popup` layout. Ignored in controlled
+   * mode (the host owns `open`) and for `inline` / `page`, which are
+   * always-open surfaces. Persistence requires a complete (agentId, userId)
+   * identity; with an incomplete identity nothing is written — the same
+   * no-shared-bucket rule the chat cache uses.
+   *
+   * Default: `true`. Set `false` to fall back to `display.defaultOpen` on
+   * every mount.
+   */
+  persistState?: boolean;
+
+  /**
+   * Allow the panel to be re-opened programmatically (via the widget ref's
+   * `open()` / `toggle()` methods) after the user has explicitly closed it.
+   * This is the master switch for any proactive, host-initiated re-open.
+   *
+   * Default: `false` — once the user dismisses the panel, only their own
+   * click on the toggle button reopens it. Set `true` only if your product
+   * genuinely needs to surface the assistant unprompted (e.g. a guided
+   * onboarding step) and you accept the intrusiveness tradeoff.
+   */
+  allowAutoReopen?: boolean;
+
+  /**
+   * Called whenever the panel's open state changes, with the new value.
+   * Fires for user actions and (allowed) programmatic changes, in both
+   * controlled and uncontrolled mode. Use it to persist the preference
+   * server-side so it survives across browsers / devices — the widget makes
+   * no opinionated server call of its own.
+   */
+  onStateChange?: (open: boolean) => void;
 
   /**
    * Custom buttons rendered in the widget header next to the close X.
@@ -158,10 +229,29 @@ export interface ToolPartLike {
   /** Always present on dynamic-tool parts; sometimes absent on static. */
   toolName?: string;
   toolCallId: string;
-  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+  /**
+   * AI SDK v6 tool lifecycle. The `approval-*` and `output-denied` states cover
+   * human-in-the-loop tools (`needsApproval`): the SDK pauses before `execute`
+   * and emits `approval-requested`; the UI shows Approve/Deny, the response
+   * moves it to `approval-responded`, then `output-available` (ran) or
+   * `output-denied` (skipped).
+   */
+  state:
+    | 'input-streaming'
+    | 'input-available'
+    | 'approval-requested'
+    | 'approval-responded'
+    | 'output-available'
+    | 'output-error'
+    | 'output-denied';
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  /**
+   * Present when `state === 'approval-requested'`: the approval to respond to.
+   * `isAutomatic` true means a policy auto-approved it (no user prompt needed).
+   */
+  approval?: { id: string; isAutomatic?: boolean };
 }
 
 /**
@@ -215,6 +305,13 @@ export interface InputPlugin {
   emptyText?: string;
 }
 
+/**
+ * Structured, per-turn context passed from the host app to the model (#162).
+ * A plain JSON-serialisable object. Extend it with your own shape via the
+ * `context` prop, e.g. `context={{ route: '/billing', plan: 'pro' } satisfies ChatContext}`.
+ */
+export type ChatContext = Record<string, unknown>;
+
 export interface StarterPrompt {
   /**
    * The main text of the prompt (also used as the message when clicked)
@@ -225,6 +322,13 @@ export interface StarterPrompt {
    * Optional subtitle for additional context
    */
   subtitle?: string;
+
+  /**
+   * Optional leading icon (e.g. a lucide icon element). Renders before the
+   * title; most impactful in the `grid` starter-prompt layout where chips have
+   * room for one.
+   */
+  icon?: ReactNode;
 }
 
 export interface ThemeConfig {
@@ -363,6 +467,15 @@ export interface DisplayConfig {
    * Default: false
    */
   defaultOpen?: boolean;
+
+  /**
+   * How starter prompts are laid out in the empty state.
+   * - `'list'` (default): full-width rows, good for descriptive prompts with
+   *   subtitles.
+   * - `'grid'`: a 2-column chip grid, good for short, scannable prompts
+   *   (optionally with an `icon`).
+   */
+  starterPromptsLayout?: 'list' | 'grid';
 
   /**
    * Show toggle button to open the chat
