@@ -81,6 +81,14 @@ export default defineConfig([
     target: 'node18',
     platform: 'node',
     shims: true,
+    // The CLI lazily `import('@mordn/chat-widget/server/knowledge')` at RUNTIME
+    // (deferred so the lightweight `init` command never loads the heavy ingest
+    // code). That self-reference is unresolvable at BUILD time — the package
+    // isn't installed in its own node_modules — so mark it external: leave the
+    // import untouched and let Node resolve it via the package `exports` map
+    // when a consumer runs `npx chat-widget`. Without this the build fails and
+    // (via the `&&` chain) the CSS build never runs.
+    external: [/^@mordn\/chat-widget(\/.*)?$/],
     banner: {
       js: '#!/usr/bin/env node',
     },
