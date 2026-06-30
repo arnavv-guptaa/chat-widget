@@ -176,6 +176,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Ref-based initialization guard to ensure initialization runs only once
   const hasInitialized = useRef(false);
 
+  // First-class per-turn context (#162). Held in a ref so the transport's
+  // prepareSendMessagesRequest always reads the latest value without
+  // re-creating the chat (and resetting the stream) on every context change.
+  const contextRef = useRef<unknown>(config?.context);
+  useEffect(() => {
+    contextRef.current = config?.context;
+  }, [config?.context]);
+
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
@@ -186,6 +194,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // its unsaved draft model/system-prompt for an owner-authed preview).
         ...(config?.extraHeaders ?? {}),
       },
+      // Attach first-class per-turn context (#162) to the request body. Read
+      // from a ref so the latest context is sent without re-creating the chat.
+      // When `context` is undefined it serialises away — zero overhead.
+      prepareSendMessagesRequest: ({ body }) => ({
+        body: { ...body, context: contextRef.current },
+      }),
     }),
     // Human-in-the-loop tool approval: once the user has answered all pending
     // approval requests on the last assistant message, automatically send the

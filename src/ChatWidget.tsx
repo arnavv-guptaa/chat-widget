@@ -103,6 +103,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   starterPrompts,
   getStarterPrompts,
   capabilitiesPrompt,
+  context,
   onClose,
   headerActions,
   open,
@@ -303,9 +304,10 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     getStarterPrompts,
     capabilitiesPrompt,
     starterPromptsLayout: display?.starterPromptsLayout,
+    context,
     inputPlugins,
     toolRenderers,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, inputPlugins, toolRenderers]);
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 

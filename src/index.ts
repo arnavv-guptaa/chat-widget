@@ -33,6 +33,7 @@ export type {
   DisplayConfig,
   ChatWidgetSize,
   StarterPrompt,
+  ChatContext,
   InputPlugin,
   InputPluginItem,
   ToolRenderer,
