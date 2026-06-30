@@ -178,14 +178,25 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
     // Tier to extract into (#167). Default 'user' preserves Phase-1 behaviour.
     const scope: MemoryScope = opts.scope ?? 'user';
     const orgId = scope === 'org' ? opts.orgId ?? null : null;
+    // An 'org' write with no verified orgId can't be attributed to a tenant and
+    // would create an un-dedupable null-org row — skip rather than mislabel it.
+    if (scope === 'org' && !orgId) {
+      console.warn('[chat-widget] memory.record(scope:"org") skipped — no orgId resolved.');
+      return;
+    }
 
     // Pull a small slice of existing SAME-TIER memories so the extractor can
-    // dedupe/supersede within the tier (a session note never supersedes a
-    // durable user preference, and vice-versa).
+    // dedupe/supersede within the tier. Scoped to the tier's real OWNER: org by
+    // TENANT (org_id, across users), every other tier by the bound (user, agent)
+    // — mirroring the partial unique indexes the upsert conflicts on below.
+    const dedupeScope =
+      scope === 'org'
+        ? and(eq(memories.orgId, orgId!), eq(memories.agentId, this.agentId), eq(memories.scope, 'org'))
+        : and(this.base(), eq(memories.scope, scope));
     const existing = await this.db
       .select({ id: memories.id, text: memories.text })
       .from(memories)
-      .where(and(this.base(), eq(memories.scope, scope)))
+      .where(dedupeScope)
       .orderBy(desc(memories.updatedAt))
       .limit(EXISTING_SLICE);
 
@@ -234,10 +245,23 @@ class DrizzleMemoryAdapter implements MemoryAdapter {
           expiresAt,
           metadata: {},
         })
-        .onConflictDoUpdate({
-          target: [memories.userId, memories.agentId, memories.scope, memories.contentHash],
-          set: { updatedAt: new Date(), sourceConversationId: opts.conversationId },
-        });
+        .onConflictDoUpdate(
+          scope === 'org'
+            ? {
+                // Org tier dedupes per TENANT — matches the partial unique index
+                // `WHERE scope = 'org'` on (org_id, agent_id, content_hash).
+                target: [memories.orgId, memories.agentId, memories.contentHash],
+                targetWhere: sql`${memories.scope} = 'org'`,
+                set: { updatedAt: new Date(), sourceConversationId: opts.conversationId },
+              }
+            : {
+                // Non-org tiers dedupe per WRITER — matches the partial unique index
+                // `WHERE scope <> 'org'` on (user_id, agent_id, scope, content_hash).
+                target: [memories.userId, memories.agentId, memories.scope, memories.contentHash],
+                targetWhere: sql`${memories.scope} <> 'org'`,
+                set: { updatedAt: new Date(), sourceConversationId: opts.conversationId },
+              },
+        );
     }
   }
 

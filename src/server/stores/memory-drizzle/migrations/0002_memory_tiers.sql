@@ -1,46 +1,63 @@
 -- ============================================================================
--- chat-widget MEMORY store migration 0002 — multi-horizon tiers (#167)
+-- chat-widget MEMORY store migration 0002 — multi-horizon tiers (#167/#172)
 -- ============================================================================
 --
 -- WHAT THIS DOES
 --   Adds semantic tiering to `chat_memories`: a `scope` column
 --   ('session' | 'user' | 'org') and an `org_id` column for shared org-tier
---   memories. Phase-1 rows are all treated as the 'user' tier (the column
---   default), so this is a backward-compatible, additive migration.
+--   memories. Phase-1 rows are all the 'user' tier (the column default), so
+--   the column adds are backward-compatible.
 --
--- WHAT CHANGES
---   • `scope`  text NOT NULL DEFAULT 'user'  — the memory horizon.
---   • `org_id` text                          — tenant id for 'org'-tier rows.
---   • The dedupe unique index now includes `scope` so the same fact can exist
---     independently in different tiers (e.g. a session note vs a durable
---     preference) without colliding.
---   • New indexes for tier-aware reads (bound user) and shared org reads.
+-- DEDUPE KEYS (the important part)
+--   The single all-tier unique index is replaced by TWO PARTIAL unique indexes
+--   so each tier dedupes by its real owner:
+--     • non-org tiers (session/user) → (user_id, agent_id, scope, content_hash)
+--       WHERE scope <> 'org'   — one fact per WRITER.
+--     • org tier                     → (org_id, agent_id, content_hash)
+--       WHERE scope = 'org'    — one fact per TENANT. Keying org rows by
+--       user_id (the writer) would let the same shared fact accumulate one row
+--       per user and never converge across the org.
 --
--- SAFETY
---   • Wrapped in a transaction; IF NOT EXISTS everywhere → re-running is a no-op.
---   • Additive only — no data is dropped; existing rows become 'user' tier.
+-- LOCK IMPACT  (!)
+--   A non-concurrent CREATE/DROP UNIQUE INDEX takes an ACCESS EXCLUSIVE lock and
+--   BLOCKS WRITES for the duration — unacceptable on a large `chat_memories`.
+--   The index DDL below therefore uses CONCURRENTLY, which does NOT block writes.
+--   CONCURRENTLY cannot run inside a transaction block, so the index statements
+--   run STANDALONE (no BEGIN/COMMIT around them). Only the fast ADD COLUMNs are
+--   wrapped in a transaction. Run this file with a client that does NOT force a
+--   surrounding transaction (e.g. `psql -f`, not a single-txn migration runner).
+--
+--   NOTE: the org partial unique index assumes no pre-existing duplicate org
+--   rows (true for a new tier). If a CONCURRENTLY build fails it leaves an
+--   INVALID index — drop it and retry.
 --
 -- HOW TO RUN
 --   psql "$DATABASE_URL" -f 0002_memory_tiers.sql
 -- ============================================================================
 
+-- 1) Additive columns — fast, safe, transactional.
 BEGIN;
-
 ALTER TABLE chat_memories ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT 'user';
 ALTER TABLE chat_memories ADD COLUMN IF NOT EXISTS org_id text;
-
--- Replace the dedupe key so tiers don't collide: one fact per
--- (user, agent, scope, hash) instead of (user, agent, hash).
-DROP INDEX IF EXISTS chat_memories_dedupe_idx;
-CREATE UNIQUE INDEX IF NOT EXISTS chat_memories_dedupe_idx
-  ON chat_memories (user_id, agent_id, scope, content_hash);
-
--- Tier-aware retrieval/list for the bound user.
-CREATE INDEX IF NOT EXISTS chat_memories_user_agent_scope_idx
-  ON chat_memories (user_id, agent_id, scope);
-
--- Shared 'org'-tier reads (WHERE org_id = ? AND agent_id = ? AND scope = 'org').
-CREATE INDEX IF NOT EXISTS chat_memories_org_idx
-  ON chat_memories (org_id, agent_id, scope);
-
 COMMIT;
+
+-- 2) Index changes — CONCURRENTLY, OUTSIDE any transaction (see LOCK IMPACT).
+
+-- Replace the old all-tier dedupe key.
+DROP INDEX CONCURRENTLY IF EXISTS chat_memories_dedupe_idx;
+
+-- Non-org tiers (session/user): dedupe per writer.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS chat_memories_dedupe_idx
+  ON chat_memories (user_id, agent_id, scope, content_hash)
+  WHERE scope <> 'org';
+
+-- Org tier: dedupe per tenant, so shared facts converge across all users.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS chat_memories_org_dedupe_idx
+  ON chat_memories (org_id, agent_id, content_hash)
+  WHERE scope = 'org';
+
+-- Supporting (non-unique) indexes for tier-aware reads.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS chat_memories_user_agent_scope_idx
+  ON chat_memories (user_id, agent_id, scope);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS chat_memories_org_idx
+  ON chat_memories (org_id, agent_id, scope);
