@@ -812,6 +812,17 @@ export const PromptInputSubmit = ({
   // by setting type="button" and calling onStop directly.
   const isStopping = status === "streaming" && !!onStop;
 
+  // The button is icon-only, so it needs an accessible name in EVERY
+  // state — not just while stopping. Derive it from the same `status`
+  // that picks the icon so the label and glyph never disagree.
+  const label = isStopping
+    ? "Stop generating"
+    : status === "submitted"
+      ? "Sending…"
+      : status === "streaming"
+        ? "Stop generating"
+        : "Send message";
+
   return (
     <Button
       className={cn("gap-1.5 rounded-lg", className)}
@@ -825,7 +836,8 @@ export const PromptInputSubmit = ({
         }
         onClick?.(e);
       }}
-      aria-label={isStopping ? "Stop generating" : undefined}
+      aria-label={label}
+      aria-busy={status === "submitted" || undefined}
       {...props}
     >
       {children ?? Icon}

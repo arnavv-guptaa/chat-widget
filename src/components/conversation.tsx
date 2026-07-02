@@ -15,6 +15,13 @@ export type ConversationProps = ComponentProps<typeof StickToBottom> & {
 };
 
 export const Conversation = ({ className, onScrollRef, ...props }: ConversationProps) => (
+  // NOTE: the live region lives on ConversationContent (below), NOT here.
+  // StickToBottom renders this root as the scroll viewport, with an inner
+  // scroll-container div and then the content div (StickToBottom.Content) that
+  // actually wraps the streamed message nodes. Putting role="log"/aria-live on
+  // the root would (a) scope announcements to the whole viewport — including the
+  // floating scroll-to-bottom button — and (b) risk a nested second live region.
+  // We scope the live region tightly to the content div instead.
   <StickToBottom
     contextRef={
       onScrollRef
@@ -29,7 +36,6 @@ export const Conversation = ({ className, onScrollRef, ...props }: ConversationP
     // smoothly via `resize`.
     initial="instant"
     resize="smooth"
-    role="log"
     {...props}
   />
 );
@@ -42,7 +48,23 @@ export const ConversationContent = ({
   className,
   ...props
 }: ConversationContentProps) => (
-  <StickToBottom.Content className={cn("p-4", className)} {...props} />
+  // Live region for streamed assistant responses. This is the div that directly
+  // wraps the rendered message nodes (StickToBottom wires its `contentRef`
+  // here), so appended/changed text lands INSIDE the boundary and is announced.
+  //   - role="log": ordered, append-style updates (chat transcript semantics).
+  //   - aria-live="polite": announce without interrupting the user.
+  //   - aria-atomic="false": announce only what changed, not the whole log.
+  //   - aria-relevant="additions text": new nodes + text edits to existing ones.
+  // Per-character drip is suppressed for reduced-motion users (see
+  // use-smooth-text.ts) so SRs announce coherent chunks rather than fragments.
+  <StickToBottom.Content
+    aria-atomic="false"
+    aria-live="polite"
+    aria-relevant="additions text"
+    className={cn("p-4", className)}
+    role="log"
+    {...props}
+  />
 );
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {
