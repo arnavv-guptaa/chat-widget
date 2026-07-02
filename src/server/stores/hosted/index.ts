@@ -14,4 +14,11 @@
  */
 import 'server-only';
 
-export { createHostedChatStore, createHostedStorage, createHostedConfig, type HostedOptions } from './store';
+export {
+  createHostedChatStore,
+  createHostedStorage,
+  createHostedConfig,
+  createHostedFeedback,
+  type HostedOptions,
+  type HostedFeedbackOptions,
+} from './store';

@@ -82,7 +82,13 @@ const MAX_CONTEXT_BYTES = 256 * 1024;
 // Internal: the base path the handler is mounted under, used to compute the
 // sub-route from the request URL. Derived from the request, not hardcoded, so
 // the handler works whether mounted at /api/chat or somewhere else.
-const KNOWN_SEGMENTS = new Set(['upload', 'history', 'memory']);
+//
+// 'feedback' is a KNOWN head so a client POST to `${apiBase}/v1/feedback`
+// (the widget's message-feedback path) resolves to the feedback sub-route.
+// `subSegments` scans from the END for the last known head, so it matches
+// whether the incoming path is `…/feedback` or `…/v1/feedback` — the optional
+// leading `v1` (or any other mount prefix) is simply ignored. See handleFeedback.
+const KNOWN_SEGMENTS = new Set(['upload', 'history', 'memory', 'feedback']);
 
 // Memory defaults.
 const DEFAULT_MEMORY_LIMIT = 6;
@@ -111,10 +117,13 @@ function jsonNoStore(body: unknown, status = 200): Response {
  *
  * The handler is mount-agnostic: it can sit at `/api/chat`, `/api/preview-chat/:agentId`,
  * or anywhere. We detect the sub-route by the trailing KNOWN_SEGMENT
- * (`upload`/`history`) rather than a hardcoded mount marker:
+ * (`upload`/`history`/`memory`/`feedback`) rather than a hardcoded mount marker:
  *   • `…/history`        → ['history']
  *   • `…/history/:id`    → ['history', ':id']
  *   • `…/upload`         → ['upload']
+ *   • `…/feedback`       → ['feedback']   (also matches `…/v1/feedback`: the
+ *                                          scan stops at the trailing 'feedback',
+ *                                          so a leading 'v1'/mount prefix is ignored)
  *   • anything else      → []  (the root chat turn — POST, or empty GET)
  */
 function subSegments(url: URL): string[] {
@@ -170,6 +179,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     upload,
     retrieval,
     memory,
+    onFeedback,
     maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES,
     maxMessageChars = DEFAULT_MAX_MESSAGE_CHARS,
     summarizeHistory,
@@ -836,6 +846,90 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return new Response(null, { status: 204 });
   }
 
+  // ── POST /feedback ─────────────────────────────────────────────────────────
+  // Records a thumbs up/down (optionally with a freeform reason) on an assistant
+  // message. The widget POSTs `{ conversationId?, messageId, rating, reason? }`
+  // to `${apiBase}/v1/feedback` with the browser-controlled `X-User-Id` header;
+  // that header is NOT trusted — we resolve the VERIFIED user through the same
+  // `authenticate`/`getUserId` gate the chat and memory routes use, so a forged
+  // client id can never attribute feedback to another user (same IDOR defence as
+  // every other route). The client id in the body is telemetry, never authz.
+  //
+  // Persistence goes through the `onFeedback` seam (mirrors how `store` / memory
+  // `adapter` are injected): pass a function to record anywhere. Use the ready-
+  // made `createHostedFeedback({ apiKey, agentId })` (server/hosted) for the
+  // hosted default — it forwards to chat-api `POST /v1/feedback` with the exact
+  // `Authorization: Bearer <apiKey>` + `X-Chat-User: <verified userId>` plumbing
+  // the hosted store/memory clients use. When no seam is configured this is a
+  // clean no-op: feedback is a side signal and must NEVER 500 the turn or break
+  // anything, so every failure here is swallowed and still returns `{ ok: true }`.
+  async function handleFeedback(request: Request): Promise<Response> {
+    // Parse defensively — a malformed body is a 400, never a throw.
+    let body: {
+      conversationId?: unknown;
+      messageId?: unknown;
+      rating?: unknown;
+      reason?: unknown;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    // Validate: rating ∈ {up,down} and a non-empty messageId. These are the only
+    // two hard requirements; conversationId is optional (a brand-new chat may not
+    // be persisted yet) and reason is optional freeform text.
+    const rating = body.rating;
+    if (rating !== 'up' && rating !== 'down') {
+      return json({ error: "Invalid rating (expected 'up' or 'down')" }, 400);
+    }
+    const messageId = typeof body.messageId === 'string' ? body.messageId.trim() : '';
+    if (!messageId) {
+      return json({ error: 'Missing messageId' }, 400);
+    }
+    const conversationId =
+      typeof body.conversationId === 'string' && body.conversationId
+        ? body.conversationId
+        : undefined;
+    const reason =
+      typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
+
+    // Resolve the VERIFIED identity through the shared gate (never the client id).
+    const ctx = await authenticate(request, conversationId ?? '');
+    if (!ctx) return new Response('Unauthorized', { status: 401 });
+
+    // No seam configured → clean no-op. Feedback that reaches a backend-less
+    // widget (headless / BYO that opts out) is simply acknowledged.
+    if (!onFeedback) return json({ ok: true });
+
+    // Fire the seam. Best-effort by contract: a recording failure must never
+    // surface as a 5xx or break the widget — swallow and still ack `{ ok:true }`.
+    try {
+      await onFeedback(
+        {
+          userId: ctx.userId,
+          conversationId,
+          messageId,
+          rating,
+          reason,
+        },
+        ctx,
+      );
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'feedback.record_failed',
+          userId: ctx.userId,
+          conversationId,
+          messageId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+    return json({ ok: true });
+  }
+
   // ── Dispatch ───────────────────────────────────────────────────────────────
   async function dispatch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -873,6 +967,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           return methodNotAllowed();
         }
         if (method === 'DELETE') return await handleMemoryForget(request, rest[0]);
+        return methodNotAllowed();
+      }
+      if (head === 'feedback') {
+        // POST only. Unlike memory, feedback is NOT gated on a config: with no
+        // `onFeedback` seam the handler still accepts and cleanly no-ops (200),
+        // so the widget's best-effort POST never sees a 404/503 that would log
+        // noise. `rest` (anything after 'feedback') is ignored.
+        if (method === 'POST') return await handleFeedback(request);
         return methodNotAllowed();
       }
       return json({ error: 'Not found' }, 404);

@@ -36,6 +36,7 @@ export type {
   CreateChatHandlerOptions,
   ChatRequestContext,
   HostedAgentConfig,
+  FeedbackEvent,
   BuiltTools,
   UploadPolicy,
   RetrievalConfig,

@@ -53,6 +53,32 @@ export interface ChatRequestContext {
 }
 
 /**
+ * A single message-feedback submission the handler hands to the `onFeedback`
+ * seam, assembled AFTER authentication. The widget posts a thumbs up/down
+ * (optionally with a reason) on an assistant message; the handler validates it,
+ * resolves the VERIFIED user, and calls `onFeedback` with this event.
+ *
+ * `userId` is the server-verified id (the same value the store/memory are bound
+ * to) — NOT the browser-controlled `X-User-Id` header the widget sends, which is
+ * forgeable and used only as telemetry. Trust `userId`.
+ */
+export interface FeedbackEvent {
+  /** Server-verified user id. Never client-supplied. Safe to attribute on. */
+  userId: string;
+  /**
+   * The conversation the rated message belongs to. Optional: a brand-new chat
+   * may not have been persisted server-side yet when the user rates a reply.
+   */
+  conversationId?: string;
+  /** Id of the assistant `UIMessage` being rated. Always present (validated). */
+  messageId: string;
+  /** Thumbs up or down. */
+  rating: 'up' | 'down';
+  /** Optional freeform reason, typically supplied on thumbs-down. */
+  reason?: string;
+}
+
+/**
  * Per-agent declarative config returned by a hosted control plane. All fields
  * optional — only what the dashboard has set is present; the rest falls through
  * to code/defaults. `model` is a gateway model string (e.g. "anthropic/…").
@@ -356,6 +382,28 @@ export interface CreateChatHandlerOptions {
     usage?: unknown;
     providerMetadata?: unknown;
   }) => void | Promise<void>;
+
+  /**
+   * Persist a message-feedback submission (thumbs up/down on an assistant
+   * message). The widget's feedback UI POSTs to `${apiBase}/v1/feedback`; the
+   * handler validates the body, resolves the VERIFIED user (never the client's
+   * `X-User-Id` header), and calls this with the resulting {@link FeedbackEvent}
+   * plus the request context.
+   *
+   * This is the single wiring point for feedback, mirroring `store` / memory
+   * `adapter`: pass any function to record wherever you like (your DB, an
+   * analytics pipe), or pass the ready-made hosted recorder
+   * `createHostedFeedback({ apiKey, agentId })` from
+   * `@mordn/chat-widget/server/hosted`, which forwards to chat-api
+   * `POST /v1/feedback` with the same `Authorization: Bearer <apiKey>` +
+   * `X-Chat-User` plumbing the hosted store/memory clients use.
+   *
+   * Best-effort by contract: feedback is a side signal, so a throw/rejection
+   * here is logged and swallowed — it never fails the response (the endpoint
+   * still returns `{ ok: true }`). Omit it entirely and the feedback route
+   * cleanly no-ops, so the widget's POST never errors.
+   */
+  onFeedback?: (feedback: FeedbackEvent, ctx: ChatRequestContext) => void | Promise<void>;
 
   /**
    * Map a stream error to the user-facing string the widget shows. Lets you
