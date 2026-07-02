@@ -55,6 +55,7 @@ import {
   toSourceParts,
 } from './knowledge/retrieval';
 import type { Memory, MemoryAdapter } from './memory/types';
+import { compressModelMessages, resolveCompression } from './compression';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -159,6 +160,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     buildSystemPrompt,
     getHostedConfig,
     transformMessages,
+    compression,
     onChatFinish,
     onError,
     getContext,
@@ -466,7 +468,32 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
 
-    // Fold retrieval + memory into the system prompt. The operator's
+    // Optional Headroom token compression — the very last transform before the
+    // model sees the messages, so it acts on exactly what would be sent.
+    // Precedence: code > hosted > off. `compressModelMessages` never throws and
+    // returns the originals on any failure, so a compression hiccup (endpoint
+    // down, timeout, odd response) can't break the turn. Runs AFTER retrieval /
+    // memory / context assembly, since those build system-prompt blocks and this
+    // acts on the model-bound `modelMessages` payload.
+    const compressionConfig = resolveCompression(compression, hosted?.compression ?? null);
+    if (compressionConfig) {
+      const outcome = await compressModelMessages(
+        modelMessages,
+        compressionConfig,
+        ctx,
+        typeof modelLabel === 'string' ? modelLabel : undefined,
+      );
+      modelMessages = outcome.messages;
+      if (compressionConfig.onResult) {
+        try {
+          compressionConfig.onResult(outcome.result, ctx);
+        } catch (err) {
+          console.error('[chat-widget] compression onResult hook threw:', err);
+        }
+      }
+    }
+
+    // Fold retrieval + memory + context into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
     const system = [baseSystem, contextSystem, historySystem, retrievalSystem, memorySystem]

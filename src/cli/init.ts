@@ -91,6 +91,12 @@ export const { GET, POST, DELETE } = createChatHandler({
   // A system prompt. Make it a function of ctx to personalise per user.
   buildSystemPrompt: () => 'You are a helpful assistant.',
 
+  // Optional: cut tokens on large tool outputs / context with Headroom
+  // (https://github.com/headroomlabs-ai/headroom). Run a Headroom service,
+  // set HEADROOM_BASE_URL in your env, then flip this on. Safe by default —
+  // if the service is unreachable the turn just proceeds uncompressed.
+  // compression: true,
+
   // Add your tools here. buildTools is async and receives the request context
   // (userId, conversationId, request) so tools can be user-scoped. If a tool
   // holds a per-request resource (e.g. an MCP client), return a \`cleanup\`
@@ -176,6 +182,13 @@ SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 # Get a key at https://aistudio.google.com/apikey
 GEMINI_API_KEY="your-gemini-api-key"
 # Or set GOOGLE_GENERATIVE_AI_API_KEY instead — both are accepted.
+
+# Token compression (optional — https://github.com/headroomlabs-ai/headroom)
+# Point the widget at a running Headroom service and set compression: true on
+# createChatHandler to shrink large tool outputs, RAG chunks, and history.
+# Unset = disabled (default). If unreachable, the turn proceeds uncompressed.
+# HEADROOM_BASE_URL="http://localhost:8787"
+# HEADROOM_API_KEY=""
 `;
 
 // ============================================================================

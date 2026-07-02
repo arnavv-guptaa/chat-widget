@@ -32,6 +32,7 @@ import type { ChatStoreFactory } from './chat-store';
 import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
+import type { CompressionOption } from './compression';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -69,6 +70,14 @@ export interface HostedAgentConfig {
    * (code > hosted > provider default).
    */
   maxOutputTokens?: number | null;
+
+  /**
+   * Token-compression toggle pushed from the dashboard — `true`/`false` or a
+   * full `CompressionConfig`. Lets an operator turn Headroom compression on
+   * for an agent without a redeploy. Consulted only when code passes no
+   * `compression` option (code > hosted > off).
+   */
+  compression?: CompressionOption | null;
 }
 
 /**
@@ -316,6 +325,24 @@ export interface CreateChatHandlerOptions {
     messages: ModelMessage[],
     ctx: ChatRequestContext,
   ) => ModelMessage[] | Promise<ModelMessage[]>;
+
+  /**
+   * Optional token compression (Headroom). Off by default; pass `true` to
+   * enable with defaults, or a `CompressionConfig` for full control. When on,
+   * the handler shrinks the model-bound payload — large tool outputs, pasted
+   * blobs, RAG chunks, long history — immediately before the model call, using
+   * a running Headroom service (https://github.com/headroomlabs-ai/headroom).
+   *
+   * Runs AFTER `transformMessages`, as the very last step before streaming, so
+   * it operates on exactly what would otherwise be sent. It is fully guarded:
+   * if the endpoint is unset, unreachable, slow, or returns something
+   * unexpected, the turn proceeds UNCOMPRESSED — compression is a cost
+   * optimisation, never a correctness dependency.
+   *
+   * Precedence matches `model`/system prompt: **code > hosted > off**. A value
+   * here wins; `getHostedConfig().compression` is used only when this is unset.
+   */
+  compression?: CompressionOption;
 
   /**
    * Called after the assistant turn has been persisted. For telemetry/usage
