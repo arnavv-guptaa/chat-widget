@@ -17,6 +17,7 @@ export type {
   StoredMessage,
   ListMessagesOptions,
   SaveTurnInput,
+  UsageRecord,
 } from './types';
 
 export type { ChatStore, ChatStoreFactory } from './chat-store';

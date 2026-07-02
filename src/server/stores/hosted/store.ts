@@ -147,7 +147,9 @@ class HostedChatStore implements ChatStore {
     const res = await this.req(`/conversations/${encodeURIComponent(input.conversationId)}/turns`, {
       method: 'POST',
       headers: this.headers(true),
-      body: JSON.stringify({ messages: input.messages, model: input.model }),
+      // `usage` (token/cost) rides along when present; an older hosted API simply
+      // ignores the extra field, so this stays backward-compatible.
+      body: JSON.stringify({ messages: input.messages, model: input.model, usage: input.usage }),
     });
     if (res.status === 403) throw new ConversationOwnershipError(input.conversationId);
     if (!res.ok) {
@@ -271,6 +273,7 @@ export function createHostedConfig(options: HostedOptions) {
         systemPrompt: raw.systemPrompt ?? null,
         greeting: raw.greeting ?? null,
         appearance: raw.appearance ?? null,
+        maxOutputTokens: raw.maxOutputTokens ?? null,
       };
       cached = { value, at: now };
       return value;

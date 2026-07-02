@@ -61,6 +61,14 @@ export interface HostedAgentConfig {
   systemPrompt?: string | null;
   greeting?: string | null;
   appearance?: Record<string, unknown> | null;
+  /**
+   * Max output tokens for the agent's model, resolved from the gateway catalog
+   * by the control plane (chat-api's /v1/config). Passed to streamText so long
+   * answers use the model's real limit instead of truncating at a low provider
+   * default. Consulted only when code passes no `maxOutputTokens`
+   * (code > hosted > provider default).
+   */
+  maxOutputTokens?: number | null;
 }
 
 /**
@@ -240,6 +248,14 @@ export interface CreateChatHandlerOptions {
    * sensible current model when omitted.
    */
   model?: LanguageModel | ((ctx: ChatRequestContext) => LanguageModel | Promise<LanguageModel>);
+
+  /**
+   * Max output tokens for the model. When omitted, the hosted config's value
+   * (the model's real catalog limit, via /v1/config) is used; when neither is
+   * set, the provider default applies. Set this to cap output (e.g. for cost
+   * control) — a code value always wins (code > hosted > provider default).
+   */
+  maxOutputTokens?: number;
 
   /**
    * Build the tool set for this request. Async and context-aware so tools can

@@ -41,6 +41,7 @@ import {
 } from 'ai';
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
+import { normalizeUsage } from './usage';
 import type { StorageAdapter } from './storage-adapter';
 import type {
   ChatRequestContext,
@@ -151,6 +152,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   const {
     getUserId,
     model: modelOption,
+    maxOutputTokens: maxOutputTokensOption,
     buildTools,
     store: storeFactory,
     storage: storageFactory,
@@ -305,6 +307,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // provider object exposing `.modelId`.
     const modelLabel =
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
+
+    // Max output tokens: code option > hosted (the model's real catalog limit,
+    // via /v1/config) > undefined (provider default). Passing the model's true
+    // limit stops long answers truncating at a low default. Guard against a
+    // bad/zero value so we never send an invalid cap.
+    const resolvedMaxOutputTokens =
+      typeof maxOutputTokensOption === 'number' && maxOutputTokensOption > 0
+        ? maxOutputTokensOption
+        : typeof hosted?.maxOutputTokens === 'number' && hosted.maxOutputTokens > 0
+          ? hosted.maxOutputTokens
+          : undefined;
 
     // System prompt: code (buildSystemPrompt) > hosted > package default.
     const baseSystem = buildSystemPrompt
@@ -464,19 +477,29 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // streamText's own onFinish is the only place usage + providerMetadata are
     // available (the UI-stream onFinish below exposes neither). Capture them
-    // here so the host's onChatFinish hook gets real numbers, not undefined.
+    // here so the host's onChatFinish hook gets real numbers, not undefined, and
+    // so we can record a usage/cost row alongside the persisted turn.
     let finalUsage: unknown;
+    let finalTotalUsage: unknown;
     let finalProviderMetadata: unknown;
+    let finalFinishReason: string | undefined;
+    let finalStepCount: number | undefined;
 
     const result = streamText({
       model,
       system,
       messages: modelMessages,
       tools,
+      // The model's real output limit (from the catalog via /v1/config), so long
+      // answers don't truncate at a low provider default. Omitted → provider default.
+      ...(resolvedMaxOutputTokens ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
       stopWhen: stopWhen ?? stepCountIs(DEFAULT_STEP_BUDGET),
-      onFinish: ({ usage, providerMetadata }) => {
+      onFinish: ({ usage, totalUsage, providerMetadata, finishReason, steps }) => {
         finalUsage = usage;
+        finalTotalUsage = totalUsage;
         finalProviderMetadata = providerMetadata;
+        finalFinishReason = typeof finishReason === 'string' ? finishReason : undefined;
+        finalStepCount = Array.isArray(steps) ? steps.length : undefined;
       },
     });
 
@@ -512,11 +535,26 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         const shouldPersist =
           finalMessages.length > 0 && (!isAborted || hasAssistantContent(finalMessages));
         if (shouldPersist) {
+          // Normalise token usage + gateway cost for this turn (best-effort —
+          // returns null when there's nothing worth recording, and never throws).
+          // Linked to the assistant message id so the usage row joins back to it.
+          const assistantId = [...finalMessages].reverse().find((m) => m.role === 'assistant')?.id;
+          const usage =
+            normalizeUsage({
+              usage: finalUsage,
+              totalUsage: finalTotalUsage,
+              providerMetadata: finalProviderMetadata,
+              modelLabel: typeof modelLabel === 'string' ? modelLabel : undefined,
+              finishReason: finalFinishReason,
+              stepCount: finalStepCount,
+              messageId: assistantId,
+            }) ?? undefined;
+
           // Persist the assistant turn. Errors here are logged loudly — a
           // silently-dropped turn is the exact failure we designed against —
           // but never thrown, because the user already has their answer.
           try {
-            await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel });
+            await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel, usage });
           } catch (err) {
             console.error(
               JSON.stringify({

@@ -197,8 +197,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // Attach first-class per-turn context (#162) to the request body. Read
       // from a ref so the latest context is sent without re-creating the chat.
       // When `context` is undefined it serialises away — zero overhead.
-      prepareSendMessagesRequest: ({ body }) => ({
-        body: { ...body, context: contextRef.current },
+      //
+      // CRITICAL: the callback receives `id` and `messages` as SEPARATE fields,
+      // NOT inside `body` (which is only the optional custom-body object, usually
+      // empty). Whatever we return as `body` IS the entire request payload — so
+      // we must explicitly include `id` and `messages`, or the server receives
+      // `{}` and rejects with "Missing conversation id". (Default transport adds
+      // these for you; once you override prepareSendMessagesRequest you own them.)
+      prepareSendMessagesRequest: ({ id, messages, body }) => ({
+        body: { ...body, id, messages, context: contextRef.current },
       }),
     }),
     // Human-in-the-loop tool approval: once the user has answered all pending
