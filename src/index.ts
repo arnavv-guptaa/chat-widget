@@ -42,6 +42,8 @@ export type {
   ActionResult,
   ActionResultStatus,
   ActionResultField,
+  FollowUpConfig,
+  FollowUpMessage,
 } from './types';
 
 export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';

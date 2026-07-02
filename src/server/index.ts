@@ -75,3 +75,9 @@ export type {
   MemoryAdapter,
   MemoryAdapterFactory,
 } from './memory/types';
+
+// ── Streaming reliability (#163) ─────────────────────────────────────────────
+// Production streaming diagnostics: probe a deployment for anti-buffering /
+// proxy issues that silently break SSE token streaming.
+export { streamHealthCheck } from './stream-health';
+export type { StreamHealthResult, StreamHealthCheckOptions } from './stream-health';
