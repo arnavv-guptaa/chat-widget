@@ -119,7 +119,10 @@ export const CodeBlockCopyButton = ({
   const { code } = useContext(CodeBlockContext);
 
   const copyToClipboard = async () => {
-    if (typeof window === "undefined" || !navigator.clipboard.writeText) {
+    // `navigator.clipboard` is undefined in insecure (http) contexts — common
+    // for internal/enterprise deployments. Optional-chain so the guard returns
+    // cleanly instead of throwing a TypeError on the property access.
+    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
       onError?.(new Error("Clipboard API not available"));
       return;
     }

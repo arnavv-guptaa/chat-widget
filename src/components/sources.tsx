@@ -30,7 +30,10 @@ export const SourcesTrigger = ({
   ...props
 }: SourcesTriggerProps) => (
   <CollapsibleTrigger
-    className={cn("flex items-center gap-2", className)}
+    className={cn(
+      "flex items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]",
+      className
+    )}
     {...props}
   >
     {children ?? (
@@ -66,7 +69,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => {
   const safeHref = safeUrl(href);
   return (
     <a
-      className="flex items-center gap-2"
+      className="flex items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]"
       href={safeHref}
       rel="noopener noreferrer"
       target="_blank"

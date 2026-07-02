@@ -24,19 +24,23 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
 );
 
 const messageContentVariants = cva(
-  "flex flex-col gap-2 overflow-hidden leading-relaxed chat-message-content",
+  // `min-w-0` lets the bubble shrink inside its flex row instead of being forced
+  // to its content's intrinsic width; `break-words` wraps long unbreakable
+  // tokens (URLs, hashes) rather than overflowing. See styles.src.css for the
+  // matching `overflow-wrap: anywhere` rule.
+  "flex min-w-0 flex-col gap-2 overflow-hidden break-words leading-relaxed chat-message-content",
   {
     variants: {
       variant: {
         contained: [
           // User messages: compact bubbles on the right (max 85% width)
-          "group-[.is-user]:max-w-[85%] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
           // Assistant messages: no bubble, just text on background (max 100% width)
           "group-[.is-assistant]:max-w-full",
         ],
         flat: [
           // User messages: compact on the right
-          "group-[.is-user]:max-w-[85%] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
           // Assistant messages: full width
           "group-[.is-assistant]:max-w-full",
         ],

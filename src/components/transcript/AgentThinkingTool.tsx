@@ -50,8 +50,20 @@ function AgentThinkingToolImpl({ text, turn, isStreaming }: AgentThinkingToolPro
   return (
     <div className="select-text">
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label={isExpanded ? 'Hide reasoning' : 'Show reasoning'}
         onClick={() => setIsExpanded((v) => !v)}
-        className="group/think flex items-center gap-2 rounded-md px-2 py-1 -mx-2 cursor-pointer transition-colors hover:bg-[var(--chat-hover-bg)]"
+        onKeyDown={(e) => {
+          // A disclosure must be operable by keyboard: Enter and Space toggle it
+          // (Space is preventDefault-ed so the page doesn't scroll).
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsExpanded((v) => !v);
+          }
+        }}
+        className="group/think flex items-center gap-2 rounded-md px-2 py-1 -mx-2 cursor-pointer transition-colors hover:bg-[var(--chat-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]"
       >
         <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
           {isPending ? (
