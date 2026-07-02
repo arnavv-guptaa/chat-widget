@@ -209,6 +209,19 @@ export interface ChatWidgetConfig {
    * native.
    */
   toolRenderers?: Record<string, ToolRenderer>;
+
+  /**
+   * Declarative action-result cards (#166). Map a tool name to a structured
+   * result — `{ status, title, fields, link }` — derived from the tool's REAL
+   * output, rendered as a polished `ActionResultCard`. This is the
+   * "false-completion" guard: the card shows what actually happened (success /
+   * partial / error), not the model's prose claim that it "did" something.
+   *
+   * Precedence: `toolRenderers` (full custom JSX) wins first; then
+   * `actionRenderers` (this declarative card); then the default compact tool
+   * row. Return `null` to fall through to the next.
+   */
+  actionRenderers?: Record<string, ActionRenderer>;
 }
 
 /**
@@ -217,6 +230,44 @@ export interface ChatWidgetConfig {
  * output-error) and on the input/output shapes.
  */
 export type ToolRenderer = (part: ToolPartLike) => ReactNode | null;
+
+/**
+ * Outcome of an action, derived from the REAL tool output (never the model's
+ * prose). Drives the card's icon + colour. 'partial' is the critical state for
+ * false-completion prevention — the tool ran but didn't fully succeed.
+ */
+export type ActionResultStatus = 'pending' | 'success' | 'partial' | 'error';
+
+/** One key/value row shown on an action card (e.g. "Assignee" → "@alice"). */
+export interface ActionResultField {
+  label: string;
+  value: ReactNode;
+}
+
+/**
+ * Structured description of what a tool actually did, rendered as an
+ * `ActionResultCard`. Returned by an `ActionRenderer`.
+ */
+export interface ActionResult {
+  /** Real outcome — derive from the tool's output/state, not the model's claim. */
+  status: ActionResultStatus;
+  /** Headline, e.g. "Ticket created" or "Couldn't update record". */
+  title: string;
+  /** Key parameters / outcome rows (assignee, priority, id…). */
+  fields?: ActionResultField[];
+  /** Optional action link, e.g. `{ label: 'View in Linear', href }`. */
+  link?: { label: string; href: string };
+  /** Optional freeform note or error detail under the fields. */
+  note?: ReactNode;
+}
+
+/**
+ * Maps a tool part to a declarative `ActionResult` (or `null` to fall back to
+ * the default tool row). Receives the same loose `ToolPartLike` as
+ * `ToolRenderer`, so it can branch on `state`/`output` to report the true
+ * outcome.
+ */
+export type ActionRenderer = (part: ToolPartLike) => ActionResult | null;
 
 /**
  * Loose shape of the tool parts the renderer will receive — covers

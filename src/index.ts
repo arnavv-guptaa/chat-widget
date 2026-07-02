@@ -38,6 +38,10 @@ export type {
   InputPluginItem,
   ToolRenderer,
   ToolPartLike,
+  ActionRenderer,
+  ActionResult,
+  ActionResultStatus,
+  ActionResultField,
 } from './types';
 
 export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';
@@ -60,6 +64,10 @@ export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 
 // Starter Messages Component
 export { StarterMessages, StarterMessageItem } from './components/suggestion2';
+
+// Action result card (#166) — structured, false-completion-proof tool results
+export { ActionResultCard } from './components/action-result-card';
+export type { ActionResultCardProps } from './components/action-result-card';
 
 // Tool render building blocks — exposed so host apps can compose
 // custom toolRenderers using the same chrome the default rendering

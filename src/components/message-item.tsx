@@ -8,7 +8,7 @@ import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
 import type { TurnState } from './transcript/types';
-import type { ToolRenderer } from '../types';
+import type { ActionRenderer, ToolRenderer } from '../types';
 
 /**
  * One message in the conversation, as its own memoized component.
@@ -45,13 +45,15 @@ interface MessageItemProps {
   status: ChatStatus;
   /** Host-supplied per-tool renderers (stable: memoized in ChatWidget config). */
   toolRenderers?: Record<string, ToolRenderer>;
+  /** Host-supplied declarative action-result cards (#166). */
+  actionRenderers?: Record<string, ActionRenderer>;
   /** Stable regenerate handler (only used on the last assistant message). */
   onRegenerate?: () => void;
   /** Approve/deny a paused (needsApproval) tool call. */
   onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, onRegenerate, onToolApproval }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval }: MessageItemProps) {
   // Derive part subsets once per message (recomputed only when parts change).
   const sourceParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'source-url') ?? [],
@@ -143,6 +145,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
             isStreaming={status === 'streaming'}
             turn={turnState}
             toolRenderers={toolRenderers}
+            actionRenderers={actionRenderers}
             onToolApproval={onToolApproval}
           />
         ) : (

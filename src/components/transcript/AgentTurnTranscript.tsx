@@ -14,7 +14,8 @@ import {
   pickPlanningVerb,
 } from './toolRegistry';
 import { toToolPart, type ToolPart, type TurnState } from './types';
-import type { ToolRenderer } from '../../types';
+import type { ActionRenderer, ToolRenderer } from '../../types';
+import { ActionResultCard } from '../action-result-card';
 
 /**
  * Renders one assistant turn as a clean, in-order flow — text, reasoning, and
@@ -30,6 +31,7 @@ interface AgentTurnTranscriptProps {
   isStreaming: boolean;
   turn: TurnState;
   toolRenderers?: Record<string, ToolRenderer>;
+  actionRenderers?: Record<string, ActionRenderer>;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
@@ -46,6 +48,7 @@ function AgentTurnTranscriptImpl({
   isStreaming,
   turn,
   toolRenderers,
+  actionRenderers,
   onToolApproval,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
@@ -117,6 +120,28 @@ function AgentTurnTranscriptImpl({
             errorText: part.state.errorText,
           });
           if (rendered != null) return <Fragment key={item.id}>{rendered}</Fragment>;
+        }
+        // Declarative action card (#166) — runs after full-JSX toolRenderers,
+        // before the default row. Reflects the REAL outcome (success / partial /
+        // error), so a model's confident "Done!" can't hide a failed step.
+        const action = actionRenderers?.[part.tool];
+        if (action) {
+          const result = action({
+            type: `tool-${part.tool}`,
+            toolName: part.tool,
+            toolCallId: part.id,
+            state: part.state.status,
+            input: part.state.input,
+            output: part.state.output,
+            errorText: part.state.errorText,
+          });
+          if (result != null) {
+            return (
+              <Fragment key={item.id}>
+                <ActionResultCard {...result} />
+              </Fragment>
+            );
+          }
         }
         const status = getToolStatus(part, turn);
         const verb = getToolVerb(part.tool, status.isPending);

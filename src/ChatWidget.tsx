@@ -113,6 +113,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   onStateChange,
   inputPlugins,
   toolRenderers,
+  actionRenderers,
 }: ChatWidgetProps, ref) {
   // `agentId` is canonical; `widgetId` is the deprecated alias.
   const effectiveAgentId = agentId ?? widgetId;
@@ -307,7 +308,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     context,
     inputPlugins,
     toolRenderers,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers]);
+    actionRenderers,
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 

@@ -15,6 +15,12 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 import { cn } from "../utils/cn";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -440,6 +446,14 @@ export const PromptInput = ({
     if (!form) {
       return;
     }
+    // When globalDrop is enabled the document-level handler below already
+    // catches drops anywhere (including over the form). Running this form-level
+    // handler too would call add() twice for a single drop — bubbling fires the
+    // form listener and then the document listener — and attach every file
+    // twice. Let the document handler own drops in that mode.
+    if (globalDrop) {
+      return;
+    }
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes("Files")) {
         e.preventDefault();
@@ -459,7 +473,7 @@ export const PromptInput = ({
       form.removeEventListener("dragover", onDragOver);
       form.removeEventListener("drop", onDrop);
     };
-  }, [add]);
+  }, [add, globalDrop]);
 
   useEffect(() => {
     if (!globalDrop) {
@@ -490,21 +504,46 @@ export const PromptInput = ({
     if (event.currentTarget.files) {
       add(event.currentTarget.files);
     }
+    // Reset the input value so picking the same file again still fires a
+    // change event. Without this, selecting file A, removing it, then trying
+    // to add A again is silently dropped (the value hasn't changed).
+    event.currentTarget.value = "";
   };
 
   const handleSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
 
+    // Capture text + files synchronously, before any await. Once we await the
+    // (possibly async) onSubmit, `event.currentTarget` is null and the
+    // controlled value may already have changed.
+    const form = event.currentTarget;
+    const messageEl = form.elements.namedItem(
+      "message"
+    ) as HTMLTextAreaElement | null;
+    const text = messageEl?.value ?? "";
+
     const files: FileUIPart[] = items.map(({ ...item }) => ({
       ...item,
     }));
 
-    // Only clear attachments once the handler has ACCEPTED the submission. If it
-    // returns `false` (e.g. a turn is mid-stream), keep the files so the user
-    // doesn't silently lose them on a blocked Enter.
-    const accepted = await onSubmit({ text: event.currentTarget.message.value, files }, event);
-    if (accepted !== false) {
-      clear();
+    try {
+      // `onSubmit` is frequently async — e.g. it uploads the attachments to a
+      // server before sending. Await it so the attachments are only released
+      // once the send has actually succeeded. Clearing eagerly (the previous
+      // behaviour) revoked the blob: object URLs while the upload was still
+      // reading them, and dropped the user's attachments on a failed send so
+      // they had nothing to retry with. Use the `text` captured synchronously
+      // above — `event.currentTarget` is null after the await.
+      const accepted = await onSubmit({ text, files }, event);
+      // Only clear once the handler has ACCEPTED the submission. If it returns
+      // `false` (e.g. a turn is mid-stream), keep the files so the user doesn't
+      // silently lose them on a blocked Enter.
+      if (accepted !== false) {
+        // Success — safe to clear and revoke the now-unused object URLs.
+        clear();
+      }
+    } catch {
+      // Keep the attachments mounted so the user can retry after a failed send.
     }
   };
 
@@ -525,10 +564,12 @@ export const PromptInput = ({
       <span aria-hidden="true" className="hidden" ref={anchorRef} />
       <input
         accept={accept}
+        aria-label="Upload files"
         className="hidden"
         multiple={multiple}
         onChange={handleChange}
         ref={inputRef}
+        title="Upload files"
         type="file"
       />
       <form
@@ -576,6 +617,10 @@ export const PromptInputTextarea = React.forwardRef<
   ...props
 }, ref) => {
   const attachments = usePromptInputAttachments();
+  // Track IME composition so Enter doesn't submit mid-composition. Some
+  // browsers only surface this through composition events rather than
+  // KeyboardEvent.isComposing, so we track both.
+  const [isComposing, setIsComposing] = useState(false);
 
   // Auto-grow via JS scrollHeight measurement — works in every browser. (The
   // CSS `field-sizing-content` property isn't supported in Safari/Firefox, so
@@ -608,7 +653,7 @@ export const PromptInputTextarea = React.forwardRef<
 
     if (e.key === "Enter") {
       // Don't submit if IME composition is in progress
-      if (e.nativeEvent.isComposing) {
+      if (isComposing || e.nativeEvent.isComposing) {
         return;
       }
 
@@ -620,8 +665,31 @@ export const PromptInputTextarea = React.forwardRef<
       // Submit on Enter (without Shift)
       e.preventDefault();
       const form = e.currentTarget.form;
+      // Respect a disabled submit button — Enter shouldn't bypass the guard
+      // the button already enforces (e.g. empty input, or send disabled).
+      const submitButton = form?.querySelector(
+        'button[type="submit"]'
+      ) as HTMLButtonElement | null;
+      if (submitButton?.disabled) {
+        return;
+      }
       if (form) {
         form.requestSubmit();
+      }
+      return;
+    }
+
+    // Backspace on an empty textarea removes the most recent attachment, so a
+    // mistaken attachment can be undone without reaching for the mouse.
+    if (
+      e.key === "Backspace" &&
+      e.currentTarget.value === "" &&
+      attachments.files.length > 0
+    ) {
+      e.preventDefault();
+      const lastAttachment = attachments.files.at(-1);
+      if (lastAttachment) {
+        attachments.remove(lastAttachment.id);
       }
     }
   };
@@ -667,6 +735,8 @@ export const PromptInputTextarea = React.forwardRef<
         resize();
       }}
       onKeyDown={handleKeyDown}
+      onCompositionStart={() => setIsComposing(true)}
+      onCompositionEnd={() => setIsComposing(false)}
       onPaste={handlePaste}
       placeholder={placeholder}
       {...props}
@@ -703,18 +773,26 @@ export const PromptInputTools = ({
   />
 );
 
-export type PromptInputButtonProps = ComponentProps<typeof Button>;
+export type PromptInputButtonProps = ComponentProps<typeof Button> & {
+  // Optional hover tooltip. Also rendered as an sr-only label so icon-only
+  // buttons are announced. Matches the Action component's tooltip convention.
+  tooltip?: string;
+  label?: string;
+};
 
 export const PromptInputButton = ({
   variant = "ghost",
   className,
   size,
+  tooltip,
+  label,
+  children,
   ...props
 }: PromptInputButtonProps) => {
   const newSize =
-    (size ?? Children.count(props.children) > 1) ? "default" : "icon";
+    (size ?? Children.count(children) > 1) ? "default" : "icon";
 
-  return (
+  const button = (
     <Button
       className={cn(
         "shrink-0 gap-1.5 rounded-lg",
@@ -726,7 +804,27 @@ export const PromptInputButton = ({
       type="button"
       variant={variant}
       {...props}
-    />
+    >
+      {children}
+      {(label || tooltip) && (
+        <span className="sr-only">{label || tooltip}</span>
+      )}
+    </Button>
+  );
+
+  if (!tooltip) {
+    return button;
+  }
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>
+          <p>{tooltip}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };
 
