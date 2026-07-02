@@ -8,7 +8,7 @@ import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
 import type { TurnState } from './transcript/types';
-import type { ActionRenderer, ToolRenderer } from '../types';
+import type { ActionRenderer, ToolRenderer, FeedbackEvent } from '../types';
 
 /**
  * One message in the conversation, as its own memoized component.
@@ -51,9 +51,19 @@ interface MessageItemProps {
   onRegenerate?: () => void;
   /** Approve/deny a paused (needsApproval) tool call. */
   onToolApproval?: (approvalId: string, approved: boolean) => void;
+  /** Show the thumbs up/down feedback control (opt-in via `config.feedback`). */
+  feedbackEnabled?: boolean;
+  /** Active conversation id, threaded through for the feedback payload. */
+  conversationId?: string;
+  /** Widget `apiBase` for the best-effort feedback POST (skipped when falsy). */
+  feedbackApiBase?: string;
+  /** Headers mirroring the chat transport, for the feedback POST. */
+  feedbackHeaders?: Record<string, string>;
+  /** Host callback fired on every feedback submission. */
+  onFeedback?: (feedback: FeedbackEvent) => void;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, onFeedback }: MessageItemProps) {
   // Derive part subsets once per message (recomputed only when parts change).
   const sourceParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'source-url') ?? [],
@@ -184,6 +194,12 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
           text={messageText}
           onRegenerate={showRegenerate ? onRegenerate : undefined}
           alwaysVisible={isLast}
+          feedbackEnabled={feedbackEnabled}
+          messageId={message.id}
+          conversationId={conversationId}
+          feedbackApiBase={feedbackApiBase}
+          feedbackHeaders={feedbackHeaders}
+          onFeedback={onFeedback}
         />
       )}
     </div>

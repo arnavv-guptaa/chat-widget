@@ -840,6 +840,20 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     regenerate?.();
   }, [regenerate]);
 
+  // Headers for the best-effort feedback POST. Mirror EXACTLY what the chat
+  // transport sends (see the useChat DefaultChatTransport above): the end-user
+  // id plus any host-injected extra headers. The Next.js handler mounted at
+  // apiBase forwards these to the hosted backend with its server-side Bearer
+  // token, so the widget reuses one auth mechanism instead of inventing another.
+  // Memoized so the memoized MessageItem list doesn't see a new object each render.
+  const feedbackHeaders = useMemo(
+    () => ({
+      'X-User-Id': config?.userId || '',
+      ...(config?.extraHeaders ?? {}),
+    }),
+    [config?.userId, config?.extraHeaders],
+  );
+
   // Memoized message list. Each message is a memoized <MessageItem>; the SDK
   // reuses old message refs and clones only the streaming (last) one, so only
   // the active bubble re-renders per tick. Assistant turns render through the
@@ -858,9 +872,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           actionRenderers={config?.actionRenderers}
           onRegenerate={handleRegenerate}
           onToolApproval={handleToolApproval}
+          feedbackEnabled={config?.feedback === true}
+          conversationId={activeTabId}
+          feedbackApiBase={config?.apiBase}
+          feedbackHeaders={feedbackHeaders}
+          onFeedback={config?.onFeedback}
         />
       )),
-    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval],
+    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.onFeedback],
   );
 
   // Follow-up chips (#134): after an assistant turn settles, derive up to
