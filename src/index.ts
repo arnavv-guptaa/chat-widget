@@ -44,6 +44,7 @@ export type {
   ActionResultField,
   FollowUpConfig,
   FollowUpMessage,
+  FeedbackEvent,
 } from './types';
 
 export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';

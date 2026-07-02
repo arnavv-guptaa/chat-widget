@@ -232,6 +232,47 @@ export interface ChatWidgetConfig {
    * streaming.
    */
   followUps?: FollowUpConfig;
+
+  /**
+   * Show a thumbs up / thumbs down control under each completed ASSISTANT
+   * message so end users can rate answer quality. Opt-in — omit or set `false`
+   * to hide the control entirely (default). When enabled, clicking a thumb
+   * records the rating to the hosted backend (`POST ${apiBase}/v1/feedback`,
+   * reusing the widget's existing transport headers — best-effort, never
+   * blocks or errors the chat) AND fires `onFeedback`. Thumbs-down reveals an
+   * optional inline reason box; submitting with or without a reason works.
+   *
+   * Degrades cleanly: with no hosted base URL (headless render / BYO backend)
+   * the network call is skipped and only `onFeedback` fires. Existing behaviour
+   * is untouched when this is off.
+   */
+  feedback?: boolean;
+
+  /**
+   * Fired on every feedback submission (thumbs up or down), whether or not the
+   * backend POST succeeds — so hosts can wire their own analytics / storage
+   * even in BYO / headless mode where there is no hosted feedback endpoint.
+   *
+   * `conversationId` is the active conversation (may be undefined for a brand-new
+   * chat not yet persisted); `messageId` identifies the rated assistant message;
+   * `reason` is present only when the user typed one (thumbs-down).
+   */
+  onFeedback?: (feedback: FeedbackEvent) => void;
+}
+
+/**
+ * Payload passed to {@link ChatWidgetConfig.onFeedback} when a user rates an
+ * assistant message via the thumbs control.
+ */
+export interface FeedbackEvent {
+  /** Id of the assistant message being rated. */
+  messageId: string;
+  /** Active conversation id, if the conversation has one yet. */
+  conversationId?: string;
+  /** Thumbs up or down. */
+  rating: 'up' | 'down';
+  /** Optional freeform reason (thumbs-down); omitted when the user gave none. */
+  reason?: string;
 }
 
 /**
