@@ -19,7 +19,7 @@ import {
   type ChatStore,
 } from '../../chat-store';
 import type { StorageAdapter, UploadInput, UploadResult } from '../../storage-adapter';
-import type { ChatRequestContext, HostedAgentConfig } from '../../handler-types';
+import type { ChatRequestContext, FeedbackEvent, HostedAgentConfig } from '../../handler-types';
 import type {
   ListMessagesOptions,
   SaveTurnInput,
@@ -147,7 +147,9 @@ class HostedChatStore implements ChatStore {
     const res = await this.req(`/conversations/${encodeURIComponent(input.conversationId)}/turns`, {
       method: 'POST',
       headers: this.headers(true),
-      body: JSON.stringify({ messages: input.messages, model: input.model }),
+      // `usage` (token/cost) rides along when present; an older hosted API simply
+      // ignores the extra field, so this stays backward-compatible.
+      body: JSON.stringify({ messages: input.messages, model: input.model, usage: input.usage }),
     });
     if (res.status === 403) throw new ConversationOwnershipError(input.conversationId);
     if (!res.ok) {
@@ -271,12 +273,81 @@ export function createHostedConfig(options: HostedOptions) {
         systemPrompt: raw.systemPrompt ?? null,
         greeting: raw.greeting ?? null,
         appearance: raw.appearance ?? null,
+        maxOutputTokens: raw.maxOutputTokens ?? null,
+        // Dashboard-pushed Headroom compression toggle. Consulted by the handler
+        // as `hosted?.compression` (code > hosted > off); it must survive the
+        // fetcher's normalisation or the dashboard switch is silently dead.
+        compression: raw.compression ?? null,
       };
       cached = { value, at: now };
       return value;
     } catch {
       cached = { value: null, at: now };
       return null;
+    }
+  };
+}
+
+/** Options for the hosted feedback recorder. Extends the shared `HostedOptions`
+ *  with the same optional `agentId` the hosted memory client accepts, so the
+ *  feedback lands in the right agent namespace. Same config, no new shape. */
+export interface HostedFeedbackOptions extends HostedOptions {
+  /**
+   * Agent namespace, sent alongside the feedback so the hosted service scopes
+   * it with the tenant + user (mirrors `createHostedMemory`). Optional: omit
+   * when the apiKey already resolves a single agent server-side.
+   */
+  agentId?: string;
+}
+
+/**
+ * Create an `onFeedback` handler backed by the hosted @mordn/chat-api service.
+ * Pass to `createChatHandler({ onFeedback: createHostedFeedback({ apiKey, agentId }) })`.
+ *
+ * This is the hosted DEFAULT for the feedback seam — the counterpart to
+ * `createHostedChatStore` / `createHostedMemory`. It forwards the verified
+ * feedback event to chat-api `POST /v1/feedback` using the EXACT plumbing the
+ * hosted store/memory clients use: `Authorization: Bearer <apiKey>` +
+ * `X-Chat-User: <verified userId>`, base URL `https://api.mordn.dev` (override
+ * via `baseUrl`), JSON body. The `apiKey` authenticates the tenant; the userId
+ * the handler resolved server-side rides in `X-Chat-User` — the browser never
+ * holds the secret and never asserts the identity.
+ *
+ * Best-effort to match the handler's contract: any network/HTTP failure is
+ * swallowed (the handler already guarantees feedback never 500s a turn), so a
+ * telemetry hiccup can't break the widget.
+ */
+export function createHostedFeedback(options: HostedFeedbackOptions) {
+  if (!options.apiKey) throw new Error('[chat-widget] createHostedFeedback requires an apiKey');
+  const base = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+  const fetchImpl = options.fetch ?? fetch;
+  const apiKey = options.apiKey;
+  const agentId = options.agentId;
+
+  return async (feedback: FeedbackEvent, _ctx: ChatRequestContext): Promise<void> => {
+    try {
+      const res = await fetchImpl(`${base}/v1/feedback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'X-Chat-User': feedback.userId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...(agentId ? { agentId } : {}),
+          conversationId: feedback.conversationId,
+          messageId: feedback.messageId,
+          rating: feedback.rating,
+          ...(feedback.reason ? { reason: feedback.reason } : {}),
+        }),
+      });
+      if (!res.ok) {
+        // Non-2xx is swallowed — the handler's response is already `{ ok:true }`.
+        console.debug('[chat-widget] hosted feedback POST rejected:', res.status);
+      }
+    } catch (err) {
+      // Network failure — best-effort, never surfaces to the user.
+      console.debug('[chat-widget] hosted feedback POST failed:', err);
     }
   };
 }

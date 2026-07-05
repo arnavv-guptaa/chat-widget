@@ -62,6 +62,39 @@ export interface ChatWidgetConfig {
   starterPrompts?: StarterPrompt[];
 
   /**
+   * Dynamic starter prompts resolved at runtime. Use this instead of (or in
+   * addition to) the static `starterPrompts` when the right prompts depend on
+   * host state — the current route, the resource the user is viewing, their
+   * role. Called once when the empty state is first shown; may be async. When
+   * it resolves to a non-empty array it takes precedence over `starterPrompts`;
+   * errors or empty results fall back to the static list.
+   */
+  getStarterPrompts?: () => StarterPrompt[] | Promise<StarterPrompt[]>;
+
+  /**
+   * Enables the always-available "Not sure where to start?" affordance in the
+   * empty state. When set, a small secondary link appears below the starter
+   * prompts; clicking it sends this string as the user's message (e.g.
+   * "What can you help me with?"), giving users a guaranteed onramp when a
+   * blank input offers no direction. Omit to hide the affordance.
+   */
+  capabilitiesPrompt?: string;
+
+  /**
+   * First-class per-turn context (#162). A typed, structured object describing
+   * the user's live app state — current route, the record they're viewing,
+   * their plan/role, etc. — sent alongside every message and folded into the
+   * model's system prompt server-side so answers are aware of what the user is
+   * actually doing (not just generic Q&A).
+   *
+   * SECURITY: the browser controls this value, so the server treats it as
+   * UNTRUSTED. It is only injected when the handler opts in — either via a
+   * server-side `getContext` (authoritative; can validate/merge/override) or
+   * `trustClientContext: true`. Never put secrets here.
+   */
+  context?: ChatContext;
+
+  /**
    * Called when the user dismisses the widget. The widget renders its own
    * close X inside the header (correctly stacked) when this is provided —
    * works in all layouts (popup, inline, page).
@@ -88,6 +121,44 @@ export interface ChatWidgetConfig {
    * clicked the close X). Required when using `open` (controlled mode).
    */
   onOpenChange?: (open: boolean) => void;
+
+  /**
+   * Persist the popup panel's open/closed state across page navigations and
+   * reloads, scoped to (agentId, userId) in localStorage. Once the user
+   * explicitly closes the widget it STAYS closed — it is never silently
+   * re-opened on the next navigation or session.
+   *
+   * Only applies to the uncontrolled `popup` layout. Ignored in controlled
+   * mode (the host owns `open`) and for `inline` / `page`, which are
+   * always-open surfaces. Persistence requires a complete (agentId, userId)
+   * identity; with an incomplete identity nothing is written — the same
+   * no-shared-bucket rule the chat cache uses.
+   *
+   * Default: `true`. Set `false` to fall back to `display.defaultOpen` on
+   * every mount.
+   */
+  persistState?: boolean;
+
+  /**
+   * Allow the panel to be re-opened programmatically (via the widget ref's
+   * `open()` / `toggle()` methods) after the user has explicitly closed it.
+   * This is the master switch for any proactive, host-initiated re-open.
+   *
+   * Default: `false` — once the user dismisses the panel, only their own
+   * click on the toggle button reopens it. Set `true` only if your product
+   * genuinely needs to surface the assistant unprompted (e.g. a guided
+   * onboarding step) and you accept the intrusiveness tradeoff.
+   */
+  allowAutoReopen?: boolean;
+
+  /**
+   * Called whenever the panel's open state changes, with the new value.
+   * Fires for user actions and (allowed) programmatic changes, in both
+   * controlled and uncontrolled mode. Use it to persist the preference
+   * server-side so it survives across browsers / devices — the widget makes
+   * no opinionated server call of its own.
+   */
+  onStateChange?: (open: boolean) => void;
 
   /**
    * Custom buttons rendered in the widget header next to the close X.
@@ -138,6 +209,70 @@ export interface ChatWidgetConfig {
    * native.
    */
   toolRenderers?: Record<string, ToolRenderer>;
+
+  /**
+   * Declarative action-result cards (#166). Map a tool name to a structured
+   * result — `{ status, title, fields, link }` — derived from the tool's REAL
+   * output, rendered as a polished `ActionResultCard`. This is the
+   * "false-completion" guard: the card shows what actually happened (success /
+   * partial / error), not the model's prose claim that it "did" something.
+   *
+   * Precedence: `toolRenderers` (full custom JSX) wins first; then
+   * `actionRenderers` (this declarative card); then the default compact tool
+   * row. Return `null` to fall through to the next.
+   */
+  actionRenderers?: Record<string, ActionRenderer>;
+
+  /**
+   * AI-suggested follow-up question chips shown after each assistant reply
+   * (#134), rendered as tappable pills so users always have a next step and
+   * conversations don't dead-end. Off by default; enable by providing a
+   * `generate` function (a lightweight second model call) or static
+   * `suggestions`. Generated AFTER the reply finishes, so it never blocks
+   * streaming.
+   */
+  followUps?: FollowUpConfig;
+
+  /**
+   * Show a thumbs up / thumbs down control under each completed ASSISTANT
+   * message so end users can rate answer quality. Opt-in — omit or set `false`
+   * to hide the control entirely (default). When enabled, clicking a thumb
+   * records the rating to the hosted backend (`POST ${apiBase}/v1/feedback`,
+   * reusing the widget's existing transport headers — best-effort, never
+   * blocks or errors the chat) AND fires `onFeedback`. Thumbs-down reveals an
+   * optional inline reason box; submitting with or without a reason works.
+   *
+   * Degrades cleanly: with no hosted base URL (headless render / BYO backend)
+   * the network call is skipped and only `onFeedback` fires. Existing behaviour
+   * is untouched when this is off.
+   */
+  feedback?: boolean;
+
+  /**
+   * Fired on every feedback submission (thumbs up or down), whether or not the
+   * backend POST succeeds — so hosts can wire their own analytics / storage
+   * even in BYO / headless mode where there is no hosted feedback endpoint.
+   *
+   * `conversationId` is the active conversation (may be undefined for a brand-new
+   * chat not yet persisted); `messageId` identifies the rated assistant message;
+   * `reason` is present only when the user typed one (thumbs-down).
+   */
+  onFeedback?: (feedback: FeedbackEvent) => void;
+}
+
+/**
+ * Payload passed to {@link ChatWidgetConfig.onFeedback} when a user rates an
+ * assistant message via the thumbs control.
+ */
+export interface FeedbackEvent {
+  /** Id of the assistant message being rated. */
+  messageId: string;
+  /** Active conversation id, if the conversation has one yet. */
+  conversationId?: string;
+  /** Thumbs up or down. */
+  rating: 'up' | 'down';
+  /** Optional freeform reason (thumbs-down); omitted when the user gave none. */
+  reason?: string;
 }
 
 /**
@@ -146,6 +281,75 @@ export interface ChatWidgetConfig {
  * output-error) and on the input/output shapes.
  */
 export type ToolRenderer = (part: ToolPartLike) => ReactNode | null;
+
+/**
+ * Outcome of an action, derived from the REAL tool output (never the model's
+ * prose). Drives the card's icon + colour. 'partial' is the critical state for
+ * false-completion prevention — the tool ran but didn't fully succeed.
+ */
+export type ActionResultStatus = 'pending' | 'success' | 'partial' | 'error';
+
+/** One key/value row shown on an action card (e.g. "Assignee" → "@alice"). */
+export interface ActionResultField {
+  label: string;
+  value: ReactNode;
+}
+
+/**
+ * Structured description of what a tool actually did, rendered as an
+ * `ActionResultCard`. Returned by an `ActionRenderer`.
+ */
+export interface ActionResult {
+  /** Real outcome — derive from the tool's output/state, not the model's claim. */
+  status: ActionResultStatus;
+  /** Headline, e.g. "Ticket created" or "Couldn't update record". */
+  title: string;
+  /** Key parameters / outcome rows (assignee, priority, id…). */
+  fields?: ActionResultField[];
+  /** Optional action link, e.g. `{ label: 'View in Linear', href }`. */
+  link?: { label: string; href: string };
+  /** Optional freeform note or error detail under the fields. */
+  note?: ReactNode;
+}
+
+/**
+ * Maps a tool part to a declarative `ActionResult` (or `null` to fall back to
+ * the default tool row). Receives the same loose `ToolPartLike` as
+ * `ToolRenderer`, so it can branch on `state`/`output` to report the true
+ * outcome.
+ */
+export type ActionRenderer = (part: ToolPartLike) => ActionResult | null;
+
+/**
+ * Simplified message handed to a follow-up generator — no AI SDK types to
+ * import. `content` is the concatenated text of the message's text parts.
+ */
+export interface FollowUpMessage {
+  role: string;
+  content: string;
+}
+
+/**
+ * AI-suggested follow-up chips shown after each assistant reply (#134).
+ */
+export interface FollowUpConfig {
+  /**
+   * Master switch. Default: enabled when `generate` or `suggestions` is set;
+   * disabled otherwise. Set `false` to force-disable.
+   */
+  enabled?: boolean;
+  /**
+   * Generate up to `max` contextual follow-up questions from the completed
+   * conversation. Runs AFTER the assistant reply finishes (off the hot path —
+   * never blocks the main response). Use a lightweight model call here; errors
+   * or a non-array result fall back to no chips.
+   */
+  generate?: (messages: FollowUpMessage[]) => string[] | Promise<string[]>;
+  /** Static follow-ups shown after every reply (used when `generate` is absent). */
+  suggestions?: string[];
+  /** Max chips to show. Default 3. */
+  max?: number;
+}
 
 /**
  * Loose shape of the tool parts the renderer will receive — covers
@@ -158,10 +362,29 @@ export interface ToolPartLike {
   /** Always present on dynamic-tool parts; sometimes absent on static. */
   toolName?: string;
   toolCallId: string;
-  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+  /**
+   * AI SDK v6 tool lifecycle. The `approval-*` and `output-denied` states cover
+   * human-in-the-loop tools (`needsApproval`): the SDK pauses before `execute`
+   * and emits `approval-requested`; the UI shows Approve/Deny, the response
+   * moves it to `approval-responded`, then `output-available` (ran) or
+   * `output-denied` (skipped).
+   */
+  state:
+    | 'input-streaming'
+    | 'input-available'
+    | 'approval-requested'
+    | 'approval-responded'
+    | 'output-available'
+    | 'output-error'
+    | 'output-denied';
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  /**
+   * Present when `state === 'approval-requested'`: the approval to respond to.
+   * `isAutomatic` true means a policy auto-approved it (no user prompt needed).
+   */
+  approval?: { id: string; isAutomatic?: boolean };
 }
 
 /**
@@ -215,6 +438,13 @@ export interface InputPlugin {
   emptyText?: string;
 }
 
+/**
+ * Structured, per-turn context passed from the host app to the model (#162).
+ * A plain JSON-serialisable object. Extend it with your own shape via the
+ * `context` prop, e.g. `context={{ route: '/billing', plan: 'pro' } satisfies ChatContext}`.
+ */
+export type ChatContext = Record<string, unknown>;
+
 export interface StarterPrompt {
   /**
    * The main text of the prompt (also used as the message when clicked)
@@ -225,6 +455,13 @@ export interface StarterPrompt {
    * Optional subtitle for additional context
    */
   subtitle?: string;
+
+  /**
+   * Optional leading icon (e.g. a lucide icon element). Renders before the
+   * title; most impactful in the `grid` starter-prompt layout where chips have
+   * room for one.
+   */
+  icon?: ReactNode;
 }
 
 export interface ThemeConfig {
@@ -363,6 +600,15 @@ export interface DisplayConfig {
    * Default: false
    */
   defaultOpen?: boolean;
+
+  /**
+   * How starter prompts are laid out in the empty state.
+   * - `'list'` (default): full-width rows, good for descriptive prompts with
+   *   subtitles.
+   * - `'grid'`: a 2-column chip grid, good for short, scannable prompts
+   *   (optionally with an `icon`).
+   */
+  starterPromptsLayout?: 'list' | 'grid';
 
   /**
    * Show toggle button to open the chat

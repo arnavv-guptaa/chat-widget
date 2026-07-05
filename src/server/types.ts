@@ -121,9 +121,58 @@ export interface ListMessagesOptions {
  * already exist must be a no-op, never a duplicate. (Replays, retries, and
  * the AI SDK's own resumability all deliver already-seen ids.)
  */
+/**
+ * Token usage + dollar cost for one assistant turn, normalised from streamText's
+ * `onFinish` (`usage`/`totalUsage` + `providerMetadata.gateway`). The Vercel AI
+ * Gateway PRE-COMPUTES the cost, so we record it verbatim — no price table. All
+ * money fields are decimal STRINGS (e.g. "0.000114") to avoid float drift; the
+ * store persists them as exact `numeric`. Every field is optional because a
+ * provider may not return it (only the gateway gives cost); a turn with no
+ * usable usage simply isn't recorded.
+ */
+export interface UsageRecord {
+  /** Assistant message id this turn produced (links the usage row to the message). */
+  messageId?: string;
+  model?: string;
+  /** gateway.routing.resolvedProvider — who actually served it (vs requested). */
+  resolvedProvider?: string;
+  finishReason?: string;
+  /** Number of LLM round-trips in the turn (steps.length). */
+  stepCount?: number;
+
+  // Tokens (from totalUsage — the whole turn, summed across tool steps).
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+
+  // Cost in USD — decimal strings from the gateway (exact money, never float).
+  costUsd?: string;
+  inputCostUsd?: string;
+  outputCostUsd?: string;
+  marketCostUsd?: string;
+  surchargeUsd?: string;
+
+  latencyMs?: number;
+  /** gateway.generationId — unique per generation; the store's idempotency key. */
+  generationId?: string;
+
+  /** The full provider metadata, verbatim, so nothing is lost. */
+  raw?: Record<string, unknown>;
+}
+
 export interface SaveTurnInput {
   conversationId: string;
   messages: UIMessage[];
   /** Model that produced the assistant message(s) in this turn. */
   model?: string;
+  /**
+   * Optional token-usage + cost for this turn (normalised from the gateway's
+   * onFinish). Stores that support usage analytics persist it; others ignore it.
+   * Never load-bearing for chat correctness — a missing/failed usage record must
+   * not affect message persistence.
+   */
+  usage?: UsageRecord;
 }

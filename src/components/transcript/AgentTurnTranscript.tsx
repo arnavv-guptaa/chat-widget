@@ -14,7 +14,8 @@ import {
   pickPlanningVerb,
 } from './toolRegistry';
 import { toToolPart, type ToolPart, type TurnState } from './types';
-import type { ToolRenderer } from '../../types';
+import type { ActionRenderer, ToolRenderer } from '../../types';
+import { ActionResultCard } from '../action-result-card';
 
 /**
  * Renders one assistant turn as a clean, in-order flow — text, reasoning, and
@@ -30,6 +31,8 @@ interface AgentTurnTranscriptProps {
   isStreaming: boolean;
   turn: TurnState;
   toolRenderers?: Record<string, ToolRenderer>;
+  actionRenderers?: Record<string, ActionRenderer>;
+  onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
@@ -45,6 +48,8 @@ function AgentTurnTranscriptImpl({
   isStreaming,
   turn,
   toolRenderers,
+  actionRenderers,
+  onToolApproval,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
 
@@ -116,6 +121,28 @@ function AgentTurnTranscriptImpl({
           });
           if (rendered != null) return <Fragment key={item.id}>{rendered}</Fragment>;
         }
+        // Declarative action card (#166) — runs after full-JSX toolRenderers,
+        // before the default row. Reflects the REAL outcome (success / partial /
+        // error), so a model's confident "Done!" can't hide a failed step.
+        const action = actionRenderers?.[part.tool];
+        if (action) {
+          const result = action({
+            type: `tool-${part.tool}`,
+            toolName: part.tool,
+            toolCallId: part.id,
+            state: part.state.status,
+            input: part.state.input,
+            output: part.state.output,
+            errorText: part.state.errorText,
+          });
+          if (result != null) {
+            return (
+              <Fragment key={item.id}>
+                <ActionResultCard {...result} />
+              </Fragment>
+            );
+          }
+        }
         const status = getToolStatus(part, turn);
         const verb = getToolVerb(part.tool, status.isPending);
         // While running show the input subtitle; once done prefer a result summary.
@@ -128,6 +155,12 @@ function AgentTurnTranscriptImpl({
               ? part.state.output
               : JSON.stringify(part.state.output, null, 2)
             : undefined;
+        // Human-in-the-loop: a tool paused awaiting approval shows Approve/Deny
+        // (unless a policy already auto-approved it). onApprove resumes the turn.
+        const awaitingApproval =
+          part.state.status === 'approval-requested' &&
+          !!part.approval &&
+          !part.approval.isAutomatic;
         return (
           <AgentToolCall
             key={item.id}
@@ -137,6 +170,12 @@ function AgentTurnTranscriptImpl({
             isError={status.isError}
             detail={detail}
             errorText={part.state.errorText}
+            awaitingApproval={awaitingApproval}
+            onApprove={
+              awaitingApproval && onToolApproval && part.approval
+                ? (approved) => onToolApproval(part.approval!.id, approved)
+                : undefined
+            }
           />
         );
       })}

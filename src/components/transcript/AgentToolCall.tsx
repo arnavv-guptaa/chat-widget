@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Loader2, X } from 'lucide-react';
+import { Check, ChevronRight, Clock, Loader2, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { CodeBlock } from '../code-block';
 import { TextShimmer } from './TextShimmer';
@@ -31,6 +31,10 @@ interface AgentToolCallProps {
   detail?: string;
   /** Error text shown in red when isError. */
   errorText?: string;
+  /** True when this tool is paused awaiting the end-user's approval. */
+  awaitingApproval?: boolean;
+  /** Approve (true) / deny (false) the paused tool. */
+  onApprove?: (approved: boolean) => void;
 }
 
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
@@ -40,8 +44,22 @@ const HOVER = { backgroundColor: 'transparent' } as const;
 const SUCCESS_COLOR = { color: '#4ade80' } as const; // Tailwind green-400
 const ERROR_COLOR = { color: '#f87171' } as const; // Tailwind red-400
 
-/** Leading status icon: spinner (running) → green check (done) → red cross (error). */
-function StatusIcon({ isPending, isError }: { isPending: boolean; isError: boolean }) {
+const APPROVAL_COLOR = { color: '#d97706' } as const; // amber-600
+
+/** Leading status icon: amber clock (awaiting approval) → spinner (running) →
+ *  green check (done) → red cross (error). */
+function StatusIcon({
+  isPending,
+  isError,
+  awaitingApproval,
+}: {
+  isPending: boolean;
+  isError: boolean;
+  awaitingApproval?: boolean;
+}) {
+  if (awaitingApproval) {
+    return <Clock className="size-3.5 flex-shrink-0" style={APPROVAL_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+  }
   if (isError) {
     return <X className="size-3.5 flex-shrink-0" style={ERROR_COLOR} strokeWidth={2.5} aria-hidden="true" />;
   }
@@ -58,6 +76,8 @@ function AgentToolCallImpl({
   isError,
   detail,
   errorText,
+  awaitingApproval,
+  onApprove,
 }: AgentToolCallProps) {
   const [expanded, setExpanded] = useState(false);
   const hasDetail = Boolean((detail && detail.trim()) || errorText);
@@ -67,12 +87,28 @@ function AgentToolCallImpl({
       <div
         className={cn(
           'flex items-center gap-2 rounded-md px-2 py-1 -mx-2 transition-colors',
-          hasDetail && 'cursor-pointer hover:bg-[var(--chat-hover-bg)]',
+          hasDetail &&
+            'cursor-pointer hover:bg-[var(--chat-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]',
         )}
         style={HOVER}
+        // Only the rows that actually expand a payload are interactive — expose
+        // them as keyboard-operable disclosures; leave static rows as plain text.
+        role={hasDetail ? 'button' : undefined}
+        tabIndex={hasDetail ? 0 : undefined}
+        aria-expanded={hasDetail ? expanded : undefined}
         onClick={hasDetail ? () => setExpanded((v) => !v) : undefined}
+        onKeyDown={
+          hasDetail
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setExpanded((v) => !v);
+                }
+              }
+            : undefined
+        }
       >
-        <StatusIcon isPending={isPending} isError={isError} />
+        <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
 
         <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
           {isPending ? (
@@ -101,6 +137,28 @@ function AgentToolCallImpl({
           />
         )}
       </div>
+
+      {/* Human-in-the-loop: Approve / Deny a paused tool. */}
+      {awaitingApproval && onApprove && (
+        <div className="flex items-center gap-2 pl-6 pt-1.5">
+          <button
+            type="button"
+            onClick={() => onApprove(true)}
+            className="chat-tool-approve inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium"
+          >
+            <Check className="size-3.5" strokeWidth={2.5} />
+            Approve
+          </button>
+          <button
+            type="button"
+            onClick={() => onApprove(false)}
+            className="chat-tool-deny inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium"
+          >
+            <X className="size-3.5" strokeWidth={2.5} />
+            Deny
+          </button>
+        </div>
+      )}
 
       {expanded && hasDetail && (
         <div className="chat-tool-detail pl-4 pr-2 pt-1 pb-1">
@@ -133,5 +191,7 @@ export const AgentToolCall = memo(
     p.isPending === n.isPending &&
     p.isError === n.isError &&
     p.detail === n.detail &&
-    p.errorText === n.errorText,
+    p.errorText === n.errorText &&
+    p.awaitingApproval === n.awaitingApproval &&
+    p.onApprove === n.onApprove,
 );

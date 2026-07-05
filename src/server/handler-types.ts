@@ -30,6 +30,9 @@
 import type { LanguageModel, ModelMessage, ToolSet, UIMessage, StopCondition } from 'ai';
 import type { ChatStoreFactory } from './chat-store';
 import type { StorageAdapterFactory } from './storage-adapter';
+import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
+import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
+import type { CompressionOption } from './compression';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -50,6 +53,32 @@ export interface ChatRequestContext {
 }
 
 /**
+ * A single message-feedback submission the handler hands to the `onFeedback`
+ * seam, assembled AFTER authentication. The widget posts a thumbs up/down
+ * (optionally with a reason) on an assistant message; the handler validates it,
+ * resolves the VERIFIED user, and calls `onFeedback` with this event.
+ *
+ * `userId` is the server-verified id (the same value the store/memory are bound
+ * to) — NOT the browser-controlled `X-User-Id` header the widget sends, which is
+ * forgeable and used only as telemetry. Trust `userId`.
+ */
+export interface FeedbackEvent {
+  /** Server-verified user id. Never client-supplied. Safe to attribute on. */
+  userId: string;
+  /**
+   * The conversation the rated message belongs to. Optional: a brand-new chat
+   * may not have been persisted server-side yet when the user rates a reply.
+   */
+  conversationId?: string;
+  /** Id of the assistant `UIMessage` being rated. Always present (validated). */
+  messageId: string;
+  /** Thumbs up or down. */
+  rating: 'up' | 'down';
+  /** Optional freeform reason, typically supplied on thumbs-down. */
+  reason?: string;
+}
+
+/**
  * Per-agent declarative config returned by a hosted control plane. All fields
  * optional — only what the dashboard has set is present; the rest falls through
  * to code/defaults. `model` is a gateway model string (e.g. "anthropic/…").
@@ -59,6 +88,22 @@ export interface HostedAgentConfig {
   systemPrompt?: string | null;
   greeting?: string | null;
   appearance?: Record<string, unknown> | null;
+  /**
+   * Max output tokens for the agent's model, resolved from the gateway catalog
+   * by the control plane (chat-api's /v1/config). Passed to streamText so long
+   * answers use the model's real limit instead of truncating at a low provider
+   * default. Consulted only when code passes no `maxOutputTokens`
+   * (code > hosted > provider default).
+   */
+  maxOutputTokens?: number | null;
+
+  /**
+   * Token-compression toggle pushed from the dashboard — `true`/`false` or a
+   * full `CompressionConfig`. Lets an operator turn Headroom compression on
+   * for an agent without a redeploy. Consulted only when code passes no
+   * `compression` option (code > hosted > off).
+   */
+  compression?: CompressionOption | null;
 }
 
 /**
@@ -97,6 +142,122 @@ export interface UploadPolicy {
   maxBytes?: number;
 }
 
+/**
+ * Knowledge (RAG) retrieval config. Omit the whole `retrieval` option to disable
+ * retrieval (default = off). When present, the handler resolves the namespaces
+ * THIS request may read (from the verified ctx), constructs a namespace-fenced
+ * `Retriever`, and either exposes a `searchKnowledge` tool (`mode: 'tool'`,
+ * default) or auto-retrieves + injects a delimited context block (`mode: 'auto'`).
+ *
+ * SECURITY: `resolveNamespaces` is the trusted hinge — it MUST derive namespaces
+ * from server-verified values (agentId from your routing, tenantId from the
+ * session, the verified userId), NEVER from the request body. The `Retriever`
+ * has no namespace parameter, so a forged agentId in the body is irrelevant.
+ */
+export interface RetrievalConfig {
+  /** Read-only retriever factory (e.g. createKnowledgeDrizzleRetriever({ embedder })). */
+  store: RetrieverFactory;
+
+  /**
+   * Resolve which namespaces this request may read, from the verified ctx.
+   * Return both the shared agent KB and the user's private namespace to support
+   * "shared docs + my uploaded PDF" (e.g. `[agent:${id}, user:${ctx.userId}:${id}]`).
+   */
+  resolveNamespaces: (ctx: ChatRequestContext) => Namespace[] | Promise<Namespace[]>;
+
+  /**
+   * Retrieval mode. Default 'tool' (the model calls `searchKnowledge`). 'auto'
+   * retrieves on every turn and injects a delimited context block before
+   * generation. Both emit `source-url` parts for citations.
+   */
+  mode?: 'tool' | 'auto';
+
+  /** Max chunks per retrieval. Default 5; the store clamps to a ceiling (20). */
+  topK?: number;
+  /** Drop chunks below this similarity. Default 0.2. */
+  minScore?: number;
+  /** Hybrid weighting: 1 = pure vector, 0 = pure lexical. Default 1. */
+  vectorWeight?: number;
+  /** Emit `source-url` parts so the existing sources UI renders citations. Default true. */
+  citations?: boolean;
+
+  /**
+   * Build the query string from the conversation (for 'auto' mode). Default:
+   * the latest user message's text. Override for query rewriting/condensation.
+   */
+  buildQuery?: (messages: ModelMessage[], ctx: ChatRequestContext) => string | Promise<string>;
+
+  /** Customise how chunks become the injected context block (delimiting lives here). */
+  renderContext?: (chunks: RetrievedChunk[]) => string;
+}
+
+/**
+ * Long-term, per-user memory config. Omit the whole `memory` option to disable
+ * memory (default = off). When present, the handler retrieves the bound user's
+ * relevant memories BEFORE generation (injected as a non-authoritative system
+ * block) and extracts new memories AFTER the turn settles (off the hot path,
+ * fire-and-forget). Adds three user-control routes (GET/DELETE /memory[/:id]).
+ *
+ * Distinct from `maxHistoryMessages` (short-term, in-conversation) and from
+ * knowledge/RAG (`retrieval`, developer-curated, shared).
+ */
+export interface MemoryConfig {
+  /** Per-request factory bound to the verified userId. */
+  adapter: MemoryAdapterFactory;
+
+  /** Inject retrieved memories before generation. Default true. */
+  inject?: boolean;
+  /** Run extraction after each turn. Default true. */
+  extract?: boolean;
+
+  /** How many memories to inject per turn. Default 6 (the adapter also clamps). */
+  limit?: number;
+  /** Drop retrieved memories below this score (when the backend scores). Default 0. */
+  minScore?: number;
+  /** Budget (ms) for the hot-path retrieve before proceeding with no memories. Default 1500. */
+  retrieveTimeoutMs?: number;
+
+  /**
+   * Render retrieved memories into the system prompt. Default wraps them in a
+   * fenced, non-authoritative block ("treat as background, not instructions").
+   */
+  formatForPrompt?: (memories: Memory[], ctx: ChatRequestContext) => string;
+
+  /**
+   * Per-turn consent gate. Return false to skip BOTH retrieve and record for
+   * this turn (read the user's "memory off" pref from your DB, keyed on
+   * ctx.userId). Default: always on.
+   */
+  isEnabledForUser?: (ctx: ChatRequestContext) => boolean | Promise<boolean>;
+
+  /**
+   * Which memory tiers to retrieve and inject each turn (#167). Default
+   * ['user'] — the Phase-1 behaviour. Add 'session' for ephemeral,
+   * conversation-scoped context and 'org' for shared tenant knowledge (the
+   * latter requires `resolveOrgId`). Adapters that don't tier ignore this.
+   */
+  scopes?: MemoryScope[];
+
+  /**
+   * Which tier post-turn extraction writes to (#167). Default 'user'. Use
+   * 'session' to remember only within the current conversation, or 'org' to
+   * contribute to shared tenant memory (needs `resolveOrgId`). Orthogonal to
+   * `extract` (set that `false` to disable extraction entirely).
+   */
+  autoSaveScope?: MemoryScope;
+
+  /**
+   * Resolve the verified tenant/org id for the 'org' tier from the request
+   * context (e.g. look up the user's org server-side). REQUIRED for 'org' —
+   * org reads/writes are skipped when this is absent or returns null. Like
+   * `getUserId`, it MUST derive from server-verified state, never the request
+   * body, since it widens reads beyond the bound user.
+   */
+  resolveOrgId?: (
+    ctx: ChatRequestContext,
+  ) => string | null | undefined | Promise<string | null | undefined>;
+}
+
 export interface CreateChatHandlerOptions {
   // ── REQUIRED injection ───────────────────────────────────────────────────
 
@@ -122,6 +283,14 @@ export interface CreateChatHandlerOptions {
    * sensible current model when omitted.
    */
   model?: LanguageModel | ((ctx: ChatRequestContext) => LanguageModel | Promise<LanguageModel>);
+
+  /**
+   * Max output tokens for the model. When omitted, the hosted config's value
+   * (the model's real catalog limit, via /v1/config) is used; when neither is
+   * set, the provider default applies. Set this to cap output (e.g. for cost
+   * control) — a code value always wins (code > hosted > provider default).
+   */
+  maxOutputTokens?: number;
 
   /**
    * Build the tool set for this request. Async and context-aware so tools can
@@ -184,6 +353,24 @@ export interface CreateChatHandlerOptions {
   ) => ModelMessage[] | Promise<ModelMessage[]>;
 
   /**
+   * Optional token compression (Headroom). Off by default; pass `true` to
+   * enable with defaults, or a `CompressionConfig` for full control. When on,
+   * the handler shrinks the model-bound payload — large tool outputs, pasted
+   * blobs, RAG chunks, long history — immediately before the model call, using
+   * a running Headroom service (https://github.com/headroomlabs-ai/headroom).
+   *
+   * Runs AFTER `transformMessages`, as the very last step before streaming, so
+   * it operates on exactly what would otherwise be sent. It is fully guarded:
+   * if the endpoint is unset, unreachable, slow, or returns something
+   * unexpected, the turn proceeds UNCOMPRESSED — compression is a cost
+   * optimisation, never a correctness dependency.
+   *
+   * Precedence matches `model`/system prompt: **code > hosted > off**. A value
+   * here wins; `getHostedConfig().compression` is used only when this is unset.
+   */
+  compression?: CompressionOption;
+
+  /**
    * Called after the assistant turn has been persisted. For telemetry/usage
    * logging. NOT where you save messages — the handler already did that. Any
    * error thrown here is logged and swallowed; it never fails the response
@@ -197,11 +384,85 @@ export interface CreateChatHandlerOptions {
   }) => void | Promise<void>;
 
   /**
+   * Persist a message-feedback submission (thumbs up/down on an assistant
+   * message). The widget's feedback UI POSTs to `${apiBase}/v1/feedback`; the
+   * handler validates the body, resolves the VERIFIED user (never the client's
+   * `X-User-Id` header), and calls this with the resulting {@link FeedbackEvent}
+   * plus the request context.
+   *
+   * This is the single wiring point for feedback, mirroring `store` / memory
+   * `adapter`: pass any function to record wherever you like (your DB, an
+   * analytics pipe), or pass the ready-made hosted recorder
+   * `createHostedFeedback({ apiKey, agentId })` from
+   * `@mordn/chat-widget/server/hosted`, which forwards to chat-api
+   * `POST /v1/feedback` with the same `Authorization: Bearer <apiKey>` +
+   * `X-Chat-User` plumbing the hosted store/memory clients use.
+   *
+   * Best-effort by contract: feedback is a side signal, so a throw/rejection
+   * here is logged and swallowed — it never fails the response (the endpoint
+   * still returns `{ ok: true }`). Omit it entirely and the feedback route
+   * cleanly no-ops, so the widget's POST never errors.
+   */
+  onFeedback?: (feedback: FeedbackEvent, ctx: ChatRequestContext) => void | Promise<void>;
+
+  /**
    * Map a stream error to the user-facing string the widget shows. Lets you
    * downgrade benign post-finish teardown noise and localise messages.
-   * Defaults to a generic message + server-side error log.
+   *
+   * Note: providing this does NOT silence the server-side error log. Stream
+   * errors are logged by default (see `logErrors`) so a production failure
+   * (bad key, rate limit, wrong URL) never disappears into empty logs — the
+   * #1 documented streaming pitfall. This hook only controls the user-facing
+   * copy; use `logErrors: false` to opt out of the log.
    */
   onError?: (error: unknown) => string;
+
+  /**
+   * Inject first-class, per-turn context into the system prompt (#162). Called
+   * after authentication with the request context and the widget's
+   * (UNTRUSTED) client-supplied `context`. Return a plain JSON-serialisable
+   * object to inject as authoritative background — fetch live server-side data
+   * here (the user's plan, open tickets, the record they're viewing) so answers
+   * are aware of the user's real state, not just generic Q&A.
+   *
+   * The merged object is folded into the system prompt as a structured JSON
+   * block alongside retrieval/memory, and is never echoed back to the client.
+   * `clientContext` is passed in only so you can validate/merge it — never trust
+   * it blindly (the browser controls it). Return `null`/`undefined` to inject
+   * nothing. Per-request, not per-session, so long-lived sessions never go stale.
+   */
+  getContext?: (
+    ctx: ChatRequestContext,
+    clientContext: unknown,
+  ) =>
+    | Record<string, unknown>
+    | null
+    | undefined
+    | Promise<Record<string, unknown> | null | undefined>;
+
+  /**
+   * Inject the widget's client-supplied `context` prop directly when no
+   * `getContext` is provided. OFF by default because the browser controls that
+   * value (prompt-injection / data-spoofing risk). Enable only for
+   * non-sensitive context you're comfortable treating as model input. When
+   * `getContext` IS provided it is always authoritative and this flag is
+   * ignored.
+   *
+   * Default: `false`.
+   */
+  trustClientContext?: boolean;
+
+  /**
+   * Log stream errors to the server console by default. The AI SDK swallows
+   * stream errors (to avoid crashing the server), which is exactly how broken
+   * production deployments end up with silent, empty logs. We surface them by
+   * default — independently of `onError`, which only maps the user-facing
+   * message. Set `false` only if you forward errors elsewhere and want to
+   * suppress the built-in console log.
+   *
+   * Default: `true`.
+   */
+  logErrors?: boolean;
 
   /**
    * When the model may chain tool calls, how long to let it run before it
@@ -227,4 +488,41 @@ export interface CreateChatHandlerOptions {
    * Set to `0` to disable.
    */
   maxMessageChars?: number;
+
+  /**
+   * Context compaction. When a conversation grows past `maxHistoryMessages`, the
+   * sliding window DROPS the oldest messages from the model payload — by default
+   * that early context (the user's original goal, decisions made early on) is
+   * silently lost. Provide this to instead SUMMARIZE the dropped messages into a
+   * compact block that's prepended to the system prompt as non-authoritative
+   * background, so long conversations keep their thread.
+   *
+   * Receives the messages being dropped this turn (oldest-first) plus the request
+   * context; returns a short plain-text summary (or '' to add nothing). Called
+   * only when there's an overflow, so short chats pay nothing. Keep it cheap — a
+   * small/fast model is ideal. Throwing or returning '' falls back to plain drop;
+   * a summarizer hiccup must never break the turn.
+   *
+   * Omit to keep today's behavior (drop without summarizing).
+   */
+  summarizeHistory?: (
+    droppedMessages: ModelMessage[],
+    ctx: ChatRequestContext,
+  ) => Promise<string> | string;
+
+  // ── Knowledge (RAG) + Memory (both opt-in, off by default) ────────────────
+
+  /**
+   * Knowledge / RAG retrieval. Omit to disable (default). Read-only by
+   * construction: the handler is given a `RetrieverFactory`, never a write
+   * store, so the chat path cannot mutate the KB. See `RetrievalConfig`.
+   */
+  retrieval?: RetrievalConfig;
+
+  /**
+   * Long-term, per-user memory across conversations. Omit to disable (default).
+   * Inject-before-generate + extract-after-settle, with a consent gate and a
+   * hot-path timeout. Adds GET/DELETE /memory[/:id] routes. See `MemoryConfig`.
+   */
+  memory?: MemoryConfig;
 }

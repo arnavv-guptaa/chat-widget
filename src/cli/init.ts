@@ -91,6 +91,12 @@ export const { GET, POST, DELETE } = createChatHandler({
   // A system prompt. Make it a function of ctx to personalise per user.
   buildSystemPrompt: () => 'You are a helpful assistant.',
 
+  // Optional: cut tokens on large tool outputs / context with Headroom
+  // (https://github.com/headroomlabs-ai/headroom). Run a Headroom service,
+  // set HEADROOM_BASE_URL in your env, then flip this on. Safe by default —
+  // if the service is unreachable the turn just proceeds uncompressed.
+  // compression: true,
+
   // Add your tools here. buildTools is async and receives the request context
   // (userId, conversationId, request) so tools can be user-scoped. If a tool
   // holds a per-request resource (e.g. an MCP client), return a \`cleanup\`
@@ -170,6 +176,19 @@ DATABASE_URL="postgresql://postgres.xxx:[PASSWORD]@aws-0-region.pooler.supabase.
 # The bucket MUST be created as a PRIVATE bucket.
 NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+
+# Knowledge base / RAG embeddings (required only if you use the knowledge module).
+# The default embedder is Google Gemini "gemini-embedding-2" (1536-dim, REST).
+# Get a key at https://aistudio.google.com/apikey
+GEMINI_API_KEY="your-gemini-api-key"
+# Or set GOOGLE_GENERATIVE_AI_API_KEY instead — both are accepted.
+
+# Token compression (optional — https://github.com/headroomlabs-ai/headroom)
+# Point the widget at a running Headroom service and set compression: true on
+# createChatHandler to shrink large tool outputs, RAG chunks, and history.
+# Unset = disabled (default). If unreachable, the turn proceeds uncompressed.
+# HEADROOM_BASE_URL="http://localhost:8787"
+# HEADROOM_API_KEY=""
 `;
 
 // ============================================================================
@@ -219,12 +238,16 @@ async function init() {
   console.log(`\n✓ Created ${filesCreated} files\n`);
 
   console.log('Next steps:');
-  console.log('  1. Copy .env.example to .env.local and fill in your credentials');
-  console.log('  2. Implement getChatUserId() in lib/chat-auth.ts');
+  console.log('  1. Install the required peer deps and an AI provider for your model:');
+  console.log('       npm install @ai-sdk/react @ai-sdk/anthropic');
+  console.log('     (@ai-sdk/react is a required peer dependency the widget renders with;');
+  console.log('      swap @ai-sdk/anthropic for your provider, e.g. @ai-sdk/openai.)');
+  console.log('  2. Copy .env.example to .env.local and fill in your credentials');
+  console.log('  3. Implement getChatUserId() in lib/chat-auth.ts');
   console.log('     ⚠  Until you do, every chat request will throw — by design.');
-  console.log('  3. Run: npx drizzle-kit push   (creates the chat tables)');
-  console.log('  4. If using uploads: create a PRIVATE "chat-attachments" bucket in Supabase');
-  console.log('  5. Mount the widget in your app:\n');
+  console.log('  4. Run: npx drizzle-kit push   (creates the chat tables)');
+  console.log('  5. If using uploads: create a PRIVATE "chat-attachments" bucket in Supabase');
+  console.log('  6. Mount the widget in your app:\n');
   console.log("     import { ChatWidget } from '@mordn/chat-widget';");
   console.log("     import '@mordn/chat-widget/styles.css';");
   console.log('     <ChatWidget userId={/* your user id */} />\n');
@@ -234,8 +257,136 @@ async function init() {
   rl.close();
 }
 
-init().catch((error) => {
-  console.error('Error:', error);
-  rl.close();
+// ============================================================================
+// COMMAND ROUTER
+//
+// The bin supports the scaffold (`init`, default) plus knowledge-base ops:
+//
+//   chat-widget init                       scaffold the backend (default)
+//   chat-widget ingest [--config p] ...    ingest sources into a namespace
+//   chat-widget sync   [--config p]        re-ingest the config's sources (idempotent)
+//   chat-widget status [--config p]        show per-source chunk counts / status
+//   chat-widget list   [--config p]        list sources in the namespace
+//
+// The knowledge commands import the user's config module (default
+// `./chat-widget.config.{mjs,js,ts}`) which must default-export:
+//   { store: KnowledgeStoreFactory, namespace: string, sources?: IngestSource[],
+//     embedder?: Embedder, chunkSize?, overlap?, crawl? }
+// `store` is the READ+WRITE factory (createKnowledgeDrizzleStore({ embedder })),
+// so these commands run admin-side only — never in the chat request path.
+// ============================================================================
+
+const KNOWLEDGE_COMMANDS = new Set(['ingest', 'sync', 'status', 'list']);
+
+function parseFlags(argv: string[]): { config?: string; rest: string[] } {
+  const rest: string[] = [];
+  let config: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--config' || argv[i] === '-c') {
+      config = argv[++i];
+    } else {
+      rest.push(argv[i]);
+    }
+  }
+  return { config, rest };
+}
+
+async function loadKnowledgeConfig(configPath?: string): Promise<any> {
+  const candidates = configPath
+    ? [configPath]
+    : ['chat-widget.config.mjs', 'chat-widget.config.js', 'chat-widget.config.cjs'];
+  for (const rel of candidates) {
+    const abs = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
+    if (fs.existsSync(abs)) {
+      const mod = await import(/* webpackIgnore: true */ abs);
+      return mod.default ?? mod;
+    }
+  }
+  throw new Error(
+    `No config found (looked for ${candidates.join(', ')}). Create one that ` +
+      'default-exports { store, namespace, sources, embedder } using ' +
+      'createKnowledgeDrizzleStore({ embedder }) from ' +
+      '@mordn/chat-widget/server/knowledge/drizzle. Pass --config <path> to override.',
+  );
+}
+
+async function runKnowledge(command: string, argv: string[]): Promise<void> {
+  const { config: configPath } = parseFlags(argv);
+  const cfg = await loadKnowledgeConfig(configPath);
+  if (!cfg.store || !cfg.namespace) {
+    throw new Error('config must export { store, namespace } (and usually sources, embedder).');
+  }
+  // Defer the (heavy) ingest import so `init` never pays for it.
+  const { ingest } = (await import('@mordn/chat-widget/server/knowledge')) as typeof import('../server/knowledge');
+  const store = cfg.store(cfg.namespace);
+
+  if (command === 'list' || command === 'status') {
+    const sources = await store.listSources();
+    if (sources.length === 0) {
+      console.log(`(no sources in namespace "${cfg.namespace}")`);
+      return;
+    }
+    console.log(`Sources in "${cfg.namespace}":`);
+    for (const s of sources) {
+      console.log(
+        `  ${s.status.padEnd(7)} ${String(s.chunkCount).padStart(4)} chunks  ${s.source}` +
+          (command === 'status' ? `  (updated ${s.updatedAt})` : ''),
+      );
+    }
+    return;
+  }
+
+  // ingest / sync — both run the pipeline; sync is just ingest over the config's
+  // sources (idempotent via contentHash). `ingest` may take explicit refs after
+  // the command for ad-hoc URLs.
+  const { rest } = parseFlags(argv);
+  const adhoc = rest.filter((r) => /^https?:\/\//.test(r)).map((url) => ({ type: 'url' as const, url }));
+  const sources = adhoc.length ? adhoc : (cfg.sources ?? []);
+  if (sources.length === 0) {
+    throw new Error('Nothing to ingest: pass URLs after the command or set `sources` in the config.');
+  }
+
+  console.log(`Ingesting ${sources.length} source(s) into "${cfg.namespace}"…`);
+  const report = await ingest({
+    store,
+    namespace: cfg.namespace,
+    sources,
+    embedder: cfg.embedder,
+    chunkSize: cfg.chunkSize,
+    overlap: cfg.overlap,
+    crawl: cfg.crawl,
+    onProgress: (p) =>
+      process.stdout.write(`\r  [${p.stage}] ${p.done}/${p.total} ${p.source ?? ''}`.padEnd(72)),
+  });
+  process.stdout.write('\n');
+  console.log(
+    `Done: ${report.sources} processed, ${report.skipped} unchanged, ` +
+      `${report.chunks} chunks upserted, ${report.deleted} orphans deleted ` +
+      `in ${report.durationMs}ms.`,
+  );
+  if (report.errors.length) {
+    console.log(`Errors (${report.errors.length}):`);
+    for (const e of report.errors) console.log(`  ${e.source}: ${e.error}`);
+  }
+}
+
+async function main() {
+  const command = process.argv[2];
+  if (command && KNOWLEDGE_COMMANDS.has(command)) {
+    rl.close(); // no interactive prompts for KB commands
+    await runKnowledge(command, process.argv.slice(3));
+    return;
+  }
+  // Default (and explicit `init`): the scaffold.
+  await init();
+}
+
+main().catch((error) => {
+  console.error('Error:', error instanceof Error ? error.message : error);
+  try {
+    rl.close();
+  } catch {
+    /* already closed */
+  }
   process.exit(1);
 });

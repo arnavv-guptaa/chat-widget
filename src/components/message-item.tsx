@@ -8,7 +8,7 @@ import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
 import type { TurnState } from './transcript/types';
-import type { ToolRenderer } from '../types';
+import type { ActionRenderer, ToolRenderer, FeedbackEvent } from '../types';
 
 /**
  * One message in the conversation, as its own memoized component.
@@ -37,15 +37,33 @@ interface MessageItemProps {
   isFirst: boolean;
   /** Is this the last message in the list? (drives streaming + regenerate UI) */
   isLast: boolean;
+  /** Role of the previous message — drives role-aware spacing: a new exchange
+   *  (user after assistant) gets a larger gap; an assistant reply to its user
+   *  sits tighter, so each Q&A reads as a pair. */
+  prevRole?: UIMessage['role'];
   /** Chat status — primitive; flips only at stream start/end. */
   status: ChatStatus;
   /** Host-supplied per-tool renderers (stable: memoized in ChatWidget config). */
   toolRenderers?: Record<string, ToolRenderer>;
+  /** Host-supplied declarative action-result cards (#166). */
+  actionRenderers?: Record<string, ActionRenderer>;
   /** Stable regenerate handler (only used on the last assistant message). */
   onRegenerate?: () => void;
+  /** Approve/deny a paused (needsApproval) tool call. */
+  onToolApproval?: (approvalId: string, approved: boolean) => void;
+  /** Show the thumbs up/down feedback control (opt-in via `config.feedback`). */
+  feedbackEnabled?: boolean;
+  /** Active conversation id, threaded through for the feedback payload. */
+  conversationId?: string;
+  /** Widget `apiBase` for the best-effort feedback POST (skipped when falsy). */
+  feedbackApiBase?: string;
+  /** Headers mirroring the chat transport, for the feedback POST. */
+  feedbackHeaders?: Record<string, string>;
+  /** Host callback fired on every feedback submission. */
+  onFeedback?: (feedback: FeedbackEvent) => void;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRegenerate }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, onFeedback }: MessageItemProps) {
   // Derive part subsets once per message (recomputed only when parts change).
   const sourceParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'source-url') ?? [],
@@ -88,8 +106,21 @@ function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRe
   const turnState: TurnState =
     status === 'error' ? 'error' : isStreamingThisMessage ? 'streaming' : 'done';
 
+  // Role-aware spacing (assistant-ui rhythm): the assistant's reply sits CLOSE
+  // to the user message it answers (one exchange), while a NEW user turn after
+  // an assistant reply gets a LARGER gap to separate exchanges. First message
+  // has no top margin.
+  const spacing = isFirst
+    ? undefined
+    : message.role === 'assistant' && prevRole === 'user'
+      ? 'mt-4' // reply to a question — keep the pair tight (16px)
+      : 'mt-6'; // new exchange — a touch more room (24px), matching assistant-ui
+
   return (
-    <div className={isFirst ? undefined : 'mt-6'}>
+    // `group` so the action row can reveal on hover; `relative` so the
+    // absolutely-positioned action row anchors to this message and floats in the
+    // gap below it (instead of adding height).
+    <div className={cn('group relative', spacing)}>
       {/* Sources — all inside one SourcesContent (Radix Collapsible wants a
           single Content child to toggle). */}
       {message.role === 'assistant' && sourceParts.length > 0 && (
@@ -124,6 +155,8 @@ function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRe
             isStreaming={status === 'streaming'}
             turn={turnState}
             toolRenderers={toolRenderers}
+            actionRenderers={actionRenderers}
+            onToolApproval={onToolApproval}
           />
         ) : (
           // User turns: plain text parts in the user bubble.
@@ -153,9 +186,21 @@ function MessageItemImpl({ message, isFirst, isLast, status, toolRenderers, onRe
       )}
 
       {/* Action row — Copy on every completed assistant message; Regenerate
-          only on the last (it replays the most recent turn). */}
+          only on the last (it replays the most recent turn). Hidden by default
+          and revealed on hover/focus of the message; the LAST message keeps them
+          visible (copy/regen are most-used on the newest reply). */}
       {showActions && (
-        <MessageActions text={messageText} onRegenerate={showRegenerate ? onRegenerate : undefined} />
+        <MessageActions
+          text={messageText}
+          onRegenerate={showRegenerate ? onRegenerate : undefined}
+          alwaysVisible={isLast}
+          feedbackEnabled={feedbackEnabled}
+          messageId={message.id}
+          conversationId={conversationId}
+          feedbackApiBase={feedbackApiBase}
+          feedbackHeaders={feedbackHeaders}
+          onFeedback={onFeedback}
+        />
       )}
     </div>
   );

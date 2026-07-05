@@ -5,6 +5,12 @@ import { type ComponentProps, memo } from "react";
 import { Streamdown } from "streamdown";
 import { useCodeBlockAutoScroll } from "../hooks/use-code-scroll";
 import { useSmoothText } from "../hooks/use-smooth-text";
+import { CollapsibleCode } from "./collapsible-code";
+
+// Override Streamdown's code rendering with our collapsed-by-default block, so a
+// long code file shows as a one-line pill (language · N lines · copy) the user
+// can expand — instead of an inline wall. Inline `code` passes through.
+const STREAMDOWN_COMPONENTS = { code: CollapsibleCode };
 
 type ResponseProps = ComponentProps<typeof Streamdown> & {
   isStreaming?: boolean;
@@ -24,6 +30,10 @@ export const Response = memo(
     const smoothed = useSmoothText(rawText, isStreaming && rawText.length > 0);
     const content = typeof children === "string" ? smoothed : children;
 
+    // Merge our code override with any components the caller passed (caller wins).
+    const { components: callerComponents, ...rest } = props;
+    const components = { ...STREAMDOWN_COMPONENTS, ...(callerComponents ?? {}) };
+
     return (
       <div ref={containerRef}>
         <Streamdown
@@ -31,7 +41,8 @@ export const Response = memo(
             "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
             className
           )}
-          {...props}
+          components={components}
+          {...rest}
         >
           {content}
         </Streamdown>

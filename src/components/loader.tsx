@@ -7,6 +7,7 @@ type LoaderIconProps = {
 
 const LoaderIcon = ({ size = 16 }: LoaderIconProps) => (
   <svg
+    aria-hidden="true"
     height={size}
     strokeLinejoin="round"
     style={{ color: "currentcolor" }}
@@ -85,10 +86,12 @@ export type LoaderProps = HTMLAttributes<HTMLDivElement> & {
 
 export const Loader = ({ className, size = 16, ...props }: LoaderProps) => (
   <div
+    aria-label="Loading"
     className={cn(
       "inline-flex animate-spin items-center justify-center",
       className
     )}
+    role="status"
     {...props}
   >
     <LoaderIcon size={size} />
