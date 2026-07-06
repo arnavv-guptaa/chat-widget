@@ -6,10 +6,15 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import { createContext, useContext, useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  oneDark,
-  oneLight,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
+// Import the two Prism themes from their explicit leaf files, NOT the
+// `react-syntax-highlighter/dist/esm/styles/prism` directory. A bare directory
+// specifier is invalid under strict native-ESM resolution (Next RSC, Vite,
+// Turbopack, any `exports`-enforcing resolver) and throws
+// ERR_UNSUPPORTED_DIR_IMPORT in consumers — and the barrel's own extensionless
+// re-exports (`./coy`, …) are ESM-hostile too. The per-file paths resolve
+// cleanly under both CJS and ESM. Ambient types: src/types/rsh-styles.d.ts.
+import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
+import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
 
 type CodeBlockContextType = {
   code: string;
