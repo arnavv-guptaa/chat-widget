@@ -31,6 +31,7 @@ import ChatInterface from './components/interface';
 import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
+import { ChatPortalProvider } from './contexts/chat-portal-context';
 import { toHslTripletIfHex } from './utils/color';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
@@ -333,13 +334,15 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
           className={`chat-widget-container chat-widget-inline chat-widget-content ${themeClass} ${className || ''}`}
           style={customStyles as React.CSSProperties}
         >
-          <ChatInterface
-            id={conversationId}
-            initialMessages={initialMessages}
-            config={config}
-            onClose={onClose}
-            headerActions={headerActions}
-          />
+          <ChatPortalProvider themeClass={themeClass} style={customStyles as React.CSSProperties}>
+            <ChatInterface
+              id={conversationId}
+              initialMessages={initialMessages}
+              config={config}
+              onClose={onClose}
+              headerActions={headerActions}
+            />
+          </ChatPortalProvider>
         </div>
       </ChatStorageProvider>
     );
@@ -356,13 +359,15 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
           className={`chat-widget-container chat-widget-page chat-widget-content ${themeClass} ${className || ''}`}
           style={customStyles as React.CSSProperties}
         >
-          <ChatInterface
-            id={conversationId}
-            initialMessages={initialMessages}
-            config={config}
-            onClose={onClose}
-            headerActions={headerActions}
-          />
+          <ChatPortalProvider themeClass={themeClass} style={customStyles as React.CSSProperties}>
+            <ChatInterface
+              id={conversationId}
+              initialMessages={initialMessages}
+              config={config}
+              onClose={onClose}
+              headerActions={headerActions}
+            />
+          </ChatPortalProvider>
         </div>
       </ChatStorageProvider>
     );
@@ -373,14 +378,23 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   return (
     <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
       {showToggleButton && !isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="fixed z-50 rounded-full bg-primary text-primary-foreground shadow-lg hover:opacity-90 transition-all p-4"
-          style={togglePosition}
-          aria-label="Open chat"
-        >
-          <MessageCircle className="h-6 w-6" />
-        </button>
+        // Wrap the launcher in a `.chat-widget-container` so its scoped Tailwind
+        // utilities (fixed, rounded-full, p-4, bg-primary, …) and the --chat-*
+        // tokens resolve. scope-css.js scopes every utility to
+        // `.chat-widget-container <util>` (descendant), so a launcher rendered
+        // OUTSIDE the container gets none of them — unpositioned and colorless —
+        // in a host app. The wrapper is in normal flow with zero footprint; the
+        // fixed-position button escapes it.
+        <div className={`chat-widget-container ${themeClass}`} style={customStyles as React.CSSProperties}>
+          <button
+            onClick={() => setIsOpen(true)}
+            className="fixed z-50 rounded-full bg-primary text-primary-foreground shadow-lg hover:opacity-90 transition-all p-4"
+            style={togglePosition}
+            aria-label="Open chat"
+          >
+            <MessageCircle className="h-6 w-6" />
+          </button>
+        </div>
       )}
 
       {isOpen && (
@@ -399,18 +413,20 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
             />
           )}
           <div className="w-full h-full overflow-hidden">
-            <ChatInterface
-              id={conversationId}
-              initialMessages={initialMessages}
-              config={config}
-              // popup also closes its own panel; consumer's onClose still
-              // fires for any cleanup they want (e.g. analytics).
-              onClose={() => {
-                setIsOpen(false);
-                onClose?.();
-              }}
-              headerActions={headerActions}
-            />
+            <ChatPortalProvider themeClass={themeClass} style={customStyles as React.CSSProperties}>
+              <ChatInterface
+                id={conversationId}
+                initialMessages={initialMessages}
+                config={config}
+                // popup also closes its own panel; consumer's onClose still
+                // fires for any cleanup they want (e.g. analytics).
+                onClose={() => {
+                  setIsOpen(false);
+                  onClose?.();
+                }}
+                headerActions={headerActions}
+              />
+            </ChatPortalProvider>
           </div>
         </div>
       )}
