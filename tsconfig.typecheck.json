@@ -1,0 +1,24 @@
+{
+  // Typecheck-only config. Extends the base tsconfig but sets `rootDir` and
+  // disables declaration/emit so `tsc --noEmit` runs cleanly — the base config
+  // emits declarations, which makes standalone `tsc` hit a "project root is
+  // ambiguous" error resolving this package's own `exports` self-reference.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    // The CLI dynamically imports the package's OWN published subpaths
+    // (e.g. `@mordn/chat-widget/server/knowledge`) — valid at runtime, but tsc
+    // can't resolve a package's self-reference during typecheck. Map the
+    // package name to src/ so these self-imports resolve to the real sources.
+    "paths": {
+      "@/*": ["./src/*"],
+      "@mordn/chat-widget/server/knowledge": ["./src/server/knowledge/index.ts"],
+      "@mordn/chat-widget/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

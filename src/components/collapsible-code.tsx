@@ -76,7 +76,7 @@ function iconForLanguage(language: string): ComponentType<LucideProps> {
 function extractText(children: ReactNode): string {
   if (typeof children === "string") return children;
   if (Array.isArray(children)) return children.map(extractText).join("");
-  if (children && typeof children === "object" && "props" in (children as Record<string, unknown>)) {
+  if (children && typeof children === "object" && "props" in children) {
     return extractText((children as { props?: { children?: ReactNode } }).props?.children);
   }
   return "";
