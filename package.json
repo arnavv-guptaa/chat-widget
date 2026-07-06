@@ -5,6 +5,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -110,7 +113,8 @@
   "peerDependencies": {
     "@ai-sdk/google": "^1.0.0 || ^2.0.0",
     "@ai-sdk/react": "^3.0.0",
-    "ai": "^5.0.0 || ^6.0.0",
+    "@supabase/supabase-js": "^2.0.0",
+    "ai": "^6.0.0",
     "drizzle-orm": "^0.44.0",
     "next": "^14.0.0 || ^15.0.0 || ^16.0.0",
     "postgres": "^3.4.0",
@@ -120,6 +124,12 @@
   },
   "peerDependenciesMeta": {
     "@ai-sdk/google": {
+      "optional": true
+    },
+    "@supabase/supabase-js": {
+      "optional": true
+    },
+    "next": {
       "optional": true
     },
     "zod": {
@@ -146,7 +156,6 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
-    "@supabase/supabase-js": "^2.86.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.544.0",
