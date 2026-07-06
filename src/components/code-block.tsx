@@ -5,16 +5,6 @@ import { cn } from "../utils/cn";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import { createContext, useContext, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-// Import the two Prism themes from their explicit leaf files, NOT the
-// `react-syntax-highlighter/dist/esm/styles/prism` directory. A bare directory
-// specifier is invalid under strict native-ESM resolution (Next RSC, Vite,
-// Turbopack, any `exports`-enforcing resolver) and throws
-// ERR_UNSUPPORTED_DIR_IMPORT in consumers — and the barrel's own extensionless
-// re-exports (`./coy`, …) are ESM-hostile too. The per-file paths resolve
-// cleanly under both CJS and ESM. Ambient types: src/types/rsh-styles.d.ts.
-import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
-import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
 
 type CodeBlockContextType = {
   code: string;
@@ -26,15 +16,34 @@ const CodeBlockContext = createContext<CodeBlockContextType>({
 
 export type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
-  language: string;
+  /**
+   * Kept for API compatibility (callers pass e.g. `language="json"`). Rendered
+   * as a `data-language` attribute for styling/selection; no syntax-token
+   * coloring is applied — see the note below.
+   */
+  language?: string;
+  /** @deprecated No-op — line numbers are not rendered. */
   showLineNumbers?: boolean;
   children?: ReactNode;
 };
 
+/**
+ * Code block rendered as a plain, theme-tokened `<pre><code>` — deliberately
+ * with NO syntax-highlighting library.
+ *
+ * We removed `react-syntax-highlighter` (and its Prism theme imports): its
+ * `styles/prism` directory import is invalid under strict native-ESM resolution
+ * and crashed consumers (Next RSC / Vite / Turbopack) with
+ * ERR_UNSUPPORTED_DIR_IMPORT. Tool input/output here is short JSON, so plain
+ * monospace text — colored via the `--chat-*` theme tokens and consistent with
+ * the widget's other code surfaces (CollapsibleCodeBlock) — is the robust,
+ * dependency-free choice that works in every bundler/runtime.
+ */
 export const CodeBlock = ({
   code,
   language,
-  showLineNumbers = false,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for API compat
+  showLineNumbers: _showLineNumbers,
   className,
   children,
   ...props
@@ -48,54 +57,12 @@ export const CodeBlock = ({
       {...props}
     >
       <div className="relative max-h-96 overflow-y-auto">
-        <SyntaxHighlighter
-          className="overflow-hidden dark:hidden"
-          codeTagProps={{
-            className: "font-mono text-sm",
-          }}
-          customStyle={{
-            margin: 0,
-            padding: "1rem",
-            fontSize: "0.875rem",
-            background: "transparent",
-            color: "hsl(var(--chat-text))",
-            border: "none",
-          }}
-          language={language}
-          lineNumberStyle={{
-            color: "hsl(var(--chat-text) / 0.4)",
-            paddingRight: "1rem",
-            minWidth: "2.5rem",
-          }}
-          showLineNumbers={showLineNumbers}
-          style={oneLight}
+        <pre
+          className="m-0 overflow-x-auto p-4 font-mono text-sm text-[hsl(var(--chat-text))]"
+          data-language={language}
         >
-          {code}
-        </SyntaxHighlighter>
-        <SyntaxHighlighter
-          className="hidden overflow-hidden dark:block"
-          codeTagProps={{
-            className: "font-mono text-sm",
-          }}
-          customStyle={{
-            margin: 0,
-            padding: "1rem",
-            fontSize: "0.875rem",
-            background: "transparent",
-            color: "hsl(var(--chat-text))",
-            border: "none",
-          }}
-          language={language}
-          lineNumberStyle={{
-            color: "hsl(var(--chat-text) / 0.4)",
-            paddingRight: "1rem",
-            minWidth: "2.5rem",
-          }}
-          showLineNumbers={showLineNumbers}
-          style={oneDark}
-        >
-          {code}
-        </SyntaxHighlighter>
+          <code className="font-mono text-sm">{code}</code>
+        </pre>
         {children && (
           <div className="absolute top-2 right-2 flex items-center gap-2">
             {children}
