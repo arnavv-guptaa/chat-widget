@@ -16,6 +16,7 @@
  * soft bordered surface that matches the rest of the widget.
  */
 import { cn } from '../utils/cn';
+import { safeUrl } from '../utils/url-safety';
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { ActionResult, ActionResultStatus } from '../types';
@@ -45,6 +46,11 @@ export function ActionResultCard({
 }: ActionResultCardProps) {
   const s = STATUS_STYLES[status] ?? STATUS_STYLES.success;
   const Icon = s.Icon;
+  // `link.href` is host/AI-derived (an `actionRenderer` maps tool output into
+  // it), so gate it through the same protocol allowlist as citation links:
+  // only a safe scheme renders a real anchor; anything else (javascript:/data:/
+  // unknown) degrades to non-clickable text so it can't execute on click.
+  const safeHref = link ? safeUrl(link.href) : undefined;
 
   return (
     <div
@@ -84,17 +90,25 @@ export function ActionResultCard({
         </div>
       )}
 
-      {link && (
-        <a
-          href={link.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-flex text-[12px] font-medium underline underline-offset-2"
-          style={{ color: 'hsl(var(--chat-primary))' }}
-        >
-          {link.label}
-        </a>
-      )}
+      {link &&
+        (safeHref ? (
+          <a
+            href={safeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex text-[12px] font-medium underline underline-offset-2"
+            style={{ color: 'hsl(var(--chat-primary))' }}
+          >
+            {link.label}
+          </a>
+        ) : (
+          <span
+            className="mt-2 inline-flex text-[12px] font-medium"
+            style={{ color: 'hsl(var(--chat-text-muted))' }}
+          >
+            {link.label}
+          </span>
+        ))}
     </div>
   );
 }
