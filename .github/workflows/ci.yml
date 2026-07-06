@@ -172,7 +172,7 @@ jobs:
           npm install \
             next@^15 react@^19 react-dom@^19 \
             ai@^6 '@ai-sdk/react@^3' zod@^3 \
-            typescript@^5 '@types/react@^19' '@types/react-dom@^19'
+            typescript@^5 '@types/node@^20' '@types/react@^19' '@types/react-dom@^19'
           npm install "${{ steps.pack.outputs.tarball }}"
 
       - name: Build the consumer (fails on any ESM/exports/RSC crash)
