@@ -14,9 +14,14 @@
  * react-markdown calls the `code` override for BOTH inline and fenced code, so we
  * detect fenced blocks by the `language-*` className (and/or a newline) and pass
  * everything else straight through.
+ *
+ * Syntax highlighting (Shiki) is a progressive enhancement layered on the
+ * EXPANDED body only — the collapsed pill stays zero-cost, and the raw
+ * `<pre><code>` always renders while (and if ever) highlighting is unavailable.
+ * See utils/highlight.ts and the CollapsibleCodeBlock notes below.
  */
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   ChevronRightIcon,
   CheckIcon,
@@ -38,6 +43,7 @@ import {
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "../utils/cn";
+import { highlightCode } from "../utils/highlight";
 
 /**
  * Map a fenced-code language tag to a fitting file icon, so the collapsed pill
@@ -107,14 +113,58 @@ export function CollapsibleCode({ className, children, inline, ...props }: CodeP
   return <CollapsibleCodeBlock code={raw.replace(/\n$/, "")} language={language} />;
 }
 
+/**
+ * How long to wait after the code stops changing before highlighting. While a
+ * response streams, `code` grows token-by-token; re-tokenising on every keystroke
+ * would jank and waste work on text that's about to change. We debounce so we
+ * only ever highlight settled text.
+ */
+const HIGHLIGHT_DEBOUNCE_MS = 150;
+
 function CollapsibleCodeBlock({ code, language }: { code: string; language: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
   const lineCount = code.split("\n").length;
   const LanguageIcon = iconForLanguage(language);
 
+  // Monotonic generation counter: each highlight attempt captures the current
+  // value and only commits its result if it's still the latest. This drops
+  // stale async results from a still-growing stream (an earlier, shorter code
+  // string resolving after a later one) and from a collapse-then-reopen.
+  const genRef = useRef(0);
+
+  // Highlight the EXPANDED body only — the collapsed pill stays free. Debounced
+  // so streaming code is highlighted once it settles, not on every chunk. Any
+  // failure (import blocked, unknown lang, oversized) yields null → we keep
+  // rendering the plain <pre><code> below.
+  useEffect(() => {
+    if (!open) {
+      // Collapsed: drop any highlighted markup so a later reopen re-highlights
+      // the (possibly grown) code afresh, and the collapsed state holds nothing.
+      setHighlighted(null);
+      return;
+    }
+
+    const gen = ++genRef.current;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      highlightCode(code, language).then((html) => {
+        // Ignore if this effect was cleaned up, or a newer attempt superseded us.
+        if (cancelled || gen !== genRef.current) return;
+        setHighlighted(html);
+      });
+    }, HIGHLIGHT_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, code, language]);
+
   const copy = async () => {
     try {
+      // Always copy the RAW source — never the highlighted markup.
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -146,9 +196,24 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
         </button>
       </div>
       <CollapsibleContent>
-        <pre className="chat-code-body">
-          <code>{code}</code>
-        </pre>
+        {highlighted ? (
+          // Shiki's <pre class="shiki"> markup. Safe to inject: Shiki escapes all
+          // token text as it builds the HTML (tokens are <span>s with
+          // text-escaped content), so nothing from `code` can inject markup. The
+          // wrapper carries the chat-code-body chrome (padding/border/surface);
+          // styles.src.css resets .shiki's own background so the widget surface
+          // shows through and the token colours come from --shiki-light/-dark.
+          <div
+            className="chat-code-body"
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+        ) : (
+          // Plain fallback: the exact pre/code we've always rendered. Shown while
+          // highlighting is pending/unavailable and whenever it returns null.
+          <pre className="chat-code-body">
+            <code>{code}</code>
+          </pre>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
