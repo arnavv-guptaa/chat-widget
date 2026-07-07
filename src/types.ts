@@ -496,7 +496,7 @@ export interface ThemeConfig {
    * @example
    * tokens: {
    *   '--chat-surface': '0 0% 96%',           // HSL-triplet tokens
-   *   '--chat-header-bg': 'rgba(0,0,0,0.7)',  // direct color tokens
+   *   '--chat-surface': '0 0% 97%',       // direct color tokens
    * }
    */
   tokens?: Record<`--chat-${string}`, string>;
