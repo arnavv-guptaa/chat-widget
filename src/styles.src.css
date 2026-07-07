@@ -304,8 +304,10 @@
    MESSAGE BUBBLES
    ============================================ */
 
+/* User bubble follows the brand color (--chat-primary). Default primary is
+   near-black, so unthemed widgets look the same as before. */
 .chat-widget-container .is-user .chat-message-content {
-  background-color: hsl(var(--chat-text));
+  background-color: hsl(var(--chat-primary));
   border: 1px solid var(--chat-divider);
 }
 
