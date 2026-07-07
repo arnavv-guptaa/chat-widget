@@ -32,7 +32,7 @@ import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
-import { toHslTripletIfHex } from './utils/color';
+import { hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
@@ -250,11 +250,14 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       styles['--chat-widget-width'] = display.width;
     }
 
-    if (theme?.primaryColor) {
-      styles['--chat-primary'] = toHslTripletIfHex(theme.primaryColor);
+    // Invalid (non-hex) values are skipped entirely — a typo can never
+    // reach the CSS as a broken variable.
+    const primaryTriplet = theme?.primaryColor ? hexToHslTriplet(theme.primaryColor) : null;
+    if (primaryTriplet) {
+      styles['--chat-primary'] = primaryTriplet;
     }
-    if (theme?.backgroundColor) {
-      const bgTriplet = toHslTripletIfHex(theme.backgroundColor);
+    const bgTriplet = theme?.backgroundColor ? hexToHslTriplet(theme.backgroundColor) : null;
+    if (bgTriplet) {
       styles['--chat-background'] = bgTriplet;
 
       // A custom background must theme the WHOLE panel, not just the canvas
@@ -271,12 +274,12 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       const bg = parse(bgTriplet);
       if (bg) {
         const isDark = bg.l < 50;
-        const text = (theme.textColor && parse(toHslTripletIfHex(theme.textColor))) || {
+        const text = (theme?.textColor && parse(hexToHslTriplet(theme.textColor) ?? '')) || {
           h: bg.h,
           s: Math.min(bg.s, 15),
           l: isDark ? 92 : 14.5,
         };
-        if (!theme.textColor) {
+        if (!theme?.textColor) {
           // Auto-contrast: a dark background with no explicit text color
           // would otherwise keep the light-mode near-black text.
           styles['--chat-text'] = `${text.h} ${text.s}% ${text.l}%`;
@@ -299,8 +302,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
         styles['--chat-overlay'] = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.02)';
       }
     }
-    if (theme?.textColor) {
-      styles['--chat-text'] = toHslTripletIfHex(theme.textColor);
+    const textTriplet = theme?.textColor ? hexToHslTriplet(theme.textColor) : null;
+    if (textTriplet) {
+      styles['--chat-text'] = textTriplet;
     }
     return styles;
   }, [display?.width, theme?.primaryColor, theme?.backgroundColor, theme?.textColor]);
