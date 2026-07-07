@@ -254,7 +254,52 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       styles['--chat-primary'] = toHslTripletIfHex(theme.primaryColor);
     }
     if (theme?.backgroundColor) {
-      styles['--chat-background'] = toHslTripletIfHex(theme.backgroundColor);
+      const bgTriplet = toHslTripletIfHex(theme.backgroundColor);
+      styles['--chat-background'] = bgTriplet;
+
+      // A custom background must theme the WHOLE panel, not just the canvas
+      // behind it: derive the surface/border/text ramps from the two poles
+      // (background ↔ text) instead of the stylesheet's fixed neutrals. The
+      // mix fractions reproduce the default ramp exactly (e.g. text-muted
+      // 45.1% = 14.5% mixed 36% toward 100%), so this is the same design
+      // system re-anchored on the custom colors. Runs only when a custom
+      // background is set — default widgets never reach this branch.
+      const parse = (t: string) => {
+        const m = /^([\d.]+) ([\d.]+)% ([\d.]+)%$/.exec(t.trim());
+        return m ? { h: +m[1], s: +m[2], l: +m[3] } : null;
+      };
+      const bg = parse(bgTriplet);
+      if (bg) {
+        const isDark = bg.l < 50;
+        const text = (theme.textColor && parse(toHslTripletIfHex(theme.textColor))) || {
+          h: bg.h,
+          s: Math.min(bg.s, 15),
+          l: isDark ? 92 : 14.5,
+        };
+        if (!theme.textColor) {
+          // Auto-contrast: a dark background with no explicit text color
+          // would otherwise keep the light-mode near-black text.
+          styles['--chat-text'] = `${text.h} ${text.s}% ${text.l}%`;
+        }
+        const lerp = (from: number, to: number, f: number) =>
+          Math.round((from + (to - from) * f) * 10) / 10;
+        const bgTone = (f: number) => `${bg.h} ${bg.s}% ${lerp(bg.l, text.l, f)}%`;
+        const textTone = (f: number) => `${text.h} ${text.s}% ${lerp(text.l, bg.l, f)}%`;
+
+        styles['--chat-surface'] = bgTone(0.05);
+        styles['--chat-surface-deep'] = bgTone(0.02);
+        styles['--chat-surface-hover'] = bgTone(0.12);
+        styles['--chat-muted'] = bgTone(0.035);
+        styles['--chat-border'] = bgTone(0.12);
+        styles['--chat-text-strong'] = textTone(0.12);
+        styles['--chat-text-muted'] = textTone(0.36);
+        styles['--chat-text-subtle'] = textTone(0.58);
+        styles['--chat-header-bg'] = `hsl(${bgTone(0.02)} / 0.8)`;
+        styles['--chat-header-bg-strong'] = `hsl(${bgTone(0.02)} / 0.95)`;
+        styles['--chat-hover-bg'] = `hsl(${bgTone(0.06)} / 0.5)`;
+        styles['--chat-divider'] = `hsl(${text.h} ${text.s}% ${text.l}% / 0.1)`;
+        styles['--chat-overlay'] = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.02)';
+      }
     }
     if (theme?.textColor) {
       styles['--chat-text'] = toHslTripletIfHex(theme.textColor);

@@ -1011,7 +1011,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
 
   return (
-    <div className={cn("w-full h-full flex flex-col bg-white dark:bg-gray-900 overflow-hidden ring-1 ring-black/[0.02] dark:ring-white/[0.03]", themeMode === 'dark' && 'dark')}>
+    <div className={cn("w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-black/[0.02] dark:ring-white/[0.03]", themeMode === 'dark' && 'dark')}>
       <div
         className={cn(
           "flex flex-col h-full w-full overflow-hidden relative chat-widget-container",
