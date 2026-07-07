@@ -27,6 +27,7 @@ import type {
   RetrieverFactory,
   RetrievedChunk,
 } from '../../knowledge/types';
+import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.dev';
 
@@ -39,6 +40,8 @@ export interface HostedKnowledgeOptions {
   baseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
+  /** Per-request timeout (ms) for the hosted API. Defaults to 30s; `0` disables. */
+  timeoutMs?: number;
 }
 
 function normaliseChunk(raw: Record<string, unknown>): RetrievedChunk {
@@ -97,7 +100,7 @@ export function createHostedKnowledgeRetriever(
   if (!options.apiKey) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an apiKey');
   if (!options.agentId) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an agentId');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (namespaces) =>
     new HostedKnowledgeRetriever(options.apiKey, options.agentId, baseUrl, fetchImpl, namespaces);
 }

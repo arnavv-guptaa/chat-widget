@@ -26,6 +26,7 @@ import type {
   StoredConversation,
   StoredMessage,
 } from '../../types';
+import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.dev';
 
@@ -36,6 +37,12 @@ export interface HostedOptions {
   baseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
+  /**
+   * Per-request timeout (ms) for calls to the hosted API. A hung/stalled
+   * upstream otherwise holds the request (and its connection/compute) open until
+   * the platform kills it. Defaults to 30s; set `0` to disable.
+   */
+  timeoutMs?: number;
 }
 
 function normaliseConversation(raw: any): StoredConversation {
@@ -221,7 +228,7 @@ class HostedStorageAdapter implements StorageAdapter {
 export function createHostedChatStore(options: HostedOptions) {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedChatStore requires an apiKey');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (userId: string): ChatStore => new HostedChatStore(userId, options.apiKey, baseUrl, fetchImpl);
 }
 
@@ -231,7 +238,7 @@ export function createHostedChatStore(options: HostedOptions) {
 export function createHostedStorage(options: HostedOptions) {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedStorage requires an apiKey');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (userId: string): StorageAdapter => new HostedStorageAdapter(userId, options.apiKey, baseUrl, fetchImpl);
 }
 
@@ -248,7 +255,7 @@ export function createHostedStorage(options: HostedOptions) {
 export function createHostedConfig(options: HostedOptions) {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedConfig requires an apiKey');
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   const apiKey = options.apiKey;
   const CONFIG_TTL_MS = 60_000;
 
@@ -320,7 +327,7 @@ export interface HostedFeedbackOptions extends HostedOptions {
 export function createHostedFeedback(options: HostedFeedbackOptions) {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedFeedback requires an apiKey');
   const base = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   const apiKey = options.apiKey;
   const agentId = options.agentId;
 
