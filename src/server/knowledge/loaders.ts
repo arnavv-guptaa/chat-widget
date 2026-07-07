@@ -279,15 +279,118 @@ function parseLinks(html: string, base: string): string[] {
   return out;
 }
 
+// ── llms.txt ─────────────────────────────────────────────────────────────────
+//
+// llms.txt is the emerging docs-site ⇄ AI handshake (Mintlify / Fumadocs /
+// Docusaurus generate it): a markdown index whose link list points at clean,
+// LLM-ready docs (usually per-page `.md`). Consuming it means we ingest pristine
+// markdown instead of scraping rendered HTML — better structure for the
+// heading-aware chunker, and a great "point us at your llms.txt, done." story.
+
+/** One parsed llms.txt entry: an absolute href + optional human title. */
+interface LlmsLink {
+  href: string;
+  title?: string;
+}
+
 /**
- * Expand multi-doc sources (sitemap/crawl) into concrete leaf refs, and pass
- * single-doc sources through. Crawl is BFS bounded by depth + page count and
- * fenced to the same origin (or allowDomains).
+ * Parse an `llms.txt` body into resolved, de-duplicated doc links.
+ *
+ * Recognises markdown list items `- [Title](href)` (also `*`/`+` bullets),
+ * with an optional `: description` trailing the link — we keep the title, drop
+ * the description. `##` section headers are ignored for structure (all links
+ * across sections are collected). Relative hrefs resolve against `baseUrl`;
+ * non-http(s) and in-page `#fragment` links are dropped. Order is preserved,
+ * first occurrence wins on dedupe. This is a PARSER only — every href is still
+ * put through `safeFetch`'s SSRF guard when it is actually loaded.
+ */
+export function parseLlmsTxt(body: string, baseUrl: string): LlmsLink[] {
+  const out: LlmsLink[] = [];
+  const seen = new Set<string>();
+  // `- [Title](href)` optionally followed by `: description`. Bullet may be
+  // -, * or +. Link text and href are captured; the rest of the line is ignored.
+  const re = /^\s*[-*+]\s*\[([^\]]*)\]\(\s*(\S+?)\s*\)/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body))) {
+    const title = m[1].trim() || undefined;
+    const rawHref = m[2].trim();
+    if (rawHref.startsWith('#')) continue; // in-page anchor, not a doc
+    let abs: string;
+    try {
+      abs = new URL(rawHref, baseUrl).toString();
+    } catch {
+      continue; // malformed href
+    }
+    if (!/^https?:\/\//i.test(abs)) continue; // http(s) only (mailto:, ftp:, …)
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push({ href: abs, title });
+  }
+  return out;
+}
+
+/**
+ * Expand an `llms.txt` URL into leaves. Fetches the index (SSRF-guarded),
+ * parses its link list, and returns one `llms`-kind leaf per linked doc, capped
+ * at `limit ?? crawl.maxPages`. If the file has NO links but is substantial
+ * markdown (an `llms-full.txt`-style concatenated file), it is ingested as ONE
+ * markdown leaf — the heading-aware chunker splits it on its headings.
+ */
+async function expandLlms(url: string, limit: number | undefined, opts: IngestOptions): Promise<LeafSource[]> {
+  const { body, title } = await safeFetch(url, opts.crawl);
+  const links = parseLlmsTxt(body, url);
+  if (links.length === 0) {
+    // llms-full.txt style (or an index with no parsable links): ingest the file
+    // itself as a single markdown doc, leaning on the chunker to section it.
+    return [{ ref: url, kind: 'llms', title }];
+  }
+  const cap = limit ?? opts.crawl?.maxPages ?? DEFAULT_MAX_PAGES;
+  return links.slice(0, cap).map((l) => ({ ref: l.href, kind: 'llms', title: l.title }));
+}
+
+/**
+ * Auto-discovery probe: try `origin + "/llms.txt"` for a sitemap/crawl source.
+ * Returns the parsed leaves when the file exists (HTTP 200) with ≥1 link, else
+ * `null` so the caller falls through to normal sitemap/crawl expansion. All
+ * failures (network, non-200, no links) are swallowed — discovery is best-effort
+ * and must never abort an ingest. Goes through `safeFetch`, so the probe URL is
+ * SSRF-checked like any other fetch.
+ */
+async function discoverLlms(pageUrl: string, opts: IngestOptions): Promise<LeafSource[] | null> {
+  let probe: string;
+  try {
+    probe = new URL('/llms.txt', new URL(pageUrl).origin).toString();
+  } catch {
+    return null;
+  }
+  try {
+    const { body } = await safeFetch(probe, opts.crawl);
+    const links = parseLlmsTxt(body, probe);
+    if (links.length === 0) return null;
+    const cap = opts.crawl?.maxPages ?? DEFAULT_MAX_PAGES;
+    return links.slice(0, cap).map((l) => ({ ref: l.href, kind: 'llms', title: l.title }));
+  } catch {
+    return null; // silent fall-through to normal expansion
+  }
+}
+
+/**
+ * Expand multi-doc sources (sitemap/crawl/llms) into concrete leaf refs, and
+ * pass single-doc sources through. Crawl is BFS bounded by depth + page count
+ * and fenced to the same origin (or allowDomains).
+ *
+ * llms.txt (DOCS_CONTRACT §5): an `llms` source is parsed into per-doc leaves.
+ * A `sitemap`/`crawl` source first PROBES `origin + "/llms.txt"` (unless
+ * `preferLlmsTxt` is `false`); when the site publishes one with ≥1 link we use
+ * those curated markdown leaves INSTEAD of scraping, and surface a progress
+ * message. Probe failures fall through silently to the normal expansion.
  */
 export async function expandSources(
   sources: IngestSource[],
   opts: IngestOptions,
 ): Promise<LeafSource[]> {
+  const onProgress = opts.onProgress ?? (() => {});
+  const preferLlmsTxt = opts.preferLlmsTxt ?? true;
   const leaves: LeafSource[] = [];
   for (const src of sources) {
     if (src.type === 'url') {
@@ -297,13 +400,40 @@ export async function expandSources(
     } else if (src.type === 'file') {
       const ref = src.fileKey ?? src.path ?? src.filename ?? `file:${Date.now()}`;
       leaves.push({ ref, kind: 'file', title: src.filename });
+    } else if (src.type === 'llms') {
+      for (const leaf of await expandLlms(src.url, src.limit, opts)) leaves.push(leaf);
     } else if (src.type === 'sitemap') {
-      const { body } = await safeFetch(src.url, opts.crawl);
-      const urls = parseSitemap(body).slice(0, src.limit ?? opts.crawl?.maxPages ?? DEFAULT_MAX_PAGES);
-      for (const u of urls) leaves.push({ ref: u, kind: 'sitemap' });
+      // Prefer a published llms.txt over scraping the sitemap when present.
+      const discovered = preferLlmsTxt ? await discoverLlms(src.url, opts) : null;
+      if (discovered) {
+        onProgress({
+          done: 0,
+          total: 0,
+          stage: 'fetch',
+          source: src.url,
+          message: `found llms.txt (${discovered.length} docs) — using it instead of the sitemap`,
+        });
+        for (const leaf of discovered) leaves.push(leaf);
+      } else {
+        const { body } = await safeFetch(src.url, opts.crawl);
+        const urls = parseSitemap(body).slice(0, src.limit ?? opts.crawl?.maxPages ?? DEFAULT_MAX_PAGES);
+        for (const u of urls) leaves.push({ ref: u, kind: 'sitemap' });
+      }
     } else if (src.type === 'crawl') {
-      const crawled = await crawl(src, opts);
-      for (const u of crawled) leaves.push({ ref: u, kind: 'crawl' });
+      const discovered = preferLlmsTxt ? await discoverLlms(src.url, opts) : null;
+      if (discovered) {
+        onProgress({
+          done: 0,
+          total: 0,
+          stage: 'fetch',
+          source: src.url,
+          message: `found llms.txt (${discovered.length} docs) — using it instead of crawling`,
+        });
+        for (const leaf of discovered) leaves.push(leaf);
+      } else {
+        const crawled = await crawl(src, opts);
+        for (const u of crawled) leaves.push({ ref: u, kind: 'crawl' });
+      }
     }
   }
   return leaves;
