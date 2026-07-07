@@ -1,4 +1,4 @@
-use client';
+'use client';
 
 /**
  * ActionResultCard (#166) — a structured, trustworthy summary of what a tool
