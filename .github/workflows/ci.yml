@@ -1,0 +1,180 @@
+name: CI
+
+# Gate every PR (and pushes to main) on the checks that would have caught the
+# regressions we shipped blind: a build/type break that only shows when all
+# changes combine (#182), and a strict-ESM consumer crash that builds fine in
+# isolation but explodes in a real Next/Vite app (#177 RSH directory import).
+#
+# Two jobs:
+#   verify         — typecheck + lint + build the widget itself
+#   consumer-smoke — pack the widget, install the tarball into a throwaway Next
+#                    App-Router app, and `next build` it under strict ESM/RSC
+#
+# The smoke job is the important one: it exercises the real `exports` map + Next
+# RSC/Turbopack resolution that local `moduleResolution: bundler` never does.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        # Non-blocking for now: the repo declares a `lint` script but ships no
+        # eslint dependency or config yet. Run it if eslint resolves, otherwise
+        # warn and continue — typecheck/build/esm-check are the hard gates.
+        # TODO: add eslint + a flat config, then make this a required step.
+        run: |
+          if npx --no-install eslint --version >/dev/null 2>&1; then
+            npm run lint
+          else
+            echo "::warning::eslint not installed — skipping lint (add eslint + config to enforce)"
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Assert strict-ESM importability
+        # The gate that catches the #177 crash class: import the built client
+        # entries under Node's real ESM loader. A bare directory / extensionless
+        # deep import (which `tsup` + bundler resolution accept) throws here,
+        # exactly as it would in a Next RSC / Vite / Turbopack consumer.
+        run: npm run esm-check
+
+      - name: Assert build output is sane
+        # Guard against a green build that silently drops or corrupts outputs.
+        run: |
+          test -f dist/index.mjs || { echo "::error::dist/index.mjs missing"; exit 1; }
+          test -f dist/index.js  || { echo "::error::dist/index.js missing"; exit 1; }
+          test -s dist/styles.css || { echo "::error::dist/styles.css missing or empty"; exit 1; }
+          # The scoped-CSS pass must have run — an unscoped universal reset would
+          # corrupt host pages. Assert the scope marker is present.
+          grep -q '.chat-widget-container' dist/styles.css \
+            || { echo "::error::dist/styles.css is not scoped to .chat-widget-container"; exit 1; }
+          echo "dist outputs present and CSS scoped."
+
+  consumer-smoke:
+    name: Consumer smoke (Next App Router, strict ESM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install widget deps
+        run: npm ci
+
+      - name: Build + pack the widget
+        id: pack
+        run: |
+          npm run build
+          TARBALL="$(npm pack --pack-destination "$RUNNER_TEMP" | tail -1)"
+          echo "tarball=$RUNNER_TEMP/$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "Packed $TARBALL"
+
+      - name: Scaffold a minimal Next App-Router consumer
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p smoke/app
+          cd smoke
+
+          cat > package.json <<'JSON'
+          {
+            "name": "smoke-consumer",
+            "private": true,
+            "version": "0.0.0",
+            "scripts": { "build": "next build" }
+          }
+          JSON
+
+          cat > next.config.mjs <<'JS'
+          // Default config — deliberately does NOT transpile @mordn/chat-widget,
+          // so the widget's real published `exports` + strict ESM resolution are
+          // exercised exactly as a third-party consumer would hit them.
+          const nextConfig = {};
+          export default nextConfig;
+          JS
+
+          cat > tsconfig.json <<'JSON'
+          {
+            "compilerOptions": {
+              "target": "ES2020",
+              "lib": ["dom", "dom.iterable", "esnext"],
+              "jsx": "preserve",
+              "module": "esnext",
+              "moduleResolution": "bundler",
+              "strict": true,
+              "noEmit": true,
+              "esModuleInterop": true,
+              "skipLibCheck": true,
+              "resolveJsonModule": true,
+              "isolatedModules": true,
+              "plugins": [{ "name": "next" }]
+            },
+            "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+            "exclude": ["node_modules"]
+          }
+          JSON
+
+          cat > app/layout.tsx <<'TSX'
+          export default function RootLayout({ children }: { children: React.ReactNode }) {
+            return (
+              <html lang="en">
+                <body>{children}</body>
+              </html>
+            );
+          }
+          TSX
+
+          # The page mounts the widget's public client export AND imports the
+          # scoped stylesheet — this is the code path that crashed on the RSH
+          # directory import. If any public subpath is ESM-unresolvable, the
+          # `next build` below fails here.
+          cat > app/page.tsx <<'TSX'
+          import { ChatWidget } from '@mordn/chat-widget';
+          import '@mordn/chat-widget/styles.css';
+
+          export default function Home() {
+            return <ChatWidget userId="smoke" agentId="smoke" />;
+          }
+          TSX
+
+      - name: Install consumer deps (widget from tarball + peers)
+        working-directory: ${{ runner.temp }}/smoke
+        run: |
+          # Peers a real consumer must provide. Pin the majors the widget's
+          # peerDependencies declare (react 19, next 15, ai 6, @ai-sdk/react 3).
+          npm install \
+            next@^15 react@^19 react-dom@^19 \
+            ai@^6 '@ai-sdk/react@^3' zod@^3 \
+            typescript@^5 '@types/node@^20' '@types/react@^19' '@types/react-dom@^19'
+          npm install "${{ steps.pack.outputs.tarball }}"
+
+      - name: Build the consumer (fails on any ESM/exports/RSC crash)
+        working-directory: ${{ runner.temp }}/smoke
+        run: npx next build

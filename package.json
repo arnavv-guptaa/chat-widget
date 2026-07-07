@@ -108,7 +108,9 @@
     "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js",
     "dev": "tsup --watch",
     "lint": "eslint src",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "esm-check": "node scripts/assert-esm-importable.mjs"
   },
   "peerDependencies": {
     "@ai-sdk/google": "^1.0.0 || ^2.0.0",
