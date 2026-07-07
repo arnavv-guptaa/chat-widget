@@ -27,7 +27,7 @@ import { isIP } from 'node:net';
 import { Agent } from 'undici';
 import type { IngestOptions, IngestSource } from './types';
 import type { StorageAdapter } from '../storage-adapter';
-import { extractTitle, htmlToCleanText } from './extract';
+import { extractTitle, htmlToCleanText, htmlToMarkdown } from './extract';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_UA = 'mordn-chat-widget-ingest/1.0 (+https://github.com/arnavv-guptaa/chat-widget)';
@@ -351,18 +351,47 @@ async function crawl(src: Extract<IngestSource, { type: 'crawl' }>, opts: Ingest
 // ── Leaf loading ─────────────────────────────────────────────────────────────
 
 /**
- * Load + clean a single leaf into final text. For url/sitemap/crawl this fetches
- * (SSRF-guarded) and runs HTML→text; for text it returns the inline text; for
- * file it reads via the StorageAdapter (deferred to the caller-provided reader).
+ * Does this leaf's content look like markdown we should route through the
+ * heading-aware chunker? True when the response is served as markdown, or its
+ * URL/key ends `.md`/`.mdx`/`.markdown` (DOCS_CONTRACT §1). `text/plain` is
+ * NOT markdown — it keeps the plain path.
+ */
+export function isMarkdownContent(ref: string, mediaType: string): boolean {
+  if (mediaType.includes('markdown')) return true;
+  // Compare the pathname only (ignore ?query / #hash).
+  let pathname = ref;
+  try {
+    pathname = new URL(ref).pathname;
+  } catch {
+    /* not a URL (file key / synthetic ref) — match on the raw string */
+  }
+  return /\.(md|mdx|markdown)$/i.test(pathname);
+}
+
+/**
+ * Load + clean a single leaf into final text. For url/sitemap/crawl/llms this
+ * fetches (SSRF-guarded); for text it returns the inline text; for file it reads
+ * via the StorageAdapter.
+ *
+ * Docs-aware routing (DOCS_CONTRACT §1): when `deps.docsMode` is on (the
+ * ingest default), HTML is converted with `htmlToMarkdown` (structure preserved)
+ * and content that is already markdown passes through raw; both set
+ * `isMarkdown: true` so the caller sends them to `chunkMarkdown`. With
+ * `docsMode` off, HTML falls back to `htmlToCleanText` and `isMarkdown` is
+ * always false — the legacy plain path, byte-for-byte.
  */
 export async function loadLeaf(
   leaf: LeafSource,
   src: IngestSource | undefined,
-  deps: { storage?: StorageAdapter; crawl?: IngestOptions['crawl'] },
-): Promise<{ text: string; title?: string; mediaType: string }> {
+  deps: { storage?: StorageAdapter; crawl?: IngestOptions['crawl']; docsMode?: boolean },
+): Promise<{ text: string; title?: string; mediaType: string; isMarkdown: boolean }> {
+  const docsMode = deps.docsMode ?? true;
+
   if (leaf.kind === 'text') {
     const inline = src && src.type === 'text' ? src.text : '';
-    return { text: inline, title: leaf.title, mediaType: 'text/plain' };
+    // Inline text is treated as prose (plain path) — a host that has markdown
+    // in hand can pass it as a `.md` file/url to opt into structure.
+    return { text: inline, title: leaf.title, mediaType: 'text/plain', isMarkdown: false };
   }
   if (leaf.kind === 'file') {
     if (!deps.storage) throw new Error('file source requires a StorageAdapter (pass deps.storage)');
@@ -371,13 +400,37 @@ export async function loadLeaf(
     const signed = await deps.storage.resign(key);
     if (!signed) throw new Error(`could not resolve file ${key} via storage`);
     const loaded = await safeFetch(signed, deps.crawl);
-    const text = loaded.mediaType.includes('html') ? htmlToCleanText(loaded.body) : loaded.body;
-    return { text, title: leaf.title ?? fileSrc?.filename, mediaType: fileSrc?.mediaType ?? loaded.mediaType };
+    const mediaType = fileSrc?.mediaType ?? loaded.mediaType;
+    const { text, isMarkdown } = routeContent(key, loaded.body, mediaType, docsMode);
+    return { text, title: leaf.title ?? fileSrc?.filename, mediaType, isMarkdown };
   }
-  // url / sitemap / crawl
+  // url / sitemap / crawl / llms
   const loaded = await safeFetch(leaf.ref, deps.crawl);
-  const text = loaded.mediaType.includes('html') ? htmlToCleanText(loaded.body) : loaded.body;
-  return { text, title: leaf.title ?? loaded.title, mediaType: loaded.mediaType };
+  const { text, isMarkdown } = routeContent(leaf.ref, loaded.body, loaded.mediaType, docsMode);
+  return { text, title: leaf.title ?? loaded.title, mediaType: loaded.mediaType, isMarkdown };
+}
+
+/**
+ * Pick the extraction + markdown flag for a fetched body. Centralised so `file`
+ * and `url/…` leaves route identically.
+ *   • already markdown → pass through raw, isMarkdown = true.
+ *   • HTML + docsMode  → htmlToMarkdown, isMarkdown = true.
+ *   • HTML + !docsMode → htmlToCleanText (legacy), isMarkdown = false.
+ *   • anything else (text/plain, unknown) → raw body, isMarkdown = false.
+ */
+function routeContent(
+  ref: string,
+  body: string,
+  mediaType: string,
+  docsMode: boolean,
+): { text: string; isMarkdown: boolean } {
+  if (isMarkdownContent(ref, mediaType)) return { text: body, isMarkdown: true };
+  if (mediaType.includes('html')) {
+    return docsMode
+      ? { text: htmlToMarkdown(body), isMarkdown: true }
+      : { text: htmlToCleanText(body), isMarkdown: false };
+  }
+  return { text: body, isMarkdown: false };
 }
 
 function hashShort(text: string): string {

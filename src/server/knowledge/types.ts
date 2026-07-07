@@ -49,7 +49,18 @@ import 'server-only';
  */
 export type Namespace = string;
 
-/** Arbitrary, store-filterable metadata stamped on every chunk. */
+/**
+ * Arbitrary, store-filterable metadata stamped on every chunk.
+ *
+ * Values are scalars ONLY (`string | number | boolean | null`) — a store maps
+ * these onto filterable columns / JSONB, so arrays/objects are not
+ * representable. Docs-aware ingestion (`chunkMarkdown`) stamps two keys the
+ * hosted retriever reads back to build deep-link citations, and both obey this
+ * scalar rule (see the CROSS-REPO contract in DOCS_CONTRACT §3):
+ *   • `anchor?: string`      — URL-fragment-ready slug of the nearest heading.
+ *   • `headingPath?: string` — the section breadcrumb JOINED with " › " (a
+ *                              STRING, never an array — arrays can't live here).
+ */
 export type ChunkMetadata = Record<string, string | number | boolean | null>;
 
 // ── Contract types named per the build contract ──────────────────────────────
@@ -104,7 +115,12 @@ export interface KnowledgeDoc {
   source: string;
   /** Human title for citations (falls back to `source`). */
   title?: string;
-  /** Filterable metadata (lang, section, chunkIndex, contentHash, …). */
+  /**
+   * Filterable metadata (lang, section, chunkIndex, contentHash, …). For
+   * docs-aware ingestion this also carries `anchor` (nearest-heading slug) and
+   * `headingPath` (breadcrumb joined by " › ") so retrieval can deep-link to the
+   * exact section — see the cross-repo contract on `ChunkMetadata` above.
+   */
   metadata?: Record<string, unknown>;
 }
 
@@ -229,13 +245,22 @@ export class NamespaceAccessError extends Error {
 
 // ── Ingestion (admin/server only) ────────────────────────────────────────────
 
-/** A source to ingest. `crawl`/`sitemap`/`url` are SSRF-guarded at load time. */
+/** A source to ingest. `crawl`/`sitemap`/`url`/`llms` are SSRF-guarded at load time. */
 export type IngestSource =
   | { type: 'url'; url: string; title?: string }
   | { type: 'sitemap'; url: string; limit?: number }
   | { type: 'crawl'; url: string; depth?: number; maxPages?: number; sameOriginOnly?: boolean }
   | { type: 'file'; path?: string; fileKey?: string; filename?: string; mediaType?: string }
-  | { type: 'text'; text: string; title?: string };
+  | { type: 'text'; text: string; title?: string }
+  /**
+   * An `llms.txt` index (the emerging docs-site ⇄ AI handshake). Fetches the
+   * file, parses its markdown link list (`- [Title](href)` items, optional
+   * `: description`), resolves relative hrefs, dedupes, and expands to one leaf
+   * per linked doc (usually `.md` → raw-markdown passthrough). An `llms-full.txt`
+   * style file with no links is ingested as ONE markdown doc. Capped at
+   * `limit ?? crawl.maxPages`.
+   */
+  | { type: 'llms'; url: string; limit?: number };
 
 /** Progress event surfaced by `ingest`'s `onProgress`. */
 export interface IngestProgress {
@@ -270,6 +295,24 @@ export interface IngestOptions {
     userAgent?: string;
     sameOriginOnly?: boolean;
   };
+  /**
+   * Docs-aware ingestion. When `true` (default), markdown sources (mediaType
+   * includes `markdown`, a `.md`/`.mdx`/`.markdown` pathname, or HTML converted
+   * via `htmlToMarkdown`) are routed through the heading-aware `chunkMarkdown`,
+   * which preserves section structure and stamps `anchor` + `headingPath` for
+   * deep-link citations. Set `false` to force the legacy plain path
+   * (`htmlToCleanText` + `chunkText`) for every source — an escape hatch for
+   * corpora that aren't docs.
+   */
+  docsMode?: boolean;
+  /**
+   * When expanding a `sitemap` or `crawl` source, first probe
+   * `origin + "/llms.txt"`; if it returns 200 with ≥1 parsed link, ingest those
+   * curated markdown leaves INSTEAD of the sitemap/crawl expansion (and surface
+   * a progress message saying so). Default `true`. Set `false` to always use the
+   * sitemap/crawl expansion. Probe failures are silent (normal expansion runs).
+   */
+  preferLlmsTxt?: boolean;
   /** Progress callback — drives a dashboard progress bar / SSE. */
   onProgress?: (p: IngestProgress) => void;
 }
