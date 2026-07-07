@@ -623,4 +623,58 @@ export interface DisplayConfig {
     bottom?: string;
     right?: string;
   };
+
+  /**
+   * Open (toggle) the widget with a keyboard shortcut, so docs sites and
+   * dashboards can wire an "Ask AI" affordance into their OWN chrome — nav
+   * button, search bar, `/` command — without holding a `ChatWidgetHandle`
+   * ref (#193). Also enables two other zero-JS/zero-ref open routes on the
+   * same widget instance regardless of this setting: `data-mordn-chat-open`
+   * / `-toggle` / `-close` attributes on any element (one delegated document
+   * click listener, works from static/markdown-generated HTML), and a
+   * `document` CustomEvent API (`mordn-chat:open` / `:close` / `:toggle`) —
+   * the same thing a script-tag embed dispatches internally. See the README
+   * section "Opening the widget from your site" for copy-pasteable examples
+   * of all three.
+   *
+   * **Format**: a `+`-separated combo of modifier tokens and exactly one
+   * key, matched against `KeyboardEvent.key` case-insensitively, e.g.:
+   *   - `"mod+k"`       — the primary modifier + K
+   *   - `"mod+i"`       — the primary modifier + I
+   *   - `"ctrl+shift+/"` — three tokens, last one is the key
+   *   - `"/"`           — a single bare key, no modifier
+   *
+   * `"mod"` resolves at match time to `metaKey` on Mac (Cmd) and `ctrlKey`
+   * everywhere else (Ctrl) — the conventional cross-platform "primary
+   * modifier" token, same convention as most command-palette libraries.
+   * Matching is an EXACT modifier-set match: `"mod+k"` does not also fire on
+   * Cmd+Shift+K.
+   *
+   * **Recommended default for docs sites**: `"mod+i"`. `Cmd/Ctrl+K` has
+   * become the de facto convention for "open search" (used by the doc site's
+   * own search-bar shortcut in most themes); `Cmd/Ctrl+I` is the emerging
+   * convention for "open AI chat" and won't fight the search shortcut for
+   * the same key.
+   *
+   * **Bare keys and typing**: a combo with NO modifier token (e.g. `"/"`)
+   * is suppressed while focus is inside an `input`, `textarea`, `select`,
+   * or any `contenteditable` element — otherwise every "/" a visitor types
+   * into a normal form field would hijack the page. Modifier combos (`"mod+k"`
+   * etc.) always fire, typing or not — same behaviour as every command
+   * palette (Slack, Linear, Notion, …) a user already expects this from.
+   * If your own page also wants a global shortcut on the same key, listen
+   * with `capture: true` and call `stopPropagation()`, exactly as you would
+   * to resolve a conflict with any other library's global hotkey.
+   *
+   * **Multi-instance**: if a page mounts more than one `<ChatWidget>`, a
+   * matching shortcut/button/event fires ALL of them (no cross-instance
+   * coordination) — fine for the common one-widget-per-page case; avoid
+   * configuring the same shortcut on multiple simultaneously-mounted
+   * instances if you don't want that.
+   *
+   * Default: `undefined` (off). There is no implicit shortcut — the widget
+   * NEVER silently hijacks a host page's keybindings. Set `false` explicitly
+   * to make "no shortcut" visible in code/diffs if you want that documented.
+   */
+  keyboardShortcut?: string | false;
 }
