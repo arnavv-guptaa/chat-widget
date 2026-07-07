@@ -120,8 +120,10 @@
   /* Translucent overlays — full color values, not HSL triplets, since they
      bake in alpha on a fixed base. Use them directly: backgroundColor:
      'var(--chat-header-bg)'. */
-  --chat-header-bg:        rgba(255, 255, 255, 0.8);
-  --chat-header-bg-strong: rgba(255, 255, 255, 0.95);
+  /* Header (conversation tabs strip) tracks the chat background — same hue,
+     translucent for the glass effect over scrolled content. */
+  --chat-header-bg:        hsl(var(--chat-background) / 0.8);
+  --chat-header-bg-strong: hsl(var(--chat-background) / 0.95);
   --chat-overlay:          rgba(0, 0, 0, 0.02);
   --chat-hover-bg:         rgba(245, 245, 245, 0.5);
 
@@ -194,8 +196,8 @@
   --chat-text-muted:  0 0% 60%;        /* dark: #999999 */
   --chat-text-subtle: 0 0% 40%;        /* dark: #666666 */
 
-  --chat-header-bg:        rgba(37, 37, 37, 0.8);
-  --chat-header-bg-strong: rgba(37, 37, 37, 0.95);
+  --chat-header-bg:        hsl(var(--chat-background) / 0.8);
+  --chat-header-bg-strong: hsl(var(--chat-background) / 0.95);
   --chat-overlay:          rgba(0, 0, 0, 0.2);
   --chat-hover-bg:         rgba(68, 68, 68, 0.5);
   /* Same single token in dark mode (slightly higher alpha because the
