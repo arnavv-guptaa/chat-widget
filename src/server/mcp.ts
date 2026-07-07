@@ -20,10 +20,24 @@
  * subprocess and has no place in a hosted multi-tenant backend. Per-server
  * headers carry auth (e.g. an end-user's token). Connection failures are
  * isolated: one bad server never blocks the others or the turn.
+ *
+ * SECURITY:
+ *   • SSRF — every server URL is validated with the shared `assertPublicHttpUrl`
+ *     guard (http/https only; private/loopback/link-local/cloud-metadata hosts
+ *     blocked, including hostnames that RESOLVE to them) BEFORE the client
+ *     connects, so a user- or developer-supplied URL can't be used to reach the
+ *     internal network. Pass `{ allowPrivateHosts: true }` only when you
+ *     intentionally connect to an internal MCP server you control.
+ *   • Untrusted output — a remote server's tool descriptions AND results are
+ *     UNTRUSTED model input; a malicious/compromised server can attempt prompt
+ *     injection through them. The handler keeps the operator's system prompt
+ *     authoritative and tool names are namespaced per server, but operators
+ *     should still only wire MCP servers they trust for a given agent.
  */
 
 import { createMCPClient } from '@ai-sdk/mcp';
 import type { ToolSet } from 'ai';
+import { assertPublicHttpUrl } from './net-guard';
 
 export type McpTransport = 'http' | 'sse';
 
@@ -70,7 +84,21 @@ function namespaced<T extends Record<string, unknown>>(tools: T, prefix: string)
  * (recorded in `results`) — it never throws into the turn. `cleanup` closes all
  * clients and is safe to call exactly once (the handler guarantees that).
  */
-export async function connectMcpTools(servers: McpServerConfig[]): Promise<ConnectedMcp> {
+export interface ConnectMcpOptions {
+  /**
+   * Allow MCP servers on PRIVATE/internal hosts — skips the SSRF guard's
+   * private-range checks (the http/https scheme check still applies). OFF by
+   * default, the safe multi-tenant posture where server URLs may be developer-
+   * or end-user-supplied. Enable only when you INTENTIONALLY connect to internal
+   * MCP servers you control.
+   */
+  allowPrivateHosts?: boolean;
+}
+
+export async function connectMcpTools(
+  servers: McpServerConfig[],
+  opts: ConnectMcpOptions = {},
+): Promise<ConnectedMcp> {
   const clients: { close: () => Promise<void> }[] = [];
   const results: ConnectedMcp['results'] = [];
   let tools: ToolSet = {};
@@ -80,6 +108,19 @@ export async function connectMcpTools(servers: McpServerConfig[]): Promise<Conne
     (servers ?? []).map(async (server) => {
       if (!server?.url || !server?.id) {
         results.push({ id: server?.id ?? '(unknown)', ok: false, toolCount: 0, error: 'missing id/url' });
+        return;
+      }
+      // SSRF guard: reject non-http(s) schemes and private/internal/metadata
+      // endpoints BEFORE the client dials a (possibly user-supplied) URL.
+      try {
+        await assertPublicHttpUrl(server.url, { allowPrivate: opts.allowPrivateHosts });
+      } catch (err) {
+        results.push({
+          id: server.id,
+          ok: false,
+          toolCount: 0,
+          error: err instanceof Error ? err.message : 'blocked url',
+        });
         return;
       }
       try {

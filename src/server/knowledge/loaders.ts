@@ -28,6 +28,12 @@ import { Agent } from 'undici';
 import type { IngestOptions, IngestSource } from './types';
 import type { StorageAdapter } from '../storage-adapter';
 import { extractTitle, htmlToCleanText } from './extract';
+import { isBlockedIp, isBlockedHostname } from '../net-guard';
+
+// The SSRF block-list lives in one place (../net-guard), shared with the MCP
+// connector so the two outbound-fetch surfaces can't drift. Re-exported to
+// preserve the existing @mordn/chat-widget/server/knowledge export surface.
+export { isBlockedIp };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_UA = 'mordn-chat-widget-ingest/1.0 (+https://github.com/arnavv-guptaa/chat-widget)';
@@ -53,44 +59,10 @@ export interface LoadedContent {
 }
 
 // ── SSRF guard ───────────────────────────────────────────────────────────────
-
-/** True if an IP string is private/loopback/link-local/unique-local/metadata. */
-export function isBlockedIp(ip: string): boolean {
-  const v = isIP(ip);
-  if (v === 4) {
-    const o = ip.split('.').map(Number);
-    if (o[0] === 10) return true; // 10/8
-    if (o[0] === 127) return true; // loopback
-    if (o[0] === 0) return true; // 0/8
-    if (o[0] === 169 && o[1] === 254) return true; // link-local incl. 169.254.169.254 metadata
-    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12
-    if (o[0] === 192 && o[1] === 168) return true; // 192.168/16
-    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT 100.64/10
-    if (o[0] >= 224) return true; // multicast / reserved
-    return false;
-  }
-  if (v === 6) {
-    const lower = ip.toLowerCase();
-    if (lower === '::1' || lower === '::') return true; // loopback / unspecified
-    if (lower.startsWith('fe80')) return true; // link-local
-    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
-    if (lower.startsWith('::ffff:')) return isBlockedIp(lower.slice(7)); // v4-mapped
-    return false;
-  }
-  return false;
-}
-
-/** Hostnames that are never fetchable regardless of resolution. */
-function isBlockedHostname(host: string): boolean {
-  const h = host.toLowerCase();
-  return (
-    h === 'localhost' ||
-    h.endsWith('.localhost') ||
-    h.endsWith('.internal') ||
-    h.endsWith('.local') ||
-    h === 'metadata.google.internal'
-  );
-}
+// `isBlockedIp` / `isBlockedHostname` are imported from ../net-guard (the shared
+// block-list). `safeLookup` below adds the loader-specific hardening on top: it
+// PINS the vetted IP to the socket via undici's connector, closing the
+// DNS-rebinding TOCTOU window for the ingest fetch path.
 
 /**
  * A `dns.lookup`-shaped resolver (the shape undici's `connect.lookup` expects)
