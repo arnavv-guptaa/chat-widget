@@ -11,10 +11,16 @@ const cssPath = path.join(__dirname, '../dist/styles.css');
 
 let css = fs.readFileSync(cssPath, 'utf8');
 
-// Replace :root,:host with .chat-widget-container
-css = css.replace(/:root,:host\{/g, '.chat-widget-container{');
-css = css.replace(/:root\{/g, '.chat-widget-container{');
-css = css.replace(/:host\{/g, '.chat-widget-container{');
+// Replace :root,:host with the OUTERMOST .chat-widget-container only. The
+// widget nests a second .chat-widget-container (the interface root) inside the
+// layout wrapper; if token defaults (--chat-primary etc.) re-declared there,
+// they would shadow runtime overrides set inline on the outer wrapper (the
+// theme.primaryColor no-op bug). :where() keeps specificity at (0,1,0) so host
+// `.chat-widget-container { --chat-*: … }` theming overrides still win.
+const ROOT_SCOPE = '.chat-widget-container:where(:not(.chat-widget-container *))';
+css = css.replace(/:root,:host\{/g, `${ROOT_SCOPE}{`);
+css = css.replace(/:root\{/g, `${ROOT_SCOPE}{`);
+css = css.replace(/:host\{/g, `${ROOT_SCOPE}{`);
 
 // Scope the global * selector to only apply within our container
 css = css.replace(

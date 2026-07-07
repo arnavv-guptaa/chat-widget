@@ -93,7 +93,11 @@
    CHAT WIDGET CONTAINER
    ============================================ */
 
-.chat-widget-container {
+/* Token defaults apply to the OUTERMOST container only: the interface root
+   nests a second .chat-widget-container, and re-declaring tokens there would
+   shadow runtime overrides set inline on the outer wrapper (theme.primaryColor
+   et al). :where() keeps specificity at (0,1,0) so host theming still wins. */
+.chat-widget-container:where(:not(.chat-widget-container *)) {
   /* Core color tokens (HSL triplets — used inside hsl() with optional alpha) */
   --chat-primary:    0 0% 20.5%;
   --chat-background: 0 0% 100%;
@@ -175,7 +179,7 @@
   container-name: chat-widget;
 }
 
-.chat-widget-container.dark {
+.chat-widget-container.dark:where(:not(.chat-widget-container *)) {
   --chat-primary:    0 0% 92.2%;
   --chat-background: 0 0% 14.5%;
   --chat-text:       0 0% 98.5%;
