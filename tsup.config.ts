@@ -1,4 +1,7 @@
 import { defineConfig } from 'tsup';
+// Read the package version for the embed's CSS-fallback URL define. `resolveJsonModule`
+// is on (tsup/esbuild resolves JSON natively), and this is build-time-only config.
+import pkg from './package.json';
 
 export default defineConfig([
   // Client components (ChatWidget, ChatInterface, etc.)
@@ -109,6 +112,53 @@ export default defineConfig([
     external: [/^@mordn\/chat-widget(\/.*)?$/],
     banner: {
       js: '#!/usr/bin/env node',
+    },
+  },
+  // Script-tag embed — a self-contained IIFE for non-React sites (issue #192).
+  //
+  // This is the OPPOSITE of the library entry above: instead of externalizing
+  // React and the widget's deps so the host provides them, we bundle EVERYTHING
+  // (`noExternal: [/.*/]`) so a plain `<script>` on a docs site with no bundler
+  // and no React still gets a working widget. Output: `dist/embed.global.js`.
+  //
+  // Entry NAMING: the key is `embed` (not `embed.global`). tsup's default JS
+  // extension for the `iife` format is already `.global.js`, so `embed` →
+  // `dist/embed.global.js`. Naming the key `embed.global` would instead emit
+  // `dist/embed.global.global.js` (double suffix). Keep it as `embed`.
+  //
+  // NO "use client" banner here — this bundle IS the React tree; there is no
+  // outer RSC boundary to annotate (unlike the library `index` entry).
+  {
+    entry: {
+      embed: 'src/embed/index.tsx',
+    },
+    format: ['iife'],
+    platform: 'browser',
+    target: 'es2019',
+    minify: true,
+    sourcemap: false,
+    dts: false,
+    clean: false, // The first (library) config already cleaned dist/.
+    // Bundle React, ReactDOM, and every widget dependency IN — the whole point
+    // of the embed is zero host dependencies.
+    noExternal: [/.*/],
+    // ...EXCEPT shiki (DOCS_CONTRACT §6). Marking it external makes esbuild
+    // leave the sibling highlighting PR's dynamic `import("shiki/bundle/web")`
+    // as a literal bare specifier, which fails fast in the browser; the loader's
+    // catch then falls back to `import(globalThis.__MORDN_SHIKI_URL__)` (a CDN
+    // URL the embed sets at init). This keeps shiki's ~1–2 MB OUT of the bundle.
+    // Both the bare package and the `/bundle/web` subpath are listed because
+    // esbuild matches exact specifiers. (main has no shiki import yet; this is
+    // inert until the highlighting branch merges, and harmless meanwhile.)
+    external: ['shiki', 'shiki/bundle/web'],
+    // The bundle references NODE_ENV (React's dev/prod branch). There is no
+    // process in the browser, so inline the production value at build time —
+    // this also drops React's dev-only warnings and dead code.
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      // Pin the CSS fallback <link> to the exact published version. Read from
+      // package.json at config-eval time so it never drifts from the release.
+      '__MORDN_WIDGET_VERSION__': JSON.stringify(pkg.version),
     },
   },
 ]);
