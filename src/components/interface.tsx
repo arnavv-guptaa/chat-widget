@@ -1196,7 +1196,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                         <div key={groupName} className="mb-0.5">
                           {/* Group Header */}
                           <div className="px-2.5 py-1 sticky top-0 backdrop-blur-sm z-10" style={{
-                            backgroundColor: 'var(--chat-header-bg-strong)'
+                            backgroundColor: 'var(--chat-header-bg)'
                           }}>
                             <h3 className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'hsl(var(--chat-text-muted))' }}>{groupName}</h3>
                           </div>
