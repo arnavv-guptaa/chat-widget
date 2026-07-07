@@ -15,7 +15,8 @@
  * -----------------
  * The source for the standalone IIFE bundle (`dist/embed.global.js`). Unlike the
  * library entry (`src/index.ts`), this bundle is SELF-CONTAINED: React,
- * ReactDOM, and the whole widget are compiled IN (tsup `noExternal: [/.*/]`), so
+ * ReactDOM, and the whole widget are compiled IN (tsup `noExternal` set to a
+ * catch-all pattern), so
  * the host page needs nothing installed. It exposes an imperative global,
  * `window.MordnChat`, and supports a declarative `data-*` auto-init so the
  * simplest sites never touch JavaScript.
