@@ -33,6 +33,7 @@ import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
 import { toHslTripletIfHex } from './utils/color';
+import { useOpenTriggers } from './hooks/use-open-triggers';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
   /**
@@ -216,6 +217,21 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     }),
     [setOpenState, isOpen]
   );
+
+  // Page-chrome open triggers (#193): keyboard shortcut, `data-mordn-chat-*`
+  // attribute buttons, and the `document` CustomEvent API. These call the
+  // EXACT SAME `setOpenState` the imperative handle above uses, with the
+  // same `programmatic` gating, so a docs-site nav button and a React ref
+  // behave identically — same allowAutoReopen gate, same controlled-mode
+  // onOpenChange delegation, same persistState behaviour.
+  const triggerOpen = useCallback(() => setOpenState(true, { programmatic: true }), [setOpenState]);
+  const triggerClose = useCallback(() => setOpenState(false), [setOpenState]);
+  const triggerToggle = useCallback(
+    () => setOpenState(!isOpen, { programmatic: !isOpen }),
+    [setOpenState, isOpen]
+  );
+  useOpenTriggers(display?.keyboardShortcut, { open: triggerOpen, close: triggerClose, toggle: triggerToggle });
+
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
