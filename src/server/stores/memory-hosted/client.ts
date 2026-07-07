@@ -26,6 +26,7 @@ import type {
   RecordOptions,
   RetrieveOptions,
 } from '../../memory/types';
+import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.dev';
 
@@ -124,6 +125,8 @@ export interface HostedMemoryOptions {
   baseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
+  /** Per-request timeout (ms) for the hosted API. Defaults to 30s; `0` disables. */
+  timeoutMs?: number;
 }
 
 /**
@@ -134,6 +137,6 @@ export function createHostedMemory(options: HostedMemoryOptions): MemoryAdapterF
   if (!options.apiKey) throw new Error('[chat-widget] createHostedMemory requires an apiKey');
   if (!options.agentId) throw new Error('[chat-widget] createHostedMemory requires an agentId');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (userId) => new HostedMemoryAdapter(userId, options.apiKey, options.agentId, baseUrl, fetchImpl);
 }

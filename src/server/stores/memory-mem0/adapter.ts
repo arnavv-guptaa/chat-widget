@@ -29,6 +29,7 @@ import type {
   RecordOptions,
   RetrieveOptions,
 } from '../../memory/types';
+import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
 const DEFAULT_BASE_URL = 'https://api.mem0.ai';
 
@@ -130,6 +131,8 @@ export interface Mem0Options {
   baseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
+  /** Per-request timeout (ms) for the mem0 API. Defaults to 30s; `0` disables. */
+  timeoutMs?: number;
 }
 
 /**
@@ -142,6 +145,6 @@ export function createMem0Memory(options: Mem0Options): MemoryAdapterFactory {
   if (!options.apiKey) throw new Error('[chat-widget] createMem0Memory requires an apiKey');
   const agentId = options.agentId ?? 'default';
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (userId) => new Mem0MemoryAdapter(userId, options.apiKey, agentId, baseUrl, fetchImpl);
 }
