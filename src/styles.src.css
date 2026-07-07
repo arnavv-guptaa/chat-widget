@@ -585,6 +585,48 @@
 }
 
 /* ============================================
+   SHIKI SYNTAX HIGHLIGHTING (token colours)
+   Both code paths (prose CollapsibleCodeBlock + tool CodeBlock) inject Shiki's
+   `<pre class="shiki">` markup. Shiki is rendered with dual themes and
+   `defaultColor: false` (utils/highlight.ts), so it emits inline
+   `color: var(--shiki-light)` plus a `--shiki-dark` custom property on the pre
+   and every token span. We keep the LIGHT colour and swap to `--shiki-dark`
+   under the widget's `.dark` scope.
+
+   The widget owns the SURFACE, not Shiki: force the Shiki background
+   transparent so our token-driven `--chat-*` surfaces show through (the pill
+   body / tool-block bg), rather than Shiki painting its own theme background.
+   Long lines keep the existing `overflow-x: auto` from `.chat-widget-container
+   pre` above (`.shiki` IS a <pre>), so wrapping/scroll behaviour from #157 is
+   unchanged.
+   ============================================ */
+.chat-widget-container .shiki,
+.chat-widget-container .shiki span {
+  color: var(--shiki-light);
+  background-color: transparent !important;
+}
+
+/* Dark mode: re-point colour to the `--shiki-dark` value Shiki stamped inline.
+   `!important` is required here — Shiki's inline `color: var(--shiki-light)`
+   would otherwise out-specify a plain stylesheet rule. Background stays
+   transparent (inherited from the rule above). */
+.chat-widget-container.dark .shiki,
+.chat-widget-container.dark .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+/* The injected `.shiki` <pre> sits inside our own chrome wrappers (the prose
+   `.chat-code-body` and the tool `.code-block-shiki`, which already own
+   padding / surface / scroll). Strip the browser's default <pre> margin so it
+   doesn't add a gap, and let the wrapper drive layout — no double box, no
+   double background. */
+.chat-widget-container .chat-code-body .shiki,
+.chat-widget-container .code-block-shiki .shiki {
+  margin: 0;
+  background-color: transparent !important;
+}
+
+/* ============================================
    TOOL APPROVAL BUTTONS (human-in-the-loop)
    Shown when a needsApproval tool pauses. Approve = filled primary; Deny =
    subtle outline. Themed via --chat-* so they work light/dark.
