@@ -49,8 +49,12 @@ export {
 // Ingestion pipeline (admin/server only)
 export { ingest, type IngestArgs } from './ingest';
 export { chunkText, type ChunkOptions } from './chunk';
-export { htmlToCleanText, extractTitle } from './extract';
-export { expandSources, loadLeaf, isBlockedIp, type LeafSource, type LoadedContent } from './loaders';
+// Heading-aware markdown chunker + its markdown-preserving HTML extractor.
+// Public because BYO ingestion pipelines want the same structure-aware
+// chunking + deep-link anchors the built-in `ingest` uses.
+export { chunkMarkdown, slugify, type MarkdownChunk } from './chunk-markdown';
+export { htmlToCleanText, htmlToMarkdown, extractTitle } from './extract';
+export { expandSources, loadLeaf, isBlockedIp, isMarkdownContent, type LeafSource, type LoadedContent } from './loaders';
 
 // Retrieval glue (tool factory + inject context + citations)
 export {

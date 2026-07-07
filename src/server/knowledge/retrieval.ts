@@ -29,9 +29,21 @@ function escapeAttr(s: string): string {
  * The citation URL for a chunk. Web sources get their real (clickable) URL;
  * file/text sources get a stable, non-navigable `kb://` href so the title still
  * renders in the sources UI.
+ *
+ * Deep-link (DOCS_CONTRACT §4): when a web source carries a heading `anchor`
+ * (stamped by the docs-aware chunker) and the URL has no fragment of its own,
+ * append `#anchor` so the citation lands on the exact section instead of the top
+ * of a long page. A URL that already has a `#fragment` is left as-is (the site
+ * chose that target), and non-web (`kb://`) sources are unchanged.
  */
 export function citationUrl(c: RetrievedChunk): string {
-  if (c.source.url && /^https?:\/\//.test(c.source.url)) return c.source.url;
+  if (c.source.url && /^https?:\/\//.test(c.source.url)) {
+    const anchor = c.metadata?.anchor;
+    if (typeof anchor === 'string' && anchor.length > 0 && !c.source.url.includes('#')) {
+      return `${c.source.url}#${anchor}`;
+    }
+    return c.source.url;
+  }
   const ref = (c.metadata?.sourceRef as string | undefined) ?? c.source.title ?? c.id;
   return `kb://${encodeURIComponent(ref)}`;
 }
@@ -44,7 +56,13 @@ export interface SourceUrlPart {
   title?: string;
 }
 
-/** Build de-duplicated `source-url` parts for the retrieved chunks. */
+/**
+ * Build de-duplicated `source-url` parts for the retrieved chunks. Dedupe is by
+ * citation URL, which is now ANCHOR-GRANULAR by design (DOCS_CONTRACT §4): two
+ * chunks from different sections of the same page produce distinct `url#anchor`
+ * citations and are intentionally kept as two separate sources; only true
+ * duplicates (same page, same section) collapse.
+ */
 export function toSourceParts(chunks: RetrievedChunk[]): SourceUrlPart[] {
   const seen = new Set<string>();
   const parts: SourceUrlPart[] = [];

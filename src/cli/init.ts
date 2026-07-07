@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import type { IngestSource } from '../server/knowledge';
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -264,6 +265,8 @@ async function init() {
 //
 //   chat-widget init                       scaffold the backend (default)
 //   chat-widget ingest [--config p] ...    ingest sources into a namespace
+//     [URL …]                                ad-hoc page URLs (.md/.mdx route as markdown)
+//     [--llms <url> …]                       an llms.txt index (expands to its linked docs)
 //   chat-widget sync   [--config p]        re-ingest the config's sources (idempotent)
 //   chat-widget status [--config p]        show per-source chunk counts / status
 //   chat-widget list   [--config p]        list sources in the namespace
@@ -280,8 +283,9 @@ async function init() {
 
 const KNOWLEDGE_COMMANDS = new Set(['ingest', 'sync', 'status', 'list', 'eval']);
 
-function parseFlags(argv: string[]): { config?: string; file?: string; json: boolean; rest: string[] } {
+function parseFlags(argv: string[]): { config?: string; file?: string; json: boolean; llms: string[]; rest: string[] } {
   const rest: string[] = [];
+  const llms: string[] = [];
   let config: string | undefined;
   let file: string | undefined;
   let json = false;
@@ -292,11 +296,15 @@ function parseFlags(argv: string[]): { config?: string; file?: string; json: boo
       file = argv[++i];
     } else if (argv[i] === '--json') {
       json = true;
+    } else if (argv[i] === '--llms') {
+      // Repeatable: --llms <url> [--llms <url> …]. Points at an llms.txt index.
+      const v = argv[++i];
+      if (v) llms.push(v);
     } else {
       rest.push(argv[i]);
     }
   }
-  return { config, file, json, rest };
+  return { config, file, json, llms, rest };
 }
 
 async function loadKnowledgeConfig(configPath?: string): Promise<any> {
@@ -346,12 +354,19 @@ async function runKnowledge(command: string, argv: string[]): Promise<void> {
 
   // ingest / sync — both run the pipeline; sync is just ingest over the config's
   // sources (idempotent via contentHash). `ingest` may take explicit refs after
-  // the command for ad-hoc URLs.
-  const { rest } = parseFlags(argv);
-  const adhoc = rest.filter((r) => /^https?:\/\//.test(r)).map((url) => ({ type: 'url' as const, url }));
-  const sources = adhoc.length ? adhoc : (cfg.sources ?? []);
+  // the command for ad-hoc URLs, and `--llms <url>` for llms.txt indexes. A
+  // plain `.md`/`.mdx` URL needs no special flag — the loader detects markdown
+  // by extension/content-type and routes it through the heading-aware chunker.
+  const { llms, rest } = parseFlags(argv);
+  const adhoc: IngestSource[] = [
+    ...rest.filter((r) => /^https?:\/\//.test(r)).map((url) => ({ type: 'url' as const, url })),
+    ...llms.map((url) => ({ type: 'llms' as const, url })),
+  ];
+  const sources: IngestSource[] = adhoc.length ? adhoc : (cfg.sources ?? []);
   if (sources.length === 0) {
-    throw new Error('Nothing to ingest: pass URLs after the command or set `sources` in the config.');
+    throw new Error(
+      'Nothing to ingest: pass URLs (or --llms <url>) after the command, or set `sources` in the config.',
+    );
   }
 
   console.log(`Ingesting ${sources.length} source(s) into "${cfg.namespace}"…`);
@@ -363,8 +378,16 @@ async function runKnowledge(command: string, argv: string[]): Promise<void> {
     chunkSize: cfg.chunkSize,
     overlap: cfg.overlap,
     crawl: cfg.crawl,
-    onProgress: (p) =>
-      process.stdout.write(`\r  [${p.stage}] ${p.done}/${p.total} ${p.source ?? ''}`.padEnd(72)),
+    docsMode: cfg.docsMode,
+    preferLlmsTxt: cfg.preferLlmsTxt,
+    onProgress: (p) => {
+      // Surface discovery/notice messages (e.g. "found llms.txt …") on their own
+      // line so they aren't overwritten by the in-place progress counter.
+      if (p.message && (p.stage === 'fetch' || p.stage === 'done')) {
+        process.stdout.write(`\n  ${p.message}\n`);
+      }
+      process.stdout.write(`\r  [${p.stage}] ${p.done}/${p.total} ${p.source ?? ''}`.padEnd(72));
+    },
   });
   process.stdout.write('\n');
   console.log(

@@ -316,6 +316,54 @@ compression: {
 
 ---
 
+## Knowledge base (RAG) & ingestion
+
+The optional knowledge module (`@mordn/chat-widget/server/knowledge`) ingests
+docs into a vector store and retrieves them at chat time. Ingestion is
+**docs-aware** by default:
+
+- **Markdown-first extraction.** HTML pages are converted to structure-preserving
+  markdown (headings, code fences with language, lists) instead of flat prose;
+  `.md`/`.mdx` pages and `text/markdown` responses pass through as-is.
+- **Heading-aware chunking.** Chunks are packed within a section, a fenced code
+  block is never split, and each chunk is prefixed with its breadcrumb
+  (`Guide › Persistence › Sliding window`) and stamped with `anchor` +
+  `headingPath` metadata.
+- **Deep-link citations.** Web citations get a `#anchor` fragment so a source
+  links to the exact section that answered, not the top of the page.
+- **`llms.txt` support.** Point ingestion at a site's `llms.txt` index and it
+  fetches every linked doc; `sitemap`/`crawl` sources auto-discover and prefer a
+  site's `llms.txt` when one exists.
+
+```ts
+import { ingest } from '@mordn/chat-widget/server/knowledge';
+import { createKnowledgeDrizzleStore } from '@mordn/chat-widget/server/knowledge/drizzle';
+
+const store = createKnowledgeDrizzleStore({ embedder });
+
+await ingest({
+  store: store('agent:my-agent'),
+  namespace: 'agent:my-agent',
+  sources: [
+    { type: 'llms', url: 'https://docs.example.com/llms.txt' },
+    { type: 'url', url: 'https://docs.example.com/guide.md' },
+  ],
+  // docsMode: true,       // default — set false for the legacy plain path
+  // preferLlmsTxt: true,  // default — sitemap/crawl auto-discover llms.txt
+});
+```
+
+From the CLI (see the command list in `chat-widget --help`):
+
+```bash
+npx @mordn/chat-widget ingest --llms https://docs.example.com/llms.txt
+```
+
+`chunkMarkdown` and `htmlToMarkdown` are exported too, for bring-your-own
+ingestion pipelines that want the same structure-aware chunking and anchors.
+
+---
+
 ## Test your docs bot in CI
 
 If you use the knowledge base to answer questions from your docs, retrieval can
@@ -396,8 +444,14 @@ import { createDrizzleChatStore, schema } from '@mordn/chat-widget/server/drizzl
 // Default Supabase storage adapter (server-only)
 import { createSupabaseStorage } from '@mordn/chat-widget/server/supabase';
 
-// Knowledge base / RAG: ingestion, retrieval, and the CI eval suite (server-only)
-import { ingest, runEvals, type EvalFile } from '@mordn/chat-widget/server/knowledge';
+// Knowledge base / RAG: ingestion, retrieval, docs-aware helpers, and the CI eval suite (server-only)
+import {
+  ingest,
+  chunkMarkdown, htmlToMarkdown,
+  createSearchKnowledgeTool, citationUrl,
+  runEvals, type EvalFile,
+  type IngestSource, type IngestOptions,
+} from '@mordn/chat-widget/server/knowledge';
 ```
 
 ---

@@ -15,7 +15,12 @@
 
 import 'server-only';
 
-const CHARS_PER_TOKEN = 4;
+/**
+ * The ≈chars-per-token heuristic. Exported so the heading-aware chunker
+ * (`chunk-markdown.ts`) budgets against the SAME constant — one source of truth,
+ * no drift between the two chunkers.
+ */
+export const CHARS_PER_TOKEN = 4;
 
 export interface ChunkOptions {
   /** Target chunk size in tokens. Default 512. */
@@ -24,7 +29,8 @@ export interface ChunkOptions {
   overlap?: number;
 }
 
-const tokensToChars = (tokens: number) => Math.max(1, Math.floor(tokens * CHARS_PER_TOKEN));
+/** Token budget → char budget (floored, min 1). Shared with `chunkMarkdown`. */
+export const tokensToChars = (tokens: number) => Math.max(1, Math.floor(tokens * CHARS_PER_TOKEN));
 
 /** Split text into paragraph units (kept small enough to pack greedily). */
 function paragraphs(text: string): string[] {

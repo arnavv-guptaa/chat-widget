@@ -8,14 +8,23 @@
  * server context (never from a chat user's request body).
  *
  * Pipeline:
- *   loader (SSRF-guarded) → HTML→clean text → token-aware chunk (+overlap)
+ *   loader (SSRF-guarded) → extract (docs-aware: HTML→markdown, else clean text)
+ *     → chunk (heading-aware `chunkMarkdown` for markdown, else `chunkText`)
  *     → contentHash + resync diff → embed (in the store) → idempotent upsert
  *     → onProgress
+ *
+ * Docs-aware (DOCS_CONTRACT §1–§3, default on via `docsMode`): markdown sources
+ * are chunked by section and every chunk is stamped with `anchor` (nearest
+ * heading slug) + `headingPath` (breadcrumb joined by " › ") so retrieval can
+ * deep-link to the exact section. `docsMode: false` restores the legacy plain
+ * path for every source.
  *
  * Idempotency: a per-source sha256 contentHash lets the store skip unchanged
  * sources; replacing a source with fewer chunks deletes the orphaned tail. The
  * pipeline never throws on a single source's failure — it records it in
  * `report.errors` and continues, so one dead link can't abort a 100-page sync.
+ * The contentHash is taken over the CLEANED TEXT (pre-chunk), so it is stable
+ * regardless of which chunker ran — resync stays byte-compatible.
  */
 
 import 'server-only';
@@ -30,6 +39,7 @@ import type {
 } from './types';
 import type { StorageAdapter } from '../storage-adapter';
 import { chunkText } from './chunk';
+import { chunkMarkdown } from './chunk-markdown';
 import { expandSources, loadLeaf, type LeafSource } from './loaders';
 
 export interface IngestArgs extends IngestOptions {
@@ -88,9 +98,10 @@ export async function ingest(args: IngestArgs): Promise<IngestReport> {
     try {
       onProgress({ done, total, stage: 'fetch', source: leaf.ref });
       const origin = originFor(leaf, sources);
-      const { text, title, mediaType } = await loadLeaf(leaf, origin, {
+      const { text, title, mediaType, isMarkdown } = await loadLeaf(leaf, origin, {
         storage,
         crawl: args.crawl,
+        docsMode: args.docsMode,
       });
 
       onProgress({ done, total, stage: 'extract', source: leaf.ref });
@@ -102,25 +113,48 @@ export async function ingest(args: IngestArgs): Promise<IngestReport> {
         continue;
       }
 
-      // contentHash over the cleaned text → stable resync key shared by all
-      // chunks of this source.
+      // contentHash over the cleaned text (pre-chunk) → stable resync key shared
+      // by all chunks of this source, independent of which chunker runs.
       const contentHash = createHash('sha256').update(clean).digest('hex');
+      const ingestedAt = Date.now();
 
       onProgress({ done, total, stage: 'chunk', source: leaf.ref });
-      const pieces = chunkText(clean, { chunkSize: args.chunkSize, overlap: args.overlap });
+      const chunkOpts = { chunkSize: args.chunkSize, overlap: args.overlap };
 
-      const docs: KnowledgeDoc[] = pieces.map((chunk, i) => ({
-        text: chunk,
-        source: leaf.ref,
-        title: title ?? leaf.title ?? leaf.ref,
-        metadata: {
-          mediaType,
-          origin: leaf.kind,
-          chunkIndex: i,
-          contentHash,
-          ingestedAt: Date.now(),
-        },
-      }));
+      // Docs-aware routing (default on): markdown → heading-aware chunker that
+      // emits per-chunk section metadata; everything else → the plain chunker.
+      // Both share the SAME base metadata below so existing keys are unchanged.
+      const docs: KnowledgeDoc[] = isMarkdown
+        ? chunkMarkdown(clean, chunkOpts).map((chunk, i) => ({
+            text: chunk.text,
+            source: leaf.ref,
+            title: title ?? leaf.title ?? leaf.ref,
+            metadata: {
+              mediaType,
+              origin: leaf.kind,
+              chunkIndex: i,
+              contentHash,
+              ingestedAt,
+              // Deep-link citation metadata (DOCS_CONTRACT §3). `headingPath` is
+              // JOINED into a string — `ChunkMetadata` values are scalars only.
+              ...(chunk.anchor ? { anchor: chunk.anchor } : {}),
+              ...(chunk.headingPath && chunk.headingPath.length
+                ? { headingPath: chunk.headingPath.join(' › ') }
+                : {}),
+            },
+          }))
+        : chunkText(clean, chunkOpts).map((chunk, i) => ({
+            text: chunk,
+            source: leaf.ref,
+            title: title ?? leaf.title ?? leaf.ref,
+            metadata: {
+              mediaType,
+              origin: leaf.kind,
+              chunkIndex: i,
+              contentHash,
+              ingestedAt,
+            },
+          }));
 
       onProgress({ done, total, stage: 'embed', source: leaf.ref });
       onProgress({ done, total, stage: 'upsert', source: leaf.ref });
