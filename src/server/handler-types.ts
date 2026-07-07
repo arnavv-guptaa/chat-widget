@@ -490,6 +490,27 @@ export interface CreateChatHandlerOptions {
   maxMessageChars?: number;
 
   /**
+   * Hard cap (bytes) on the raw chat request body the handler will buffer before
+   * rejecting with 413. Enforced against the ACTUAL bytes read off the request
+   * stream — NOT the `Content-Length` header (which a chunked request can omit),
+   * so a client cannot force an unbounded allocation / `JSON.stringify`. Defaults
+   * to 1 MB, which is generous for a windowed message array plus injected
+   * context; raise it only if you legitimately POST larger bodies.
+   */
+  maxRequestBytes?: number;
+
+  /**
+   * Optional overall wall-clock timeout (ms) for the streamed model response. A
+   * hung or stalled upstream (bad gateway, wedged tool call) otherwise holds the
+   * connection and server resources open until the platform kills it. When set,
+   * the handler aborts the stream after this many ms (in addition to honouring
+   * client-abort). OFF by default, so long but legitimate tool-using turns are
+   * never cut short — set it to a ceiling comfortably above your slowest expected
+   * answer and at/below your platform's function timeout.
+   */
+  streamTimeoutMs?: number;
+
+  /**
    * Context compaction. When a conversation grows past `maxHistoryMessages`, the
    * sliding window DROPS the oldest messages from the model payload — by default
    * that early context (the user's original goal, decisions made early on) is
