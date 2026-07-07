@@ -72,6 +72,12 @@ const DEFAULT_ALLOWED_MEDIA_TYPES = [
 ];
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant.';
 
+// Hard cap on the raw chat request body. Enforced against the ACTUAL bytes read
+// off the stream (not the forgeable Content-Length), so a chunked / omitted-
+// length client can't force an unbounded buffer + JSON parse. Overridable via
+// the `maxRequestBytes` option.
+const DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024; // 1 MB
+
 // Per-turn context injection (#162). Cap the injected context's rendered size,
 // and skip injection entirely when the request body exceeds this byte budget —
 // a cheap Content-Length guard so a malicious client can't force an unbounded
@@ -177,6 +183,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     logErrors = true,
     stopWhen,
     upload,
+    maxRequestBytes = DEFAULT_MAX_REQUEST_BYTES,
+    streamTimeoutMs,
     retrieval,
     memory,
     onFeedback,
@@ -233,12 +241,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
   // ── POST /chat ─────────────────────────────────────────────────────────
   async function handleChat(request: Request): Promise<Response> {
-    let body: { messages?: UIMessage[]; id?: string; context?: unknown };
-    try {
-      body = await request.json();
-    } catch {
-      return json({ error: 'Invalid JSON body' }, 400);
+    // Read the body under a HARD byte cap (real bytes, not Content-Length) so a
+    // giant or chunked payload can't force an unbounded allocation / parse (DoS).
+    const read = await readJsonWithLimit(request, maxRequestBytes);
+    if (!read.ok) {
+      return read.reason === 'too_large'
+        ? json({ error: 'Request body too large' }, 413)
+        : json({ error: 'Invalid JSON body' }, 400);
     }
+    const body = read.body as { messages?: UIMessage[]; id?: string; context?: unknown };
+    const requestBodyBytes = read.bytes;
     const conversationId = typeof body.id === 'string' && body.id ? body.id : undefined;
     if (!conversationId) return json({ error: 'Missing conversation id' }, 400);
 
@@ -360,7 +372,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // below as `contextSystem`, and is never echoed back to the client.
     let contextSystem = '';
     {
-      const bodyBytes = Number(request.headers.get('content-length') || '0');
+      const bodyBytes = requestBodyBytes; // real measured size, not the forgeable Content-Length
       if (bodyBytes > MAX_CONTEXT_BYTES) {
         if (body.context !== undefined) {
           console.warn(
@@ -440,7 +452,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let memoryEnabled = false;
     let memoryOrgId: string | undefined;
     if (memory) {
-      memoryEnabled = memory.isEnabledForUser ? await memory.isEnabledForUser(ctx) : true;
+      if (memory.isEnabledForUser) {
+        // Consent gate fails CLOSED: if the host's check throws, disable memory
+        // for this turn rather than 500-ing the whole request.
+        try {
+          memoryEnabled = await memory.isEnabledForUser(ctx);
+        } catch (err) {
+          console.error(
+            '[chat-widget] memory.isEnabledForUser threw; disabling memory for this turn:',
+            err,
+          );
+          memoryEnabled = false;
+        }
+      } else {
+        memoryEnabled = true;
+      }
       if (memoryEnabled) {
         memoryAdapter = memory.adapter(ctx.userId); // bound to the verified id
         // Resolve the verified org id once (used by both recall + extraction for
@@ -513,16 +539,33 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     const tools: ToolSet = { ...retrievalTools, ...(built.tools ?? {}) };
 
-    // Single, guarded teardown of the tools' per-request resource. Fires
-    // exactly once across all completion paths (finish / error / abort).
+    // Optional wall-clock timeout for the stream. When `streamTimeoutMs` is set,
+    // abort the stream after that budget (and on client-abort) so a hung/stalled
+    // upstream can't hold the connection + resources open indefinitely. OFF by
+    // default → no abortSignal is passed to streamText below and the stream
+    // lifecycle is exactly as before.
+    let streamAbort: AbortController | undefined;
+    let streamTimer: ReturnType<typeof setTimeout> | undefined;
+    if (streamTimeoutMs && streamTimeoutMs > 0) {
+      streamAbort = new AbortController();
+      request.signal.addEventListener('abort', () => streamAbort!.abort());
+      streamTimer = setTimeout(() => streamAbort!.abort(), streamTimeoutMs);
+    }
+
+    // Single, guarded teardown of the tools' per-request resource AND the stream
+    // timer. Fires exactly once across all completion paths (finish / error /
+    // abort).
     let cleanedUp = false;
     const runCleanup = async (reason: string) => {
-      if (cleanedUp || !built.cleanup) return;
+      if (cleanedUp) return;
       cleanedUp = true;
-      try {
-        await built.cleanup();
-      } catch (err) {
-        console.error(`[chat-widget] tool cleanup failed (${reason}):`, err);
+      if (streamTimer) clearTimeout(streamTimer);
+      if (built.cleanup) {
+        try {
+          await built.cleanup();
+        } catch (err) {
+          console.error(`[chat-widget] tool cleanup failed (${reason}):`, err);
+        }
       }
     };
     request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
@@ -542,6 +585,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       system,
       messages: modelMessages,
       tools,
+      // Wall-clock timeout / client-abort when `streamTimeoutMs` is set (see
+      // streamAbort above); omitted otherwise so default behaviour is unchanged.
+      ...(streamAbort ? { abortSignal: streamAbort.signal } : {}),
       // The model's real output limit (from the catalog via /v1/config), so long
       // answers don't truncate at a low provider default. Omitted → provider default.
       ...(resolvedMaxOutputTokens ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
@@ -720,6 +766,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const storage = resolveStorage(ctx.userId);
 
     if (method === 'DELETE') {
+      // Purge attachment blobs BEFORE deleting the conversation rows, so a
+      // successful delete never orphans private files in the bucket (storage
+      // cost + a GDPR-erasure gap). Best-effort and strictly user-scoped:
+      // `listMessages` is bound to the verified user (a foreign conversation
+      // yields nothing) and `storage.remove()` refuses paths outside this user's
+      // prefix — so this can only ever delete the caller's own attachments. A
+      // purge failure is logged but never blocks the delete (the primary intent).
+      if (storage) {
+        try {
+          const paths = await collectAttachmentPaths(store, conversationId);
+          if (paths.length) await Promise.allSettled(paths.map((p) => storage.remove(p)));
+        } catch (err) {
+          console.error('[chat-widget] attachment purge on delete failed:', err);
+        }
+      }
       const deleted = await store.deleteConversation(conversationId);
       return new Response(null, { status: deleted ? 204 : 404 });
     }
@@ -1036,6 +1097,103 @@ function formatContextPreamble(context: Record<string, unknown>): string {
 // User-facing fallback when a stream error isn't mapped by `onError`. Logging of
 // the underlying error is handled at the call site, gated by `logErrors` (#163).
 const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the response.';
+
+/**
+ * Read and JSON-parse a request body while enforcing a HARD byte cap against the
+ * actual bytes read off the stream — not the forgeable `Content-Length`. Reads
+ * incrementally and bails the moment the cap is passed, so an oversized body is
+ * never fully buffered. Returns a discriminated result: `too_large` → 413,
+ * `invalid` → 400. Also returns the exact byte count for downstream budgeting.
+ */
+async function readJsonWithLimit(
+  request: Request,
+  maxBytes: number,
+): Promise<
+  | { ok: true; body: unknown; bytes: number }
+  | { ok: false; reason: 'too_large' | 'invalid' }
+> {
+  // Fast reject: a declared Content-Length over the cap never gets read.
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, reason: 'too_large' };
+  }
+
+  const stream = request.body;
+  if (!stream) {
+    // No readable stream (unusual) — fall back to text(), still hard-capped.
+    const text = await request.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      return { ok: false, reason: 'too_large' };
+    }
+    try {
+      return { ok: true, body: JSON.parse(text), bytes: new TextEncoder().encode(text).byteLength };
+    } catch {
+      return { ok: false, reason: 'invalid' };
+    }
+  }
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          return { ok: false, reason: 'too_large' };
+        }
+        chunks.push(value);
+      }
+    }
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.byteLength;
+  }
+  try {
+    return { ok: true, body: JSON.parse(new TextDecoder().decode(merged)), bytes: total };
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+}
+
+/**
+ * Collect every attachment `storagePath` in a conversation, for blob purging on
+ * delete. Pages backward through the (user-bound) store so long conversations
+ * are covered, with a hard page bound so a pathological history can't loop
+ * unboundedly. Best-effort: the caller swallows failures.
+ */
+async function collectAttachmentPaths(store: ChatStore, conversationId: string): Promise<string[]> {
+  const paths: string[] = [];
+  const pageSize = 200;
+  let before: Date | undefined;
+  for (let i = 0; i < 100; i++) {
+    const page = await store.listMessages(conversationId, { limit: pageSize, before });
+    if (!page.length) break;
+    for (const m of page) {
+      if (!Array.isArray(m.parts)) continue;
+      for (const part of m.parts) {
+        const p = part as { type?: string; storagePath?: unknown };
+        if (p.type === 'file' && typeof p.storagePath === 'string' && p.storagePath) {
+          paths.push(p.storagePath);
+        }
+      }
+    }
+    if (page.length < pageSize) break;
+    const oldest = page[0]; // store returns chronological (oldest→newest)
+    if (!oldest?.createdAt) break;
+    before = oldest.createdAt;
+  }
+  return paths;
+}
 
 /**
  * Best-effort detection of a reverse proxy / CDN in front of the chat endpoint
