@@ -487,19 +487,6 @@ export interface ThemeConfig {
    * Maps to `--chat-text` on the widget container.
    */
   textColor?: string;
-
-  /**
-   * Fine-grained CSS variable overrides. Keys must start with `--chat-`.
-   * Use this when the three high-level props above aren't enough — e.g. to
-   * theme the header glass, hover state, or surface tones independently.
-   *
-   * @example
-   * tokens: {
-   *   '--chat-surface': '0 0% 96%',           // HSL-triplet tokens
-   *   '--chat-surface': '0 0% 97%',       // direct color tokens
-   * }
-   */
-  tokens?: Record<`--chat-${string}`, string>;
 }
 
 export interface FeatureConfig {

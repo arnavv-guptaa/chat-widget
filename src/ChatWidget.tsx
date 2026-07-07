@@ -302,14 +302,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     if (theme?.textColor) {
       styles['--chat-text'] = toHslTripletIfHex(theme.textColor);
     }
-    if (theme?.tokens) {
-      // Tokens are advanced overrides — pass through unchanged. Caller is
-      // responsible for the right format (HSL triplet vs full color value).
-      Object.assign(styles, theme.tokens);
-    }
-
     return styles;
-  }, [display?.width, theme?.primaryColor, theme?.backgroundColor, theme?.textColor, theme?.tokens]);
+  }, [display?.width, theme?.primaryColor, theme?.backgroundColor, theme?.textColor]);
 
   // Handle resize drag - updates CSS variable directly
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
