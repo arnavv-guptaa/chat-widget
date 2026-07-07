@@ -132,6 +132,44 @@ export default function Assistant({ userId }: { userId: string }) {
 
 ---
 
+## Opening the widget from your site (Ask-AI buttons & shortcuts)
+
+The widget can be opened from your OWN page chrome — a nav "Ask AI" button, a
+search bar affordance, a keyboard shortcut — with no React ref and no JS at
+all for the button case. All three routes are equivalent to calling the
+`ChatWidgetHandle` ref's `open()` / `close()` / `toggle()`: same
+`allowAutoReopen` gate, same controlled-mode `onOpenChange` behaviour, same
+`persistState` persistence.
+
+**1. Keyboard shortcut** — set `display.keyboardShortcut`. Off by default; the
+widget never hijacks a host page's keybindings unless you opt in.
+
+```tsx
+<ChatWidget userId={userId} display={{ keyboardShortcut: 'mod+i' }} />
+```
+
+**2. Data-attribute buttons** — add `data-mordn-chat-open` (or `-toggle` /
+`-close`) to any element, anywhere in your markup, including static or
+markdown-generated docs pages. No shortcut config needed; this always works.
+
+```html
+<button data-mordn-chat-open>Ask AI</button>
+```
+
+**3. CustomEvent API** — the programmatic equivalent, for a search bar, a
+command palette, or any other trigger you already have wired up.
+
+```js
+document.dispatchEvent(new CustomEvent('mordn-chat:open'));
+```
+
+`mordn-chat:close` and `mordn-chat:toggle` work the same way. See the
+`keyboardShortcut` JSDoc in `DisplayConfig` for the full combo syntax
+(`"mod+k"`, `"ctrl+shift+/"`, a bare `"/"`, …), the typing guard for bare
+keys, and multi-instance behaviour.
+
+---
+
 ## Bring your own database / storage
 
 The default `createDrizzleChatStore()` and `createSupabaseStorage()` are just
