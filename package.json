@@ -105,7 +105,7 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js",
+    "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js && node scripts/inline-embed-css.js",
     "dev": "tsup --watch",
     "lint": "eslint src",
     "prepublishOnly": "npm run build"
@@ -178,6 +178,8 @@
     "drizzle-orm": "^0.45.2",
     "postcss": "^8.5.6",
     "postgres": "^3.4.9",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "tailwindcss": "^4.1.17",
     "tsup": "^8.0.0",
     "typescript": "^5"
