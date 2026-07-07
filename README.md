@@ -132,6 +132,93 @@ export default function Assistant({ userId }: { userId: string }) {
 
 ---
 
+## Script-tag embed (any site)
+
+No React and no bundler? Docs sites built with MkDocs, Sphinx, Hugo, Jekyll,
+VitePress, Docusaurus, or plain HTML can embed the widget with a single script
+tag. The `dist/embed.global.js` bundle is self-contained — **React and the whole
+widget are compiled in**, so the host page needs nothing installed.
+
+You still run your own chat handler (see [Setup](#setup)); the embed is just a
+framework-free way to mount the client against it.
+
+### Declarative (one tag, no JavaScript)
+
+```html
+<script
+  src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
+  data-api-base="https://your-app.com/api/chat"
+  data-agent-id="docs-bot"
+></script>
+```
+
+The widget mounts itself once the page is ready. Available shortcut attributes,
+each mapping to the same config key you'd pass in React: `data-user-id`,
+`data-agent-id`, `data-api-base`, `data-model`, `data-target` (a CSS selector to
+mount into), and `data-css-url`. For any field not covered by a shortcut, pass a
+full JSON config in `data-config`:
+
+```html
+<script
+  src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
+  data-config='{"apiBase":"https://your-app.com/api/chat","theme":{"mode":"dark"},"display":{"layout":"popup"},"starterPrompts":[{"title":"How do I get started?"}]}'
+></script>
+```
+
+Precedence: `data-config` is the base and individual `data-*` shortcuts overlay
+it, so you can share one JSON blob and override a single field per page.
+
+### Imperative (`window.MordnChat`)
+
+Omit the data attributes and drive it yourself. `init` accepts the same config
+object as the React `<ChatWidget>` props and returns a handle:
+
+```html
+<script src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"></script>
+<script>
+  const chat = MordnChat.init({
+    apiBase: 'https://your-app.com/api/chat',
+    agentId: 'docs-bot',
+    theme: { mode: 'light' },
+    display: { layout: 'popup', size: 'default' },
+  });
+
+  // Drive it programmatically:
+  chat.open();
+  chat.close();
+  chat.toggle();
+  chat.destroy(); // unmount and remove the container
+
+  // The same methods are also available on the global directly:
+  MordnChat.open();
+</script>
+```
+
+`init` is idempotent — calling it again tears down the previous mount first, so
+it's safe to re-init after a client-side route change on a docs SPA.
+
+### Anonymous visitors
+
+Docs readers usually aren't logged in, so `userId` is optional here. When you
+omit it, the embed generates a persistent `anon-…` id and stores it in
+`localStorage` so a visitor's conversation history survives reloads. As with the
+React path, this id is a client-side scoping key only — **your `getChatUserId`
+on the server remains the identity boundary** (see the security note above).
+
+### Bundle size and CSP
+
+- The bundle includes React, ReactDOM, and the widget (estimated ~250–400 KB
+  gzipped). You do **not** need React on the host page. Code highlighting
+  (shiki) is not bundled — it lazy-loads from a CDN only if a response contains
+  a code block, and falls back to plain text if that load is blocked.
+- The widget's CSS is injected once into a `<style data-mordn-chat>` tag, so a
+  strict Content-Security-Policy needs `style-src 'unsafe-inline'` (or serve the
+  stylesheet yourself and set `data-css-url` / `cssUrl` to link it, which uses
+  the CDN/self-hosted fallback path instead). The styles are pre-scoped to
+  `.chat-widget-container`, so they never leak into the host page.
+
+---
+
 ## Bring your own database / storage
 
 The default `createDrizzleChatStore()` and `createSupabaseStorage()` are just
