@@ -267,6 +267,8 @@ async function init() {
 //   chat-widget sync   [--config p]        re-ingest the config's sources (idempotent)
 //   chat-widget status [--config p]        show per-source chunk counts / status
 //   chat-widget list   [--config p]        list sources in the namespace
+//   chat-widget eval   [--config p] --file evals.json [--json]
+//                                          run a retrieval eval suite (CI gate)
 //
 // The knowledge commands import the user's config module (default
 // `./chat-widget.config.{mjs,js,ts}`) which must default-export:
@@ -276,19 +278,25 @@ async function init() {
 // so these commands run admin-side only — never in the chat request path.
 // ============================================================================
 
-const KNOWLEDGE_COMMANDS = new Set(['ingest', 'sync', 'status', 'list']);
+const KNOWLEDGE_COMMANDS = new Set(['ingest', 'sync', 'status', 'list', 'eval']);
 
-function parseFlags(argv: string[]): { config?: string; rest: string[] } {
+function parseFlags(argv: string[]): { config?: string; file?: string; json: boolean; rest: string[] } {
   const rest: string[] = [];
   let config: string | undefined;
+  let file: string | undefined;
+  let json = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--config' || argv[i] === '-c') {
       config = argv[++i];
+    } else if (argv[i] === '--file' || argv[i] === '-f') {
+      file = argv[++i];
+    } else if (argv[i] === '--json') {
+      json = true;
     } else {
       rest.push(argv[i]);
     }
   }
-  return { config, rest };
+  return { config, file, json, rest };
 }
 
 async function loadKnowledgeConfig(configPath?: string): Promise<any> {
@@ -370,8 +378,77 @@ async function runKnowledge(command: string, argv: string[]): Promise<void> {
   }
 }
 
+// ── eval — the CI answer-quality gate ─────────────────────────────────────────
+//
+// Runs a versioned eval file (JSON, `version: 1`) against the SAME store the
+// `ingest`/`sync` commands build — the read+write store is a `Retriever`, so we
+// construct it identically (config module → `cfg.store(cfg.namespace)`) and pass
+// it straight to the pure `runEvals` runner. Retrieval-level assertions only, no
+// LLM spend. Exit code is the contract: 0 when every case passes, 1 on any
+// failure — drops directly into CI. `--json` emits the full result object.
+
+async function runEval(argv: string[]): Promise<void> {
+  const { config: configPath, file, json } = parseFlags(argv);
+  if (!file) {
+    throw new Error('eval requires --file <path> pointing at an eval suite (JSON, version 1).');
+  }
+  const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
+  if (!fs.existsSync(abs)) throw new Error(`Eval file not found: ${abs}`);
+
+  let suite: any;
+  try {
+    suite = JSON.parse(fs.readFileSync(abs, 'utf8'));
+  } catch (e) {
+    throw new Error(`Could not parse ${file} as JSON: ${e instanceof Error ? e.message : e}`);
+  }
+  if (suite.version !== 1) {
+    throw new Error(`Unsupported eval file version ${suite.version} (expected 1).`);
+  }
+  if (!Array.isArray(suite.cases) || suite.cases.length === 0) {
+    throw new Error('Eval file has no `cases` (expected a non-empty array).');
+  }
+
+  const cfg = await loadKnowledgeConfig(configPath);
+  if (!cfg.store || !cfg.namespace) {
+    throw new Error('config must export { store, namespace } (and usually sources, embedder).');
+  }
+  // Same deferred import + same store construction as ingest/sync. The store is
+  // the read surface we evaluate against.
+  const { runEvals } = (await import('@mordn/chat-widget/server/knowledge')) as typeof import('../server/knowledge');
+  const retriever = cfg.store(cfg.namespace);
+
+  const result = await runEvals({ retriever, cases: suite.cases, defaults: suite.defaults });
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    for (const r of result.results) {
+      console.log(`${r.pass ? '✓' : '✗'} ${r.id} — ${r.question}`);
+      if (!r.pass) {
+        for (const c of r.checks.filter((k) => !k.pass)) {
+          console.log(`    ✗ ${c.kind}: ${c.detail}`);
+        }
+        if (r.error) console.log(`    ✗ error: ${r.error}`);
+      }
+    }
+    console.log(
+      `\n${result.passed}/${result.total} passed` +
+        (result.failed ? `, ${result.failed} failed` : '') +
+        ` in ${result.durationMs}ms.`,
+    );
+  }
+
+  // The CI contract: any failure is a non-zero exit.
+  if (result.failed > 0) process.exitCode = 1;
+}
+
 async function main() {
   const command = process.argv[2];
+  if (command === 'eval') {
+    rl.close(); // no interactive prompts for KB commands
+    await runEval(process.argv.slice(3));
+    return;
+  }
   if (command && KNOWLEDGE_COMMANDS.has(command)) {
     rl.close(); // no interactive prompts for KB commands
     await runKnowledge(command, process.argv.slice(3));

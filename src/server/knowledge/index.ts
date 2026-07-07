@@ -61,3 +61,19 @@ export {
   DEFAULT_TOP_K,
   type SourceUrlPart,
 } from './retrieval';
+
+// RAG eval / regression suite (CI-checkable answer-quality gate — retrieval-level,
+// no LLM calls). Runs an eval suite against any `Retriever`; see `eval.ts` for the
+// versioned file format and the four checks.
+export {
+  runEvals,
+  type EvalFile,
+  type EvalCase,
+  type EvalExpect,
+  type EvalDefaults,
+  type EvalCheckResult,
+  type EvalRetrieved,
+  type EvalCaseResult,
+  type EvalRunResult,
+  type RunEvalsArgs,
+} from './eval';
