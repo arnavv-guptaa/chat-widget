@@ -278,6 +278,65 @@ compression: {
 
 ---
 
+## Test your docs bot in CI
+
+If you use the knowledge base to answer questions from your docs, retrieval can
+silently regress when you re-crawl or restructure them. Write down the questions
+your bot must answer and check them on every push — no LLM calls, so it is free
+to run in CI.
+
+Create an `evals.json` (versioned; each case asserts what retrieval should
+surface):
+
+```json
+{
+  "version": 1,
+  "defaults": { "topK": 5, "minScore": 0.2 },
+  "cases": [
+    {
+      "id": "install-pnpm",
+      "question": "How do I install with pnpm?",
+      "expect": {
+        "sourceIncludes": "docs.example.com/install",
+        "anchor": "pnpm",
+        "minScore": 0.4,
+        "notSourceIncludes": "legacy"
+      }
+    }
+  ]
+}
+```
+
+Each case runs the question through your retriever (built from the same
+`chat-widget.config` as `ingest`) and passes when every check passes:
+
+- `sourceIncludes` — a retrieved chunk's citation URL or source contains this string (string or array; any match).
+- `notSourceIncludes` — no retrieved chunk matches (guards against a wrong/legacy page returning).
+- `minScore` — the top retrieved score is at least this.
+- `anchor` — a retrieved chunk's heading anchor contains this (populated by docs-aware ingestion).
+
+Run it. The command exits `0` when all cases pass and `1` on any failure:
+
+```bash
+npx @mordn/chat-widget eval --file evals.json
+```
+
+Add `--json` for the full result object (per-case checks + retrieved chunks),
+handy for custom reporting. Drop it into GitHub Actions:
+
+```yaml
+- run: npm ci
+- run: npx @mordn/chat-widget eval --file evals.json
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
+You can also run the suite programmatically with `runEvals` from
+`@mordn/chat-widget/server/knowledge`.
+
+---
+
 ## Exports
 
 ```ts
@@ -298,6 +357,9 @@ import { createDrizzleChatStore, schema } from '@mordn/chat-widget/server/drizzl
 
 // Default Supabase storage adapter (server-only)
 import { createSupabaseStorage } from '@mordn/chat-widget/server/supabase';
+
+// Knowledge base / RAG: ingestion, retrieval, and the CI eval suite (server-only)
+import { ingest, runEvals, type EvalFile } from '@mordn/chat-widget/server/knowledge';
 ```
 
 ---
