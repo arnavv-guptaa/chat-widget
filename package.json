@@ -108,6 +108,7 @@
     "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js",
     "dev": "tsup --watch",
     "lint": "eslint src",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -180,7 +181,8 @@
     "postgres": "^3.4.9",
     "tailwindcss": "^4.1.17",
     "tsup": "^8.0.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.0.0"
   },
   "keywords": [
     "react",
