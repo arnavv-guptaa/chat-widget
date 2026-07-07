@@ -1,25 +1,9 @@
-'use client';
+use client';
 
 /**
  * @mordn/chat-widget
  *
  * A customizable AI chat widget for React applications.
- *
- * @example
- * ```tsx
- * import { ChatWidget } from '@mordn/chat-widget';
- * import '@mordn/chat-widget/styles.css';
- *
- * export default function App() {
- *   return (
- *     <ChatWidget
- *       userId="user-123"
- *       theme={{ mode: 'dark' }}
- *       display={{ width: '400px' }}
- *     />
- *   );
- * }
- * ```
  */
 
 // Main component
@@ -52,11 +36,6 @@ export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';
 // Hooks
 export * from './hooks/use-chat-theme';
 
-// Supported gateway models are exposed via the dedicated, server-safe subpath
-// '@mordn/chat-widget/models' (no "use client"), so server actions can import
-// the list too. There is intentionally NO default-model export: an agent's
-// model is an explicit, required developer choice (one model per agent).
-
 // Contexts
 export { ChatStorageProvider, useChatStorageKey, clearChatStorage } from './contexts/chat-storage-context';
 
@@ -67,6 +46,12 @@ export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 
 // Starter Messages Component
 export { StarterMessages, StarterMessageItem } from './components/suggestion2';
+
+// Message/citation building blocks for high-quality custom renderers.
+export { Message, MessageContent, MessageMetadata, MessageAvatar } from './components/message';
+export type { MessageProps, MessageContentProps, MessageMetadataProps, MessageAvatarProps } from './components/message';
+export { Sources, SourcesTrigger, SourcesContent, Source } from './components/sources';
+export type { SourcesProps, SourcesTriggerProps, SourcesContentProps, SourceProps } from './components/sources';
 
 // Action result card (#166) — structured, false-completion-proof tool results
 export { ActionResultCard } from './components/action-result-card';

@@ -6,7 +6,7 @@ import {
 import { cn } from "../utils/cn";
 import type { UIMessage } from "ai";
 import { cva, type VariantProps } from "class-variance-authority";
-import type { ComponentProps, HTMLAttributes } from "react";
+import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -33,21 +33,34 @@ const messageContentVariants = cva(
     variants: {
       variant: {
         contained: [
-          // User messages: compact bubbles on the right (max 85% width)
+          // User messages: compact bubbles on the right.
           "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
-          // Assistant messages: no bubble, just text on background (max 100% width)
+          // Assistant messages: no bubble by default, just text on background.
           "group-[.is-assistant]:max-w-full",
         ],
         flat: [
-          // User messages: compact on the right
           "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
-          // Assistant messages: full width
           "group-[.is-assistant]:max-w-full",
         ],
+        surface: [
+          "rounded-2xl border px-4 py-3 shadow-sm",
+          "border-[var(--chat-divider)] bg-[hsl(var(--chat-surface)/0.64)]",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-br-lg",
+          "group-[.is-assistant]:max-w-full group-[.is-assistant]:rounded-bl-lg",
+        ],
+        ghost: [
+          "max-w-full",
+        ],
+      },
+      density: {
+        compact: "text-[13px] leading-relaxed group-[.is-user]:px-3 group-[.is-user]:py-2",
+        balanced: "text-[14px] leading-relaxed",
+        spacious: "text-[15px] leading-7 group-[.is-user]:px-5 group-[.is-user]:py-4",
       },
     },
     defaultVariants: {
       variant: "contained",
+      density: "balanced",
     },
   }
 );
@@ -59,15 +72,43 @@ export const MessageContent = ({
   children,
   className,
   variant,
+  density,
   ...props
 }: MessageContentProps) => (
   <div
-    className={cn(messageContentVariants({ variant, className }))}
+    className={cn(messageContentVariants({ variant, density, className }))}
     {...props}
   >
     {children}
   </div>
 );
+
+export type MessageMetadataProps = HTMLAttributes<HTMLDivElement> & {
+  items?: ReactNode[];
+};
+
+export const MessageMetadata = ({ items, children, className, ...props }: MessageMetadataProps) => {
+  const content = children ?? items?.filter(Boolean).map((item, i) => (
+    <span className="inline-flex items-center gap-1" key={i}>
+      {i > 0 && <span className="text-[hsl(var(--chat-text-subtle))]" aria-hidden="true">·</span>}
+      <span>{item}</span>
+    </span>
+  ));
+
+  if (!content) return null;
+
+  return (
+    <div
+      className={cn(
+        "not-prose mt-2 flex flex-wrap items-center gap-1.5 text-[11px] leading-none text-[hsl(var(--chat-text-muted))]",
+        className
+      )}
+      {...props}
+    >
+      {content}
+    </div>
+  );
+};
 
 export type MessageAvatarProps = ComponentProps<typeof Avatar> & {
   src: string;
