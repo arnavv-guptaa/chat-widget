@@ -95,7 +95,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     storageKeyPrefix ? `chat-${storageKeyPrefix}-${key}` : null;
 
   // Get theme mode from config (defaults to 'light')
-  const themeMode = config?.theme?.mode || 'light';
 
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -362,10 +361,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       <PromptInputButton
         variant="ghost"
         size="icon"
-        // No hover background (the ghost circle looked odd next to the textarea);
-        // just darken the icon on hover. `chat-attach-button` (styles.src.css)
-        // forces the transparent background over the ghost variant.
-        className="chat-attach-button size-9 text-muted-foreground"
+        // Icon-only affordance: no hover background (the ghost circle looked
+        // odd next to the textarea), the icon just steps up the text ramp.
+        className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
         aria-label="Attach files"
         onClick={() => attachments.openFileDialog()}
       >
@@ -1011,13 +1009,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
 
   return (
-    <div className={cn("w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-black/[0.02] dark:ring-white/[0.03]", themeMode === 'dark' && 'dark')}>
-      <div
-        className={cn(
-          "flex flex-col h-full w-full overflow-hidden relative chat-widget-container",
-          themeMode === 'dark' && 'dark'
-        )}
-      >
+    <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-divider))]">
+      <div className="flex flex-col h-full w-full overflow-hidden relative chat-widget-container">
         {/* Header Section with Tabs */}
         <div className="flex items-center gap-2 px-3 py-2 border-b backdrop-blur-sm relative z-20" style={{
           borderColor: 'var(--chat-divider)',
@@ -1139,7 +1132,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
             {/* Chat History Dropdown */}
             {showHistory && (
-              <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] z-50 animate-in fade-in slide-in-from-top-1 duration-150 overflow-hidden" style={{
+              <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl shadow-[var(--chat-shadow-md)] z-50 animate-in fade-in slide-in-from-top-1 duration-150 overflow-hidden" style={{
                 backgroundColor: 'hsl(var(--chat-background))',
                 border: `1px solid ${'var(--chat-divider)'}`
               }}>
@@ -1439,10 +1432,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 {config?.features?.fileUpload === true && <AttachButton />}
                 <PromptInputSubmit
                   // Filled circular send button, right-aligned in the action row.
-                  // The Button `default` variant's bg-primary now resolves (theme
-                  // tokens defined in styles.src.css), but we keep the explicit
-                  // `chat-send-button` rule for the muted-disabled treatment.
-                  className="chat-send-button ml-auto size-9 rounded-full p-0 [&_svg]:size-4"
+                  // Colors come entirely from the Button default variant tokens
+                  // (bg-primary / text-primary-foreground / disabled:opacity-50).
+                  className="ml-auto size-9 rounded-full p-0 [&_svg]:size-4"
                   disabled={status === 'streaming' || status === 'submitted' ? false : !input}
                   status={status}
                   onStop={stop}

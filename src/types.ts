@@ -464,29 +464,29 @@ export interface StarterPrompt {
   icon?: ReactNode;
 }
 
+/**
+ * Theming is exactly three colors, all required. Every other color in the
+ * widget is derived from these (see the ramp in ChatWidget). There is no
+ * mode: light vs dark is simply which colors you pick. Omit `theme` entirely
+ * to get the stock palette. If any value is not valid hex, the whole theme
+ * is ignored — a theme is never half-applied.
+ */
 export interface ThemeConfig {
   /**
-   * Theme mode — drives the default token values (light vs dark).
+   * Chat background color (hex, e.g. "#171717").
    */
-  mode?: 'light' | 'dark';
+  backgroundColor: string;
 
   /**
-   * Primary accent color (any CSS color: hex, rgb, hsl, named).
-   * Maps to `--chat-primary` on the widget container at runtime.
+   * Body text color (hex). Must contrast with `backgroundColor` — the widget
+   * renders what you declare and does not second-guess it.
    */
-  primaryColor?: string;
+  textColor: string;
 
   /**
-   * Background color (any CSS color).
-   * Maps to `--chat-background` on the widget container.
+   * Primary accent color (hex) — send button, links, focus states.
    */
-  backgroundColor?: string;
-
-  /**
-   * Body text color (any CSS color).
-   * Maps to `--chat-text` on the widget container.
-   */
-  textColor?: string;
+  primaryColor: string;
 }
 
 export interface FeatureConfig {

@@ -6,6 +6,12 @@
 @import "tailwindcss/utilities" layer(chat-widget);
 @source "./**/*.tsx";
 
+/* `dark:` inside the widget means "the declared background is dark" — the
+   internal .chat-dark class ChatWidget derives from the theme's background
+   lightness. Without this, Tailwind v4 defaults dark: to the visitor's OS
+   prefers-color-scheme, which has nothing to do with the widget's theme. */
+@custom-variant dark (&:where(.chat-dark, .chat-dark *));
+
 /* Register the shadcn color tokens with Tailwind so utilities like bg-popover /
    bg-primary / bg-accent / text-muted-foreground are GENERATED. Tailwind v4 only
    emits a color utility for names it knows via @theme — a bare --color-* custom
@@ -54,30 +60,18 @@
 }
 
 .ai-assistant-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.922 0 0 / 30%);
+  background: hsl(var(--chat-border));
   border-radius: 10px;
   transition: background 0.2s ease;
 }
 
 .ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.922 0 0 / 50%);
-}
-
-.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(1 0 0 / 20%);
-}
-
-.dark .ai-assistant-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(1 0 0 / 30%);
+  background: hsl(var(--chat-text-subtle));
 }
 
 .ai-assistant-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.922 0 0 / 30%) transparent;
-}
-
-.dark .ai-assistant-scrollbar {
-  scrollbar-color: oklch(1 0 0 / 20%) transparent;
+  scrollbar-color: hsl(var(--chat-border)) transparent;
 }
 
 .scrollbar-hide {
@@ -177,49 +171,14 @@
   container-name: chat-widget;
 }
 
-.chat-widget-container.dark:where(:not(.chat-widget-container *)) {
-  --chat-primary:    0 0% 92.2%;
-  --chat-background: 0 0% 14.5%;
-  --chat-text:       0 0% 98.5%;
-  --chat-muted:      0 0% 26.9%;
-  --chat-border:     0 0% 24.9%;
-
-  --chat-surface:        0 0% 20%;     /* dark: #333333 */
-  --chat-surface-hover:  0 0% 33.3%;   /* dark: #555555 */
-  --chat-surface-deep:   0 0% 10.2%;   /* dark: #1a1a1a */
-
-  --chat-text-strong: 0 0% 80%;        /* dark: #cccccc */
-  --chat-text-muted:  0 0% 60%;        /* dark: #999999 */
-  --chat-text-subtle: 0 0% 40%;        /* dark: #666666 */
-
-  --chat-overlay:          rgba(0, 0, 0, 0.2);
-  --chat-hover-bg:         rgba(68, 68, 68, 0.5);
-  /* Same single token in dark mode (slightly higher alpha because the
-     dark text colour is light, and translucent-light-on-dark reads thinner). */
-  --chat-divider:          hsl(0 0% 98.5% / 0.12);
-
+/* Internal, derived from the declared background's lightness (never from a
+   client "mode" -- there isn't one). Only things that cannot be interpolated
+   from the three declared colors live here: shadow strength (shadows need
+   more alpha to read on dark surfaces) and the syntax-highlight palette
+   further down. */
+.chat-widget-container.chat-dark:where(:not(.chat-widget-container *)) {
   --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-
-  /* Override Tailwind's border color for Streamdown compatibility */
-  --color-border: var(--chat-divider);
-
-  /* shadcn theme tokens (dark) — same mapping; the --chat-* values above already
-     hold the dark palette, so these resolve to dark colors automatically. */
-  --chat-c-primary:              hsl(var(--chat-primary));
-  --chat-c-primary-foreground:   hsl(var(--chat-background));
-  --chat-c-background:           hsl(var(--chat-background));
-  --chat-c-foreground:           hsl(var(--chat-text));
-  --chat-c-popover:              hsl(var(--chat-surface));
-  --chat-c-popover-foreground:   hsl(var(--chat-text));
-  --chat-c-card:                 hsl(var(--chat-surface));
-  --chat-c-card-foreground:      hsl(var(--chat-text));
-  --chat-c-muted:                hsl(var(--chat-muted));
-  --chat-c-muted-foreground:     hsl(var(--chat-text-muted));
-  --chat-c-accent:               hsl(var(--chat-surface-hover));
-  --chat-c-accent-foreground:    hsl(var(--chat-text));
-  --chat-c-input:                var(--chat-divider);
-  --chat-c-ring:                 hsl(var(--chat-primary) / 0.4);
 }
 
 /* ============================================
@@ -384,12 +343,10 @@
 
 /* Links — clear, underline-on-hover. */
 .chat-widget-container .is-assistant .chat-message-content a {
-  color: #2563eb;
+  color: hsl(var(--chat-primary));
   text-decoration: none;
   text-underline-offset: 2px;
 }
-.dark .chat-widget-container .is-assistant .chat-message-content a,
-.chat-widget-container.dark .is-assistant .chat-message-content a { color: #60a5fa; }
 .chat-widget-container .is-assistant .chat-message-content a:hover { text-decoration: underline; }
 
 /* Blockquote — a soft left rule, recessed text. */
@@ -504,7 +461,7 @@
 }
 
 .chat-widget-container textarea::placeholder {
-  color: hsl(var(--chat-text) / 0.6);
+  color: hsl(var(--chat-text-subtle));
 }
 
 /* Form internal divider (between PromptInputBody and PromptInputToolbar).
@@ -593,7 +550,8 @@
    `defaultColor: false` (utils/highlight.ts), so it emits inline
    `color: var(--shiki-light)` plus a `--shiki-dark` custom property on the pre
    and every token span. We keep the LIGHT colour and swap to `--shiki-dark`
-   under the widget's `.dark` scope.
+   under the widget's internal `.chat-dark` scope
+   (derived from the declared background's lightness).
 
    The widget owns the SURFACE, not Shiki: force the Shiki background
    transparent so our token-driven `--chat-*` surfaces show through (the pill
@@ -608,12 +566,12 @@
   background-color: transparent !important;
 }
 
-/* Dark mode: re-point colour to the `--shiki-dark` value Shiki stamped inline.
+/* Dark background: re-point colour to the `--shiki-dark` value Shiki stamped inline.
    `!important` is required here — Shiki's inline `color: var(--shiki-light)`
    would otherwise out-specify a plain stylesheet rule. Background stays
    transparent (inherited from the rule above). */
-.chat-widget-container.dark .shiki,
-.chat-widget-container.dark .shiki span {
+.chat-widget-container.chat-dark .shiki,
+.chat-widget-container.chat-dark .shiki span {
   color: var(--shiki-dark) !important;
 }
 
@@ -952,53 +910,6 @@
 .chat-widget-container .chat-prompt-box:focus-within {
   border-color: hsl(var(--chat-primary) / 0.4);
   box-shadow: var(--chat-shadow-md);
-}
-
-/* ============================================
-   SEND BUTTON
-   The Button `default` variant relies on bg-primary/text-primary-foreground,
-   which the widget's scoped theme doesn't define (it uses --chat-primary), so
-   the send button rendered with no fill. Style it explicitly: solid primary
-   circle with a contrasting icon, a slightly-dimmed hover, and a muted disabled
-   state (so it reads as inactive when the input is empty, without disappearing).
-   ============================================ */
-.chat-widget-container button.chat-send-button {
-  background-color: hsl(var(--chat-primary));
-  color: hsl(var(--chat-background));
-  /* Force a perfect circle — beat any rounded-md/rounded-lg from the Button base
-     so it never reads as "square with radius". */
-  border-radius: 9999px;
-  width: 2.25rem;   /* 36px */
-  height: 2.25rem;
-  flex: none;       /* don't let the flex row squish it into an oval */
-  transition: background-color 0.15s ease, opacity 0.15s ease;
-}
-
-.chat-widget-container button.chat-send-button:hover:not(:disabled) {
-  background-color: hsl(var(--chat-primary) / 0.9);
-}
-
-.chat-widget-container button.chat-send-button:disabled {
-  background-color: hsl(var(--chat-primary) / 0.35);
-  color: hsl(var(--chat-background));
-  opacity: 1; /* override the Button's default disabled:opacity-50 — the muted fill already signals disabled */
-  cursor: not-allowed;
-}
-
-/* ============================================
-   ATTACH BUTTON
-   Plain icon button — no background fill, ever. The ghost variant added a
-   circular hover background that looked out of place next to the textarea; here
-   we keep it transparent and only darken the icon on hover.
-   ============================================ */
-.chat-widget-container .chat-attach-button,
-.chat-widget-container .chat-attach-button:hover,
-.chat-widget-container .chat-attach-button:focus-visible {
-  background-color: transparent;
-}
-
-.chat-widget-container .chat-attach-button:hover:not(:disabled) {
-  color: hsl(var(--chat-text));
 }
 
 /* ============================================

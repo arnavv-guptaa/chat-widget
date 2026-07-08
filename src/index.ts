@@ -34,7 +34,6 @@ export type {
 export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';
 
 // Hooks
-export * from './hooks/use-chat-theme';
 
 // Contexts
 export { ChatStorageProvider, useChatStorageKey, clearChatStorage } from './contexts/chat-storage-context';
@@ -67,3 +66,5 @@ export {
   ToolInput,
   ToolOutput,
 } from './components/tool';
+
+export * from './theme-presets';

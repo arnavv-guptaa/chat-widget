@@ -18,7 +18,7 @@
  *   return (
  *     <ChatWidget
  *       userId="user-123"
- *       theme={{ mode: 'dark', primaryColor: '#3b82f6' }}
+ *       theme={{ backgroundColor: '#171717', textColor: '#ededed', primaryColor: '#3b82f6' }}
  *       display={{ size: 'default', resizable: true }}
  *     />
  *   );
@@ -245,69 +245,59 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // doing (e.g. they passed an HSL triplet directly).
   const customStyles = useMemo(() => {
     const styles: Record<string, string> = {};
-
     if (display?.width) {
       styles['--chat-widget-width'] = display.width;
     }
 
-    // Invalid (non-hex) values are skipped entirely — a typo can never
-    // reach the CSS as a broken variable.
-    const primaryTriplet = theme?.primaryColor ? hexToHslTriplet(theme.primaryColor) : null;
-    if (primaryTriplet) {
+    // Theming is all-or-nothing: exactly three declared colors (background,
+    // text, primary). If any is missing or not valid hex the theme is ignored
+    // and the stock palette applies -- a theme is never half-applied. The
+    // widget renders what the client declared; contrast is their call (the
+    // playground is where combinations get validated).
+    const parse = (t: string | null) => {
+      const m = t ? /^([\d.]+) ([\d.]+)% ([\d.]+)%$/.exec(t.trim()) : null;
+      return m ? { h: +m[1], s: +m[2], l: +m[3] } : null;
+    };
+    const bg = theme ? parse(hexToHslTriplet(theme.backgroundColor)) : null;
+    const text = theme ? parse(hexToHslTriplet(theme.textColor)) : null;
+    const primaryTriplet = theme ? hexToHslTriplet(theme.primaryColor) : null;
+
+    if (bg && text && primaryTriplet) {
+      // Every neutral is a named stop on ONE ramp between the two poles:
+      // fraction = how far from the background toward the text color. Hue,
+      // saturation and lightness all interpolate, so the whole panel
+      // re-anchors on the declared colors and nothing else.
+      const lerp = (from: number, to: number, f: number) =>
+        Math.round((from + (to - from) * f) * 10) / 10;
+      const hueDelta = (() => {
+        let d = text.h - bg.h;
+        if (d > 180) d -= 360;
+        if (d < -180) d += 360;
+        return d;
+      })();
+      const tone = (f: number) =>
+        `${(lerp(0, hueDelta, f) + bg.h + 360) % 360} ${lerp(bg.s, text.s, f)}% ${lerp(bg.l, text.l, f)}%`;
+
+      styles['--chat-background'] = tone(0);
+      styles['--chat-surface-deep'] = tone(0.02); // composer / deep fills
+      styles['--chat-muted'] = tone(0.035);
+      styles['--chat-surface'] = tone(0.05);
+      styles['--chat-hover-bg'] = `hsl(${tone(0.06)})`;
+      styles['--chat-divider'] = `hsl(${tone(0.1)})`;
+      styles['--chat-border'] = tone(0.12);
+      styles['--chat-surface-hover'] = tone(0.12);
+      styles['--chat-text-subtle'] = tone(0.42); // placeholder / disabled
+      styles['--chat-text-muted'] = tone(0.64); // icons / secondary text
+      styles['--chat-text-strong'] = tone(0.88);
+      styles['--chat-text'] = tone(1);
       styles['--chat-primary'] = primaryTriplet;
-    }
-    const bgTriplet = theme?.backgroundColor ? hexToHslTriplet(theme.backgroundColor) : null;
-    if (bgTriplet) {
-      styles['--chat-background'] = bgTriplet;
-
-      // A custom background must theme the WHOLE panel, not just the canvas
-      // behind it: derive the surface/border/text ramps from the two poles
-      // (background ↔ text) instead of the stylesheet's fixed neutrals. The
-      // mix fractions reproduce the default ramp exactly (e.g. text-muted
-      // 45.1% = 14.5% mixed 36% toward 100%), so this is the same design
-      // system re-anchored on the custom colors. Runs only when a custom
-      // background is set — default widgets never reach this branch.
-      const parse = (t: string) => {
-        const m = /^([\d.]+) ([\d.]+)% ([\d.]+)%$/.exec(t.trim());
-        return m ? { h: +m[1], s: +m[2], l: +m[3] } : null;
-      };
-      const bg = parse(bgTriplet);
-      if (bg) {
-        const isDark = bg.l < 50;
-        const text = (theme?.textColor && parse(hexToHslTriplet(theme.textColor) ?? '')) || {
-          h: bg.h,
-          s: Math.min(bg.s, 15),
-          l: isDark ? 92 : 14.5,
-        };
-        if (!theme?.textColor) {
-          // Auto-contrast: a dark background with no explicit text color
-          // would otherwise keep the light-mode near-black text.
-          styles['--chat-text'] = `${text.h} ${text.s}% ${text.l}%`;
-        }
-        const lerp = (from: number, to: number, f: number) =>
-          Math.round((from + (to - from) * f) * 10) / 10;
-        const bgTone = (f: number) => `${bg.h} ${bg.s}% ${lerp(bg.l, text.l, f)}%`;
-        const textTone = (f: number) => `${text.h} ${text.s}% ${lerp(text.l, bg.l, f)}%`;
-
-        styles['--chat-surface'] = bgTone(0.05);
-        styles['--chat-surface-deep'] = bgTone(0.02);
-        styles['--chat-surface-hover'] = bgTone(0.12);
-        styles['--chat-muted'] = bgTone(0.035);
-        styles['--chat-border'] = bgTone(0.12);
-        styles['--chat-text-strong'] = textTone(0.12);
-        styles['--chat-text-muted'] = textTone(0.36);
-        styles['--chat-text-subtle'] = textTone(0.58);
-        styles['--chat-hover-bg'] = `hsl(${bgTone(0.06)} / 0.5)`;
-        styles['--chat-divider'] = `hsl(${text.h} ${text.s}% ${text.l}% / 0.1)`;
-        styles['--chat-overlay'] = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.02)';
-      }
-    }
-    const textTriplet = theme?.textColor ? hexToHslTriplet(theme.textColor) : null;
-    if (textTriplet) {
-      styles['--chat-text'] = textTriplet;
+      // Scrim over content: translucency is the intent here, so alpha is
+      // correct; direction just follows which pole is lighter.
+      styles['--chat-overlay'] =
+        text.l > bg.l ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.02)';
     }
     return styles;
-  }, [display?.width, theme?.primaryColor, theme?.backgroundColor, theme?.textColor]);
+  }, [display?.width, theme?.backgroundColor, theme?.textColor, theme?.primaryColor]);
 
   // Handle resize drag - updates CSS variable directly
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -378,7 +368,15 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 
   // Common interface — same for all three layouts. The wrapper differs.
-  const themeClass = theme?.mode === 'dark' ? 'dark' : '';
+  // Internal only -- NOT a theme mode. Picks which of the two shipped syntax
+  // palettes (and scrim direction) fits behind the declared background; it
+  // never overrides a declared token.
+  const isDarkBackground = (() => {
+    const t = theme ? hexToHslTriplet(theme.backgroundColor) : null;
+    const m = t ? /([\d.]+)%$/.exec(t) : null;
+    return m ? parseFloat(m[1]) < 50 : false;
+  })();
+  const themeClass = isDarkBackground ? 'chat-dark' : '';
 
   // INLINE layout: render the chat interface in place inside the parent. No
   // toggle button, no fixed positioning, no resize. Caller owns sizing via

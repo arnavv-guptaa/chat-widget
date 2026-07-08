@@ -114,7 +114,9 @@ export default function Assistant({ userId }: { userId: string }) {
   return (
     <ChatWidget
       userId={userId}                 // your app's user id (for the client)
-      theme={{ mode: 'light' }}       // 'light' | 'dark'
+      // Theming = exactly three colors (or omit for the stock palette).
+      // Presets available: import { THEME_PRESETS } from '@mordn/chat-widget'
+      theme={{ backgroundColor: '#ffffff', textColor: '#262626', primaryColor: '#171717' }}
       features={{ fileUpload: true }} // needs `storage` configured on the handler
       display={{ layout: 'popup', size: 'default', resizable: true }}
       starterPrompts={[
@@ -199,7 +201,7 @@ full JSON config in `data-config`:
 ```html
 <script
   src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
-  data-config='{"apiBase":"https://your-app.com/api/chat","theme":{"mode":"dark"},"display":{"layout":"popup"},"starterPrompts":[{"title":"How do I get started?"}]}'
+  data-config='{"apiBase":"https://your-app.com/api/chat","theme":{"backgroundColor":"#171717","textColor":"#ededed","primaryColor":"#fafafa"},"display":{"layout":"popup"},"starterPrompts":[{"title":"How do I get started?"}]}'
 ></script>
 ```
 
@@ -217,7 +219,7 @@ object as the React `<ChatWidget>` props and returns a handle:
   const chat = MordnChat.init({
     apiBase: 'https://your-app.com/api/chat',
     agentId: 'docs-bot',
-    theme: { mode: 'light' },
+    theme: { backgroundColor: '#ffffff', textColor: '#262626', primaryColor: '#171717' },
     display: { layout: 'popup', size: 'default' },
   });
 
