@@ -220,6 +220,9 @@ function injectStyles(cssUrl?: string): void {
 // key (same role as the React `userId`); the server remains the real identity
 // boundary and must not trust it (see README security note).
 
+// Kept in sync with clearChatStorage's sign-out sweep (chat-storage-context
+// matches on this prefix) — the anon id IS chat identity and must not survive
+// a blanket sign-out clear.
 const ANON_ID_KEY = 'mordn-chat-anon-id';
 
 /**
@@ -229,15 +232,32 @@ const ANON_ID_KEY = 'mordn-chat-anon-id';
  * visit. All localStorage access is guarded: Safari private mode, disabled
  * storage, and quota errors throw on access, so we fall back to a fresh
  * per-session id rather than crashing the whole widget.
+ *
+ * Scoped PER AGENT: two agents embedded on one origin (product docs + billing
+ * help) must not share one anonymous identity — the id flows into the
+ * (agent, user) browser-cache scope and into X-User-Id, so a shared id bleeds
+ * conversation/memory scope across agent boundaries. Visitors minted before
+ * per-agent scoping are migrated (legacy global id copied into the scoped
+ * key) so they keep their server-side history instead of being silently
+ * re-anonymised.
  */
-function resolveUserId(explicit?: string): string {
+function resolveUserId(explicit?: string, agentId?: string): string {
   if (explicit) return explicit;
 
+  const key = agentId ? `${ANON_ID_KEY}:${agentId}` : ANON_ID_KEY;
+
   try {
-    const existing = window.localStorage.getItem(ANON_ID_KEY);
+    const existing = window.localStorage.getItem(key);
     if (existing) return existing;
+    if (agentId) {
+      const legacy = window.localStorage.getItem(ANON_ID_KEY);
+      if (legacy) {
+        window.localStorage.setItem(key, legacy);
+        return legacy;
+      }
+    }
     const fresh = `anon-${nanoid()}`;
-    window.localStorage.setItem(ANON_ID_KEY, fresh);
+    window.localStorage.setItem(key, fresh);
     return fresh;
   } catch {
     // Storage unavailable/blocked — degrade to an ephemeral id. History won't
@@ -316,7 +336,7 @@ function init(config: MordnChatConfig = {} as MordnChatConfig): MordnChatInstanc
   // prop), so we spread the remaining fields and layer on the resolved id.
   const props: ChatWidgetProps = {
     ...(rest as ChatWidgetProps),
-    userId: resolveUserId(userId),
+    userId: resolveUserId(userId, (rest as ChatWidgetProps).agentId),
   };
   root.render(React.createElement(ChatWidget, { ...props, ref: handleRef }));
 

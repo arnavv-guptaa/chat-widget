@@ -46,28 +46,55 @@ export function useChatStorageKey() {
 }
 
 /**
- * Remove chat data this widget persisted in localStorage. Call this on sign-out
+ * Remove chat data this widget persisted in the browser. Call this on sign-out
  * / user switch so a subsequent user on the same browser can never see the
  * previous user's conversation tabs, titles, prompts, or model.
  *
- * - No args → clears EVERY `chat-*` key (safe blanket sign-out clear).
- * - `{ agentId, userId }` → clears only that scope's keys (`chat-${agentId}-${userId}-*`).
+ * - No args → clears EVERY `chat-*` key (safe blanket sign-out clear), PLUS
+ *   the script-tag embed's anonymous visitor id — that id IS chat identity
+ *   (it scopes server-side conversations/memory), and leaving it behind would
+ *   hand the next visitor on this browser the previous visitor's anonymous
+ *   scope.
+ * - `{ agentId, userId }` → clears only that scope's keys
+ *   (`chat-${agentId}|${userId}-*`). The anon id is untouched here: a scoped
+ *   clear targets a signed-in identity, which is never the anon id.
+ *
+ * Sweeps BOTH localStorage (tabs, panel state) and sessionStorage (per-tab
+ * composer drafts) — the same key scheme is used in both.
  */
 export function clearChatStorage(opts?: { agentId?: string; userId?: string }): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
+  if (typeof window === 'undefined') return;
 
   const scopedPrefix =
     opts?.agentId && opts?.userId
       ? `chat-${encodeURIComponent(opts.agentId)}|${encodeURIComponent(opts.userId)}-`
       : null;
 
-  const toRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key) continue;
-    if (scopedPrefix ? key.startsWith(scopedPrefix) : key.startsWith('chat-')) {
-      toRemove.push(key);
+  const sweep = (storage: Storage) => {
+    const toRemove: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (!key) continue;
+      if (scopedPrefix ? key.startsWith(scopedPrefix) : key.startsWith('chat-')) {
+        toRemove.push(key);
+      } else if (!scopedPrefix && key.startsWith('mordn-chat-anon-id')) {
+        // Legacy global + per-agent scoped variants. Keep this literal in
+        // sync with ANON_ID_KEY in src/embed/index.tsx (importing it here
+        // would pull the embed's react-dom/client into the library graph).
+        toRemove.push(key);
+      }
     }
+    toRemove.forEach((key) => storage.removeItem(key));
+  };
+
+  try {
+    sweep(window.localStorage);
+  } catch {
+    /* storage unavailable — nothing to clear */
   }
-  toRemove.forEach((key) => localStorage.removeItem(key));
+  try {
+    sweep(window.sessionStorage);
+  } catch {
+    /* storage unavailable — nothing to clear */
+  }
 }
