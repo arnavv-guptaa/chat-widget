@@ -15,6 +15,11 @@
       "require": "./dist/index.js"
     },
     "./styles.css": "./dist/styles.css",
+    "./actions": {
+      "types": "./dist/actions/index.d.ts",
+      "import": "./dist/actions/index.mjs",
+      "require": "./dist/actions/index.js"
+    },
     "./models": {
       "types": "./dist/models.d.ts",
       "import": "./dist/models.mjs",
@@ -102,7 +107,8 @@
   "files": [
     "dist",
     "README.md",
-    "SECURITY.md"
+    "SECURITY.md",
+    "docs"
   ],
   "scripts": {
     "build": "tsup && npx @tailwindcss/cli -i src/styles.src.css -o dist/styles.css --minify && node scripts/scope-css.js && node scripts/inline-embed-css.js",

@@ -34,6 +34,9 @@ export default defineConfig([
       // Pure data (supported model list) — no "use client", safe to import from
       // server actions or client components. Exposed as '@mordn/chat-widget/models'.
       'models': 'src/utils/models.ts',
+      // Action/template manifests and types — server-safe data contracts used by
+      // dashboard/docs/server code without importing the client component entry.
+      'actions/index': 'src/actions/index.ts',
       'db/index': 'src/db/index.ts',
       'api/index': 'src/api/index.ts',
       'schema/index': 'src/schema/index.ts',
