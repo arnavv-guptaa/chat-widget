@@ -54,6 +54,8 @@ import {
   ReasoningTrigger,
 } from './reasoning';
 import { Loader } from './loader';
+import { TextShimmer } from './transcript/TextShimmer';
+import { pickPlanningVerb } from './transcript/toolRegistry';
 import {
   Tool,
   ToolContent,
@@ -157,7 +159,9 @@ function AttachButton() {
       size="icon"
       // Icon-only affordance: no hover background (the ghost circle looked
       // odd next to the textarea), the icon just steps up the text ramp.
-      className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
+      // Rests at text-strong (0.88) rather than text-muted (0.64) so it
+      // reads closer to the text color; hover completes it to full text.
+      className="size-9 text-[hsl(var(--chat-text-strong))] hover:bg-transparent hover:text-foreground"
       aria-label="Attach files"
       onClick={() => attachments.openFileDialog()}
     >
@@ -1303,6 +1307,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     );
   const showThinking =
     status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
+  // Seed the planning verb from the last USER message id: it exists from the
+  // moment of submit and doesn't change when the assistant message arrives,
+  // so the verb never flips mid-gap.
+  const lastUserMessageId = messages.findLast((m) => m.role === 'user')?.id ?? 'planning';
+  const planningVerb = pickPlanningVerb(lastUserMessageId);
 
   return (
     <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-divider))]">
@@ -1626,12 +1635,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             )}
             {renderedMessages}
             {showThinking && (
-              <div className="mt-6">
-                <Message from="assistant">
-                  <MessageContent>
-                    <Loader size={16} />
-                  </MessageContent>
-                </Message>
+              // The ONLY pre-content indicator: a shimmering planning verb
+              // ("One moment", "Working on it", …) with no spinner. Seeded by
+              // the last user message id so the verb stays stable across the
+              // whole submitted → streaming-with-no-content gap.
+              <div className="mt-6 flex items-center px-2 py-1">
+                <TextShimmer as="span" className="text-[13px] font-medium leading-5">
+                  {planningVerb}
+                </TextShimmer>
               </div>
             )}
           </ConversationContent>

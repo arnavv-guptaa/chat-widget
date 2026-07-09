@@ -1,17 +1,14 @@
 import { Fragment, memo, useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
 import type { UIMessage } from 'ai';
 import { Message, MessageContent } from '../message';
 import { Response } from '../response';
 import { AgentToolCall } from './AgentToolCall';
 import { AgentThinkingTool } from './AgentThinkingTool';
-import { TextShimmer } from './TextShimmer';
 import {
   getResultSummary,
   getToolStatus,
   getToolSubtitle,
   getToolVerb,
-  pickPlanningVerb,
 } from './toolRegistry';
 import { toToolPart, type ToolPart, type TurnState } from './types';
 import type { ActionRenderer, ToolRenderer } from '../../types';
@@ -75,8 +72,10 @@ function AgentTurnTranscriptImpl({
   }, [message.parts, turnId]);
 
   const lastIdx = flat.length - 1;
-  const shouldShowPlanning = isLast && isStreaming && flat.length === 0;
-  const planningVerb = useMemo(() => pickPlanningVerb(turnId), [turnId]);
+  // NOTE: the pre-first-token planning indicator ("One moment", …) is rendered
+  // by ChatInterface (showThinking) — it covers the whole gap including before
+  // this assistant message exists, so this component renders nothing extra
+  // for an empty streaming turn.
 
   return (
     <div className="flex flex-col gap-1.5" data-assistant-turn-id={turnId}>
@@ -180,18 +179,6 @@ function AgentTurnTranscriptImpl({
         );
       })}
 
-      {shouldShowPlanning && (
-        <div className="flex items-center gap-2 px-2 py-1 -mx-2">
-          <Loader2
-            className="size-3.5 flex-shrink-0 animate-spin"
-            style={{ color: 'hsl(var(--chat-text-subtle))' }}
-            aria-hidden="true"
-          />
-          <TextShimmer as="span" className="text-[13px] font-medium leading-5">
-            {planningVerb}
-          </TextShimmer>
-        </div>
-      )}
     </div>
   );
 }
