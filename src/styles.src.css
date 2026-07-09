@@ -147,7 +147,14 @@
      all of them. These feed the @theme tokens above (so the utilities resolve to
      these per-mode values). Full hsl() colors, not raw triplets. */
   --chat-c-primary:              hsl(var(--chat-primary));
-  --chat-c-primary-foreground:   hsl(var(--chat-background));
+  /* Text ON the brand color. For a THEMED widget, ChatWidget sets
+     --chat-primary-foreground to the near-black/near-white that actually
+     reads on the declared primary (WCAG-luminance-picked) — hardwiring the
+     background here made light brands (yellow/pastel/white) render an
+     unreadable send arrow, launcher icon, and user-bubble text. The
+     background remains the fallback for the stock palette (near-black
+     primary on white → white foreground). */
+  --chat-c-primary-foreground:   hsl(var(--chat-primary-foreground, var(--chat-background)));
   --chat-c-background:           hsl(var(--chat-background));
   --chat-c-foreground:           hsl(var(--chat-text));
   --chat-c-popover:              hsl(var(--chat-surface-deep));
@@ -283,7 +290,8 @@
 }
 
 .chat-widget-container .is-user .chat-message-content * {
-  color: hsl(var(--chat-background));
+  /* Contrast-picked "text on brand" (see --chat-c-primary-foreground). */
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
 }
 
 .chat-widget-container .is-assistant .chat-message-content * {
@@ -435,7 +443,7 @@
    and stop (brand) diverge. */
 .chat-widget-container button[type="submit"] {
   background-color: hsl(var(--chat-primary));
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
   border-radius: 12px;
   border: 1px solid var(--chat-divider);
   font-weight: 500;
@@ -460,7 +468,7 @@
 }
 
 .chat-widget-container button[type="submit"] svg {
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
 }
 
 .chat-widget-container form {
@@ -614,7 +622,7 @@
    ============================================ */
 .chat-widget-container .chat-tool-approve {
   background-color: hsl(var(--chat-primary));
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
   transition: background-color 0.15s ease;
 }
 .chat-widget-container .chat-tool-approve:hover {

@@ -32,7 +32,7 @@ import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
-import { hexToHslTriplet } from './utils/color';
+import { contrastForegroundTriplet, hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
@@ -344,19 +344,46 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       const tone = (f: number) =>
         `${(lerp(0, hueDelta, f) + bg.h + 360) % 360} ${lerp(bg.s, text.s, f)}% ${lerp(bg.l, text.l, f)}%`;
 
+      // STRUCTURAL stops (surfaces, hovers, dividers, borders) get a floor:
+      // when the declared poles sit close together (near-mono palettes — or
+      // bg === text by mistake), a pure fraction of that tiny range makes
+      // the widget's own furniture invisible: no borders, no dividers, no
+      // hover feedback. Ink stops stay verbatim fractions — the declared
+      // text contrast is the client's call (validated in the playground) —
+      // but structure never silently vanishes. Each structural stop is
+      // guaranteed a minimum lightness offset from the background, pushed
+      // toward the text pole, flipping to the other side only when the
+      // background sits so close to that extreme there's no room left.
+      const dir = text.l >= bg.l ? 1 : -1;
+      const clampL = (n: number) => Math.min(100, Math.max(0, n));
+      const structuralTone = (f: number, minDelta: number) => {
+        const lerped = lerp(bg.l, text.l, f);
+        let l = Math.abs(lerped - bg.l) >= minDelta ? lerped : clampL(bg.l + minDelta * dir);
+        if (Math.abs(l - bg.l) + 0.25 < minDelta) l = clampL(bg.l - minDelta * dir);
+        return `${(lerp(0, hueDelta, f) + bg.h + 360) % 360} ${lerp(bg.s, text.s, f)}% ${l}%`;
+      };
+
       styles['--chat-background'] = tone(0);
-      styles['--chat-surface-deep'] = tone(0.02); // composer / deep fills
-      styles['--chat-muted'] = tone(0.035);
-      styles['--chat-surface'] = tone(0.05);
-      styles['--chat-hover-bg'] = `hsl(${tone(0.06)})`;
-      styles['--chat-divider'] = `hsl(${tone(0.1)})`;
-      styles['--chat-border'] = tone(0.12);
-      styles['--chat-surface-hover'] = tone(0.12);
+      styles['--chat-surface-deep'] = structuralTone(0.02, 1.5); // composer / deep fills
+      styles['--chat-muted'] = structuralTone(0.035, 2.5);
+      styles['--chat-surface'] = structuralTone(0.05, 3.5);
+      styles['--chat-hover-bg'] = `hsl(${structuralTone(0.06, 4)})`;
+      styles['--chat-divider'] = `hsl(${structuralTone(0.1, 6)})`;
+      styles['--chat-border'] = structuralTone(0.12, 7);
+      styles['--chat-surface-hover'] = structuralTone(0.12, 7);
       styles['--chat-text-subtle'] = tone(0.42); // placeholder / disabled
       styles['--chat-text-muted'] = tone(0.64); // icons / secondary text
       styles['--chat-text-strong'] = tone(0.88);
       styles['--chat-text'] = tone(1);
       styles['--chat-primary'] = primaryTriplet;
+      // Text ON the brand color — the send button, the launcher icon, and
+      // user-bubble text are all painted over --chat-primary. This was
+      // hardwired to the background color, which a light brand (yellow,
+      // pastel, white) rendered unreadable (≈1.5:1). Picked by WCAG relative
+      // luminance — NOT HSL lightness, which calls pure yellow "medium" —
+      // and the CSS falls back to the background for the stock palette.
+      const primaryForeground = contrastForegroundTriplet(theme?.primaryColor ?? '');
+      if (primaryForeground) styles['--chat-primary-foreground'] = primaryForeground;
       // Scrim over content: translucency is the intent here, so alpha is
       // correct; direction just follows which pole is lighter.
       styles['--chat-overlay'] =
@@ -489,12 +516,24 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // Internal only -- NOT a theme mode. Picks which of the two shipped syntax
   // palettes (and scrim direction) fits behind the declared background; it
   // never overrides a declared token.
-  const isDarkBackground = (() => {
-    const t = theme ? hexToHslTriplet(theme.backgroundColor) : null;
-    const m = t ? /([\d.]+)%$/.exec(t) : null;
-    return m ? parseFloat(m[1]) < 50 : false;
+  const isDarkTheme = (() => {
+    const lightnessOf = (hex: string | undefined): number | null => {
+      const t = hex ? hexToHslTriplet(hex) : null;
+      const m = t ? /([\d.]+)%$/.exec(t) : null;
+      return m ? parseFloat(m[1]) : null;
+    };
+    const bgL = lightnessOf(theme?.backgroundColor);
+    const textL = lightnessOf(theme?.textColor);
+    // Ramp DIRECTION, not absolute lightness: a theme whose text is lighter
+    // than its background IS a dark theme — the same signal the overlay
+    // scrim already keys on, and no knife-edge flip between a #808080 and a
+    // #7d7d7d background. The old `lightness < 50` check survives only as a
+    // fallback for a partially-invalid theme (which the ramp rejects
+    // wholesale anyway).
+    if (bgL !== null && textL !== null) return textL > bgL;
+    return bgL !== null ? bgL < 50 : false;
   })();
-  const themeClass = isDarkBackground ? 'chat-dark' : '';
+  const themeClass = isDarkTheme ? 'chat-dark' : '';
 
   // INLINE layout: render the chat interface in place inside the parent. No
   // toggle button, no fixed positioning, no resize. Caller owns sizing via
