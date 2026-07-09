@@ -1,12 +1,15 @@
 'use client';
 
 import {
+  Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   ExternalLinkIcon,
   Loader2,
   ShieldCheck,
 } from 'lucide-react';
+import { useRef } from 'react';
 import type { ComponentProps, FormEvent, ReactNode } from 'react';
 import { safeUrl } from '../utils/url-safety';
 import { cn } from '../utils/cn';
@@ -26,6 +29,17 @@ function dispatchAction(
 ) {
   if (!onAction || !action) return;
   void onAction({ action, source, values });
+}
+
+/**
+ * Deterministic hue from a string — gives each entity a stable accent so a
+ * card rail reads as a designed set (varied, but anchored to the theme) even
+ * when the host supplies no imagery.
+ */
+function hashHue(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return ((h % 360) + 360) % 360;
 }
 
 export interface ActionButtonProps
@@ -53,10 +67,13 @@ export function ActionButton({
     <button
       type="button"
       className={cn(
-        'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)] disabled:pointer-events-none disabled:opacity-50',
-        variant === 'primary' && 'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))] hover:opacity-90',
-        variant === 'secondary' && 'border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-hover-bg))]',
-        variant === 'ghost' && 'border-transparent bg-transparent text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-text)/0.06)] hover:text-[hsl(var(--chat-text))]',
+        'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50',
+        variant === 'primary' &&
+          'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-primary-foreground))] shadow-sm hover:brightness-110 hover:shadow',
+        variant === 'secondary' &&
+          'border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-background))] text-[hsl(var(--chat-text))] shadow-sm hover:bg-[hsl(var(--chat-hover-bg))]',
+        variant === 'ghost' &&
+          'border-transparent bg-transparent text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-text)/0.06)] hover:text-[hsl(var(--chat-text))]',
         className,
       )}
       disabled={disabled || loading}
@@ -98,44 +115,97 @@ export interface EntityCardProps extends ComponentProps<'article'> {
   onAction?: MordnActionDispatcher;
 }
 
-export function EntityCard({ item, onAction, className, ...props }: EntityCardProps) {
+export function EntityCard({ item, onAction, className, style, ...props }: EntityCardProps) {
+  const image = item.imageUrl ? safeUrl(item.imageUrl) : undefined;
+  const hue = hashHue(item.id);
+
   return (
     <article
-      className={cn('not-prose overflow-hidden rounded-2xl border bg-[hsl(var(--chat-surface))]', className)}
-      style={{ borderColor: 'hsl(var(--chat-border))' }}
+      className={cn(
+        'chat-card-lift not-prose overflow-hidden rounded-2xl border bg-[hsl(var(--chat-background))]',
+        className,
+      )}
+      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)', ...style }}
       {...props}
     >
-      {item.imageUrl && safeUrl(item.imageUrl) && (
-        <img src={safeUrl(item.imageUrl)} alt="" className="h-32 w-full object-cover" loading="lazy" />
-      )}
-      <div className="space-y-3 p-3">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="truncate text-[13px] font-semibold text-[hsl(var(--chat-text))]">{item.title}</h3>
-            {item.subtitle && <p className="mt-0.5 text-[12px] text-[hsl(var(--chat-text-muted))]">{item.subtitle}</p>}
-          </div>
-          {(item.price || item.badge) && (
-            <span className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--chat-text))]" style={{ borderColor: 'hsl(var(--chat-border))' }}>
-              {item.price ?? item.badge}
+      {/* Media header: the host's image when given, otherwise a generated
+          accent panel (theme-anchored gradient + oversized glyph) so cards
+          never look bare. Badge and price ride on top as glass chips. */}
+      <div
+        className="relative h-[5.5rem] w-full overflow-hidden"
+        style={
+          image
+            ? undefined
+            : {
+                background: `linear-gradient(135deg, hsl(var(--chat-primary) / 0.9), hsl(${hue} 58% 48%))`,
+              }
+        }
+      >
+        {image ? (
+          <img src={image} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -bottom-4 -right-1 select-none text-[72px] font-black leading-none text-white/[0.18]"
+            >
+              {item.title.slice(0, 1)}
             </span>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(120% 90% at 0% 0%, rgb(255 255 255 / 0.22), transparent 55%)' }}
+            />
+          </>
+        )}
+        {item.badge && (
+          <span className="absolute left-2 top-2 rounded-full bg-black/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
+            {item.badge}
+          </span>
+        )}
+        {item.price && (
+          <span className="absolute bottom-2 right-2 rounded-full bg-white/90 px-2 py-0.5 text-[12px] font-bold text-gray-900 shadow-sm backdrop-blur-sm">
+            {item.price}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2.5 p-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-[13px] font-semibold text-[hsl(var(--chat-text))]">{item.title}</h3>
+          {item.subtitle && (
+            <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">
+              {item.subtitle}
+            </p>
           )}
         </div>
 
-        {item.description && <div className="text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">{item.description}</div>}
+        {item.description && (
+          <div className="text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">{item.description}</div>
+        )}
 
         {item.attributes && item.attributes.length > 0 && (
-          <dl className="grid gap-1.5">
+          <dl
+            className="divide-y overflow-hidden rounded-xl border"
+            style={{ borderColor: 'hsl(var(--chat-border) / 0.8)' }}
+          >
             {item.attributes.map((attr) => (
-              <div key={attr.label} className="grid grid-cols-[minmax(64px,auto)_1fr] gap-2 rounded-lg bg-[hsl(var(--chat-surface)/0.72)] px-2 py-1">
-                <dt className="truncate text-[11px] text-[hsl(var(--chat-text-muted))]">{attr.label}</dt>
-                <dd className="min-w-0 truncate text-[11px] font-medium text-[hsl(var(--chat-text))]">{attr.value}</dd>
+              <div
+                key={attr.label}
+                className="flex items-baseline justify-between gap-3 px-2.5 py-1.5"
+                style={{ borderColor: 'hsl(var(--chat-border) / 0.8)' }}
+              >
+                <dt className="shrink-0 text-[11px] text-[hsl(var(--chat-text-subtle))]">{attr.label}</dt>
+                <dd className="min-w-0 truncate text-right text-[11.5px] font-medium text-[hsl(var(--chat-text))]">
+                  {attr.value}
+                </dd>
               </div>
             ))}
           </dl>
         )}
 
         {item.actions && item.actions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
             {item.actions.map((entityAction) => {
               const safeHref = safeUrl(entityAction.href);
               if (safeHref) {
@@ -145,7 +215,7 @@ export function EntityCard({ item, onAction, className, ...props }: EntityCardPr
                     href={safeHref}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text))] shadow-sm transition-colors hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]"
                     style={{ borderColor: 'hsl(var(--chat-border))' }}
                   >
                     {entityAction.label}
@@ -177,13 +247,51 @@ export interface EntityCarouselProps extends ComponentProps<'div'> {
 }
 
 export function EntityCarousel({ items, onAction, label, className, ...props }: EntityCarouselProps) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
   if (!items.length) return null;
+
+  const scrollByCard = (direction: -1 | 1) => {
+    scrollerRef.current?.scrollBy({ left: direction * 276, behavior: 'smooth' });
+  };
+
   return (
     <section className={cn('not-prose space-y-2', className)} aria-label={label} {...props}>
-      {label && <h3 className="text-[12px] font-semibold text-[hsl(var(--chat-text))]">{label}</h3>}
-      <div className="flex snap-x gap-2 overflow-x-auto pb-1">
-        {items.map((item) => (
-          <EntityCard key={item.id} item={item} onAction={onAction} className="w-[15rem] shrink-0 snap-start" />
+      {(label || items.length > 1) && (
+        <div className="flex items-center justify-between gap-2">
+          {label && <h3 className="text-[12px] font-semibold text-[hsl(var(--chat-text))]">{label}</h3>}
+          {items.length > 1 && (
+            <div className="flex gap-1">
+              <button
+                type="button"
+                aria-label="Scroll back"
+                onClick={() => scrollByCard(-1)}
+                className="flex size-6 items-center justify-center rounded-full border text-[hsl(var(--chat-text-muted))] transition-colors hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]"
+                style={{ borderColor: 'hsl(var(--chat-border))' }}
+              >
+                <ChevronLeft className="size-3.5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="Scroll forward"
+                onClick={() => scrollByCard(1)}
+                className="flex size-6 items-center justify-center rounded-full border text-[hsl(var(--chat-text-muted))] transition-colors hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]"
+                style={{ borderColor: 'hsl(var(--chat-border))' }}
+              >
+                <ChevronRight className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <div ref={scrollerRef} className="chat-carousel flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-1 pr-8">
+        {items.map((item, index) => (
+          <EntityCard
+            key={item.id}
+            item={item}
+            onAction={onAction}
+            className="chat-card-in w-[16.5rem] shrink-0 snap-start"
+            style={{ animationDelay: `${Math.min(index, 5) * 70}ms` }}
+          />
         ))}
       </div>
     </section>
@@ -227,8 +335,11 @@ export function ActionForm({
 
   return (
     <form
-      className={cn('not-prose space-y-3 rounded-2xl border bg-[hsl(var(--chat-surface))] p-3 shadow-sm', className)}
-      style={{ borderColor: 'hsl(var(--chat-border))' }}
+      className={cn(
+        'chat-card-in not-prose space-y-3 rounded-2xl border bg-[hsl(var(--chat-background))] p-3.5',
+        className,
+      )}
+      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)' }}
       onSubmit={onSubmit}
       {...props}
     >
@@ -238,7 +349,7 @@ export function ActionForm({
           {description && <p className="text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">{description}</p>}
         </div>
       )}
-      <div className="grid gap-2">
+      <div className="grid gap-2.5">
         {fields.map((field) => {
           const common = {
             id: field.name,
@@ -247,7 +358,7 @@ export function ActionForm({
             placeholder: field.placeholder,
             defaultValue: field.defaultValue,
             className:
-              'min-h-9 rounded-lg border bg-[hsl(var(--chat-background))] px-2.5 py-1.5 text-[13px] text-[hsl(var(--chat-text))] placeholder:text-[hsl(var(--chat-text-subtle))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]',
+              'min-h-9 rounded-xl border bg-[hsl(var(--chat-surface))] px-3 py-1.5 text-[13px] text-[hsl(var(--chat-text))] placeholder:text-[hsl(var(--chat-text-subtle))] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.35)]',
             style: { borderColor: 'hsl(var(--chat-border))' },
           };
           return (
@@ -274,29 +385,65 @@ export interface SummaryCardProps extends ComponentProps<'section'> {
   actionLabel?: string;
 }
 
+/**
+ * Receipt-style summary. Rows render as a hairline-divided ledger; a row whose
+ * label reads like a grand total ("Total", "Total due"…) is automatically
+ * emphasised so the number that matters is the one you see first.
+ */
 export function SummaryCard({ title, description, rows, action, onAction, actionLabel, className, ...props }: SummaryCardProps) {
   return (
-    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
-      <div className="flex items-start gap-2">
-        <CheckCircle2 className="mt-0.5 size-4 text-[hsl(var(--chat-primary))]" aria-hidden="true" />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <h3 className="text-[13px] font-semibold text-[hsl(var(--chat-text))]">{title}</h3>
-            {description && <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">{description}</div>}
-          </div>
-          {rows && rows.length > 0 && (
-            <dl className="grid gap-1.5">
-              {rows.map((row) => (
-                <div key={row.label} className="grid grid-cols-[minmax(72px,auto)_1fr] gap-3 rounded-lg bg-[hsl(var(--chat-surface)/0.72)] px-2 py-1">
-                  <dt className="truncate text-[11px] text-[hsl(var(--chat-text-muted))]">{row.label}</dt>
-                  <dd className="min-w-0 truncate text-[11px] font-medium text-[hsl(var(--chat-text))]">{row.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {action && <ActionButton action={action} onAction={onAction} variant="primary" label={actionLabel ?? action.label} />}
+    <section
+      className={cn('chat-card-in not-prose overflow-hidden rounded-2xl border bg-[hsl(var(--chat-background))]', className)}
+      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)' }}
+      {...props}
+    >
+      <div className="flex items-start gap-2.5 p-3">
+        <span
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: 'hsl(var(--chat-primary) / 0.12)' }}
+          aria-hidden="true"
+        >
+          <CheckCircle2 className="size-4" style={{ color: 'hsl(var(--chat-primary))' }} strokeWidth={2.2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[13px] font-semibold text-[hsl(var(--chat-text))]">{title}</h3>
+          {description && <div className="mt-0.5 text-[12px] leading-relaxed text-[hsl(var(--chat-text-muted))]">{description}</div>}
         </div>
       </div>
+
+      {rows && rows.length > 0 && (
+        <dl
+          className="mx-3 mb-3 divide-y overflow-hidden rounded-xl border"
+          style={{ borderColor: 'hsl(var(--chat-border) / 0.8)' }}
+        >
+          {rows.map((row) => {
+            const isTotal = typeof row.label === 'string' && /^total\b/i.test(row.label);
+            return (
+              <div
+                key={row.label}
+                className={cn('flex items-baseline justify-between gap-3 px-2.5', isTotal ? 'py-2' : 'py-1.5')}
+                style={{
+                  borderColor: 'hsl(var(--chat-border) / 0.8)',
+                  backgroundColor: isTotal ? 'hsl(var(--chat-primary) / 0.06)' : undefined,
+                }}
+              >
+                <dt className={cn('shrink-0 text-[11px]', isTotal ? 'font-semibold text-[hsl(var(--chat-text))]' : 'text-[hsl(var(--chat-text-subtle))]')}>
+                  {row.label}
+                </dt>
+                <dd className={cn('min-w-0 truncate text-right font-medium text-[hsl(var(--chat-text))]', isTotal ? 'text-[13px] font-bold' : 'text-[11.5px]')}>
+                  {row.value}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      )}
+
+      {action && (
+        <div className="px-3 pb-3">
+          <ActionButton action={action} onAction={onAction} variant="primary" label={actionLabel ?? action.label} />
+        </div>
+      )}
     </section>
   );
 }
@@ -323,9 +470,19 @@ export function ConfirmationCard({
   ...props
 }: ConfirmationCardProps) {
   return (
-    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
-      <div className="flex gap-2">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[hsl(var(--chat-primary))]" aria-hidden="true" />
+    <section
+      className={cn('chat-card-in not-prose rounded-2xl border bg-[hsl(var(--chat-background))] p-3.5', className)}
+      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)' }}
+      {...props}
+    >
+      <div className="flex gap-2.5">
+        <span
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: 'hsl(var(--chat-primary) / 0.12)' }}
+          aria-hidden="true"
+        >
+          <ShieldCheck className="size-4" style={{ color: 'hsl(var(--chat-primary))' }} strokeWidth={2.2} />
+        </span>
         <div className="min-w-0 flex-1 space-y-3">
           <div>
             <h3 className="text-[13px] font-semibold text-[hsl(var(--chat-text))]">{title}</h3>
@@ -338,7 +495,7 @@ export function ConfirmationCard({
             <button
               type="button"
               onClick={onCancel}
-              className="inline-flex min-h-8 items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
+              className="inline-flex min-h-8 items-center justify-center rounded-full border px-3.5 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text-muted))] transition-colors hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]"
               style={{ borderColor: 'hsl(var(--chat-border))' }}
             >
               {cancelLabel}
@@ -354,29 +511,79 @@ export interface StatusTrackerProps extends ComponentProps<'ol'> {
   steps: MordnStatusStep[];
 }
 
+/**
+ * Vertical timeline: filled markers for completed steps, a pulsing ring on the
+ * current one, and a connecting rail so progress reads at a glance.
+ */
 export function StatusTracker({ steps, className, ...props }: StatusTrackerProps) {
   return (
-    <ol className={cn('not-prose grid gap-2 rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
-      {steps.map((step) => (
-        <li key={step.id} className="flex gap-2">
-          <span
-            className={cn(
-              'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]',
-              step.status === 'complete' && 'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))]',
-              step.status === 'current' && 'border-[hsl(var(--chat-primary))] text-[hsl(var(--chat-primary))]',
-              step.status === 'error' && 'border-red-500 text-red-500',
-              (!step.status || step.status === 'pending') && 'border-[hsl(var(--chat-border))] text-[hsl(var(--chat-text-muted))]',
-            )}
-            aria-hidden="true"
-          >
-            {step.status === 'complete' ? '✓' : <ChevronRight className="size-3" />}
-          </span>
-          <span className="min-w-0">
-            <span className="block text-[12px] font-medium text-[hsl(var(--chat-text))]">{step.label}</span>
-            {step.description && <span className="block text-[11px] text-[hsl(var(--chat-text-muted))]">{step.description}</span>}
-          </span>
-        </li>
-      ))}
+    <ol
+      className={cn('chat-card-in not-prose rounded-2xl border bg-[hsl(var(--chat-background))] p-3.5', className)}
+      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)' }}
+      {...props}
+    >
+      {steps.map((step, index) => {
+        const isLast = index === steps.length - 1;
+        const status = step.status ?? 'pending';
+        return (
+          <li key={step.id} className="flex gap-2.5">
+            {/* Marker + connecting rail */}
+            <span className="flex flex-col items-center" aria-hidden="true">
+              <span
+                className={cn(
+                  'flex size-5 shrink-0 items-center justify-center rounded-full border',
+                  status === 'current' && 'chat-step-pulse',
+                )}
+                style={
+                  status === 'complete'
+                    ? { backgroundColor: 'hsl(var(--chat-primary))', borderColor: 'hsl(var(--chat-primary))' }
+                    : status === 'current'
+                      ? { borderColor: 'hsl(var(--chat-primary))', borderWidth: 2 }
+                      : status === 'error'
+                        ? { borderColor: 'hsl(var(--chat-danger))', borderWidth: 2 }
+                        : { borderColor: 'hsl(var(--chat-border))' }
+                }
+              >
+                {status === 'complete' && (
+                  <Check className="size-3" style={{ color: 'hsl(var(--chat-primary-foreground))' }} strokeWidth={3} />
+                )}
+                {status === 'current' && (
+                  <span className="size-1.5 rounded-full" style={{ backgroundColor: 'hsl(var(--chat-primary))' }} />
+                )}
+                {status === 'error' && (
+                  <span className="size-1.5 rounded-full" style={{ backgroundColor: 'hsl(var(--chat-danger))' }} />
+                )}
+              </span>
+              {!isLast && (
+                <span
+                  className="w-px flex-1"
+                  style={{
+                    minHeight: '0.875rem',
+                    backgroundColor:
+                      status === 'complete' ? 'hsl(var(--chat-primary) / 0.45)' : 'hsl(var(--chat-border))',
+                  }}
+                />
+              )}
+            </span>
+
+            <span className={cn('min-w-0', !isLast && 'pb-3')}>
+              <span
+                className={cn(
+                  'block text-[12px]',
+                  status === 'current' ? 'font-semibold text-[hsl(var(--chat-text))]' : 'font-medium',
+                  status === 'pending' && 'text-[hsl(var(--chat-text-muted))]',
+                  (status === 'complete' || status === 'error') && 'text-[hsl(var(--chat-text))]',
+                )}
+              >
+                {step.label}
+              </span>
+              {step.description && (
+                <span className="block text-[11px] text-[hsl(var(--chat-text-muted))]">{step.description}</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }
