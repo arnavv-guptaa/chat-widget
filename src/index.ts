@@ -56,6 +56,62 @@ export type { SourcesProps, SourcesTriggerProps, SourcesContentProps, SourceProp
 export { ActionResultCard } from './components/action-result-card';
 export type { ActionResultCardProps } from './components/action-result-card';
 
+// Action/template primitives — foundation for vertical assistants and generative UI.
+export {
+  ActionButton,
+  ActionChips,
+  ActionForm,
+  ConfirmationCard,
+  EntityCard,
+  EntityCarousel,
+  StatusTracker,
+  SummaryCard,
+} from './components/action-primitives';
+export type {
+  ActionButtonProps,
+  ActionChipsProps,
+  ActionFormField,
+  ActionFormProps,
+  ConfirmationCardProps,
+  EntityCardProps,
+  EntityCarouselProps,
+  StatusTrackerProps,
+  SummaryCardProps,
+} from './components/action-primitives';
+export {
+  defaultMordnTemplates,
+  docsAssistantTemplate,
+  ecommerceConciergeTemplate,
+  getMordnTemplate,
+  leadCaptureTemplate,
+  restaurantAssistantTemplate,
+  servicesBookingTemplate,
+  travelPlannerTemplate,
+} from './actions';
+export type {
+  MordnActionConfig,
+  MordnActionConfirmationPolicy,
+  MordnActionDispatcher,
+  MordnActionEvent,
+  MordnActionHandler,
+  MordnActionLoadingBehavior,
+  MordnActionPrimitiveProps,
+  MordnActionResult,
+  MordnActionRiskLevel,
+  MordnActionSchema,
+  MordnActionSchemaProperty,
+  MordnActionStatus,
+  MordnEntityAction,
+  MordnEntityAttribute,
+  MordnEntityItem,
+  MordnStatusStep,
+  MordnTemplateActionDefinition,
+  MordnTemplateCardDefinition,
+  MordnTemplateManifest,
+  MordnTemplateStarterPrompt,
+  MordnTemplateVertical,
+} from './actions';
+
 // Tool render building blocks — exposed so host apps can compose
 // custom toolRenderers using the same chrome the default rendering
 // uses.
