@@ -111,6 +111,17 @@
   --chat-text-muted:  0 0% 45.1%;      /* light: #737373 — secondary text */
   --chat-text-subtle: 0 0% 63.9%;      /* light: #a3a3a3 — placeholder/disabled */
 
+  /* Semantic status colors — success / warning / danger (HSL triplets, like
+     every other color token; consume as hsl(var(--chat-success)) or with
+     alpha). ONE token set so tool-call status dots, action-result cards, and
+     error banners read consistently on every theme — previously three files
+     hardcoded three different greens, tuned only for one surface. Dark-tuned
+     variants live on .chat-dark below (status hues need more lightness to
+     read on dark surfaces). */
+  --chat-success: 142 76% 36%;         /* light: #16a34a */
+  --chat-warning: 32 95% 44%;          /* light: #d97706 */
+  --chat-danger:  0 72% 51%;           /* light: #dc2626 */
+
   /* Translucent overlays — full color values, not HSL triplets, since they
      bake in alpha on a fixed base. Use them directly: backgroundColor:
      'var(--chat-hover-bg)'. */
@@ -136,7 +147,14 @@
      all of them. These feed the @theme tokens above (so the utilities resolve to
      these per-mode values). Full hsl() colors, not raw triplets. */
   --chat-c-primary:              hsl(var(--chat-primary));
-  --chat-c-primary-foreground:   hsl(var(--chat-background));
+  /* Text ON the brand color. For a THEMED widget, ChatWidget sets
+     --chat-primary-foreground to the near-black/near-white that actually
+     reads on the declared primary (WCAG-luminance-picked) — hardwiring the
+     background here made light brands (yellow/pastel/white) render an
+     unreadable send arrow, launcher icon, and user-bubble text. The
+     background remains the fallback for the stock palette (near-black
+     primary on white → white foreground). */
+  --chat-c-primary-foreground:   hsl(var(--chat-primary-foreground, var(--chat-background)));
   --chat-c-background:           hsl(var(--chat-background));
   --chat-c-foreground:           hsl(var(--chat-text));
   --chat-c-popover:              hsl(var(--chat-surface-deep));
@@ -179,6 +197,11 @@
 .chat-widget-container.chat-dark:where(:not(.chat-widget-container *)) {
   --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+
+  /* Status hues need more lightness to read on dark surfaces. */
+  --chat-success: 142 69% 58%;         /* dark: #4ade80 */
+  --chat-warning: 43 96% 56%;          /* dark: #fbbf24 */
+  --chat-danger:  0 91% 71%;           /* dark: #f87171 */
 }
 
 /* ============================================
@@ -267,7 +290,8 @@
 }
 
 .chat-widget-container .is-user .chat-message-content * {
-  color: hsl(var(--chat-background));
+  /* Contrast-picked "text on brand" (see --chat-c-primary-foreground). */
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
 }
 
 .chat-widget-container .is-assistant .chat-message-content * {
@@ -419,7 +443,7 @@
    and stop (brand) diverge. */
 .chat-widget-container button[type="submit"] {
   background-color: hsl(var(--chat-primary));
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
   border-radius: 12px;
   border: 1px solid var(--chat-divider);
   font-weight: 500;
@@ -444,7 +468,7 @@
 }
 
 .chat-widget-container button[type="submit"] svg {
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
 }
 
 .chat-widget-container form {
@@ -580,6 +604,18 @@
   color: var(--shiki-dark) !important;
 }
 
+/* Under .chat-dark, code sits on a NEUTRAL near-black canvas instead of the
+   theme-tinted surface: github-dark's token palette was tuned for neutral
+   near-black — on a saturated custom background (navy, forest) its dim tokens
+   (comments, punctuation) lose contrast against the tint. The widget's other
+   furniture stays theme-tinted; only the code canvas gets the surface the
+   palette was designed for. On the stock dark ramp this is visually
+   indistinguishable from the tinted value. */
+.chat-widget-container.chat-dark .chat-code-body,
+.chat-widget-container.chat-dark .code-block-shiki {
+  background-color: hsl(0 0% 9%);
+}
+
 /* The injected `.shiki` <pre> sits inside our own chrome wrappers (the prose
    `.chat-code-body` and the tool `.code-block-shiki`, which already own
    padding / surface / scroll). Strip the browser's default <pre> margin so it
@@ -598,7 +634,7 @@
    ============================================ */
 .chat-widget-container .chat-tool-approve {
   background-color: hsl(var(--chat-primary));
-  color: hsl(var(--chat-background));
+  color: hsl(var(--chat-primary-foreground, var(--chat-background)));
   transition: background-color 0.15s ease;
 }
 .chat-widget-container .chat-tool-approve:hover {
@@ -842,6 +878,20 @@
   border-left: 1px solid var(--chat-divider);
   background-color: hsl(var(--chat-background));
   animation: chat-slide-in-right 0.3s ease-out forwards;
+  /* Keep the composer above the iOS home indicator (and clear of rounded
+     corners in landscape). Zero everywhere env() is unsupported/irrelevant. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Exit choreography: ChatWidget keeps the panel mounted with
+   data-closing="true" until this animation ends (with a JS timer safety net),
+   so closing mirrors the entrance instead of vanishing in one frame. The
+   panel is inert while it leaves. Reduced-motion skips the closing state in
+   JS entirely (and the block below force-disables animation as belt and
+   braces). */
+.chat-widget-container.chat-widget-popup[data-closing="true"] {
+  animation: chat-slide-out-right 0.24s ease-in forwards;
+  pointer-events: none;
 }
 
 /* ============================================
@@ -879,7 +929,9 @@
   transition: none;
 }
 
-/* Resize handle */
+/* Resize handle. touch-action: none is REQUIRED for the Pointer Events drag —
+   without it the browser claims vertical touch moves for scrolling and
+   cancels the pointer stream mid-drag. */
 .chat-widget-container .chat-widget-resize-handle {
   position: absolute;
   left: 0;
@@ -890,11 +942,19 @@
   background: transparent;
   transition: background-color 0.2s ease;
   z-index: 10;
+  touch-action: none;
 }
 
 .chat-widget-container .chat-widget-resize-handle:hover,
 .chat-widget-container .chat-widget-resize-handle:active {
   background-color: hsl(var(--chat-primary) / 0.2);
+}
+
+/* The handle is keyboard-operable (role=separator + arrow keys) — it needs a
+   visible focus affordance like every other interactive element. */
+.chat-widget-container .chat-widget-resize-handle:focus-visible {
+  outline: none;
+  background-color: hsl(var(--chat-primary) / 0.35);
 }
 
 /* ============================================

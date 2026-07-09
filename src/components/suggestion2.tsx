@@ -38,7 +38,7 @@ export function StarterMessages({
       >
         {prompts.map((prompt, index) => (
           <StarterMessageItem
-            key={index}
+            key={`${prompt.title}-${index}`}
             prompt={prompt}
             layout="grid"
             onClick={() => onPromptSelect(prompt)}
@@ -57,7 +57,7 @@ export function StarterMessages({
       {...props}
     >
       {prompts.map((prompt, index) => (
-        <div key={index}>
+        <div key={`${prompt.title}-${index}`}>
           <StarterMessageItem
             prompt={prompt}
             onClick={() => onPromptSelect(prompt)}

@@ -5,7 +5,7 @@ import { cn } from "../utils/cn";
 import { highlightCode } from "../utils/highlight";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 type CodeBlockContextType = {
   code: string;
@@ -165,6 +165,16 @@ export const CodeBlockCopyButton = ({
   const [isCopied, setIsCopied] = useState(false);
   const { code } = useContext(CodeBlockContext);
 
+  // Timer id for the "copied" flash, so a rapid re-copy (or unmount) can
+  // clear the pending reset instead of leaking it.
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   const copyToClipboard = async () => {
     // `navigator.clipboard` is undefined in insecure (http) contexts — common
     // for internal/enterprise deployments. Optional-chain so the guard returns
@@ -178,7 +188,8 @@ export const CodeBlockCopyButton = ({
       await navigator.clipboard.writeText(code);
       setIsCopied(true);
       onCopy?.();
-      setTimeout(() => setIsCopied(false), timeout);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setIsCopied(false), timeout);
     } catch (error) {
       onError?.(error as Error);
     }

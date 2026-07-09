@@ -41,10 +41,10 @@ const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
 const SUBTLE = { color: 'hsl(var(--chat-text-subtle))' } as const;
 const HOVER = { backgroundColor: 'transparent' } as const;
 // Match the jarvis PortfolioHoldingsEditor status colours: green-400 / red-400.
-const SUCCESS_COLOR = { color: '#4ade80' } as const; // Tailwind green-400
-const ERROR_COLOR = { color: '#f87171' } as const; // Tailwind red-400
+const SUCCESS_COLOR = { color: 'hsl(var(--chat-success))' } as const;
+const ERROR_COLOR = { color: 'hsl(var(--chat-danger))' } as const;
 
-const APPROVAL_COLOR = { color: '#d97706' } as const; // amber-600
+const APPROVAL_COLOR = { color: 'hsl(var(--chat-warning))' } as const;
 
 /** Leading status icon: amber clock (awaiting approval) → spinner (running) →
  *  green check (done) → red cross (error). */
@@ -171,7 +171,7 @@ function AgentToolCallImpl({
           {errorText ? (
             <div
               className="rounded-md px-2.5 py-1.5 text-xs"
-              style={{ backgroundColor: 'rgba(248,113,113,0.12)', color: '#f87171' }}
+              style={{ backgroundColor: 'hsl(var(--chat-danger) / 0.12)', color: 'hsl(var(--chat-danger))' }}
             >
               {errorText}
             </div>

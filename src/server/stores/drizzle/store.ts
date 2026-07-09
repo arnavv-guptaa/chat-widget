@@ -17,7 +17,7 @@
  */
 
 import 'server-only';
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { generateId, type UIMessage } from 'ai';
 
 import {
@@ -202,6 +202,31 @@ class DrizzleChatStore implements ChatStore {
       text: textFromParts(m.parts),
       model: m.role === 'assistant' ? model ?? null : null,
     }));
+
+    // The PK is `id` alone, so onConflictDoNothing's dedup is GLOBAL, not
+    // per-conversation. A same-conversation id collision (a retry/replay
+    // re-delivering the same generateMessageId) is the intended idempotent
+    // path — onConflictDoNothing is exactly right for that. But a CLIENT
+    // -supplied user-message id can collide with a message id that already
+    // exists in a DIFFERENT conversation; if that happens, onConflictDoNothing
+    // would silently swallow the new message (data loss) and doubles as an
+    // existence oracle (the client can probe whether an id exists elsewhere).
+    // That's a client bug or a probe, not a replay — detect it and re-mint the
+    // id so the message is still persisted, rather than trusting a
+    // client-controlled PK across conversation boundaries.
+    const incomingIds = values.map((v) => v.id);
+    if (incomingIds.length > 0) {
+      const existing = await this.db
+        .select({ id: messages.id, conversationId: messages.conversationId })
+        .from(messages)
+        .where(inArray(messages.id, incomingIds));
+      const foreignIds = new Set(
+        existing.filter((row) => row.conversationId !== conversationId).map((row) => row.id),
+      );
+      for (const v of values) {
+        if (foreignIds.has(v.id)) v.id = generateId();
+      }
+    }
 
     await this.db.insert(messages).values(values).onConflictDoNothing({ target: messages.id });
 

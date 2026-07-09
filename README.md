@@ -241,9 +241,35 @@ it's safe to re-init after a client-side route change on a docs SPA.
 
 Docs readers usually aren't logged in, so `userId` is optional here. When you
 omit it, the embed generates a persistent `anon-…` id and stores it in
-`localStorage` so a visitor's conversation history survives reloads. As with the
-React path, this id is a client-side scoping key only — **your `getChatUserId`
-on the server remains the identity boundary** (see the security note above).
+`localStorage` so a visitor's conversation history survives reloads (scoped per
+`agentId`, so two agents on one origin keep separate anonymous identities). As
+with the React path, this id is a client-side scoping key only — **your
+`getChatUserId` on the server remains the identity boundary** (see the security
+note above).
+
+### Cross-origin embeds (CORS)
+
+The examples above point `data-api-base` at **another origin** — the widget on
+`docs.example.com` calling `your-app.com`. Because the widget sends an
+`X-User-Id` header, *every* cross-origin request triggers a CORS preflight, so
+the handler must be told to answer it. Two steps:
+
+```ts
+// app/api/chat/[[...chat]]/route.ts — note the added OPTIONS export
+export const { GET, POST, DELETE, OPTIONS } = createChatHandler({
+  getUserId: getChatUserId,
+  // Exact origins that may embed this handler ('*' allows any):
+  cors: { allowOrigins: ['https://docs.example.com'] },
+  // …store, storage, model as usual
+});
+```
+
+That's all for anonymous/docs traffic. If your `getUserId` reads a **session
+cookie** and you want it to work cross-origin, both ends must opt into
+credentials — set `allowCredentials: true` in the handler's `cors` and
+`requestCredentials: 'include'` on the widget (via `data-config` or React
+props). Same-origin apps need none of this: without `cors`, behavior is
+unchanged.
 
 ### Bundle size and CSP
 

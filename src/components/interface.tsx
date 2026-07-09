@@ -80,11 +80,93 @@ type Conversation = {
   metadata?: any;
 };
 
+/**
+ * Storage access that can never throw. Safari private mode (historically a
+ * QuotaExceededError on ANY setItem), storage disabled by policy, a full
+ * origin quota, or SSR must all degrade to "no persistence" — never to a
+ * crashed widget inside someone else's app. Every other file already guards
+ * its storage access; interface.tsx was the lone gap and holds the most
+ * storage code, so the guard lives here as one helper instead of ad-hoc
+ * try/catch at every call site.
+ */
+const makeSafeStorage = (resolve: () => Storage) => ({
+  get(key: string): string | null {
+    try {
+      return resolve().getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      resolve().setItem(key, value);
+    } catch {
+      /* persistence is best-effort */
+    }
+  },
+  remove(key: string): void {
+    try {
+      resolve().removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  },
+  keys(): string[] {
+    try {
+      const store = resolve();
+      const out: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (k) out.push(k);
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  },
+});
+
+const safeStorage = makeSafeStorage(() => window.localStorage);
+// Drafts live in sessionStorage on purpose: a half-typed message should
+// survive tab switches and panel close/reopen within the visit, but is not
+// worth carrying across browser sessions the way conversation tabs are.
+const safeSession = makeSafeStorage(() => window.sessionStorage);
+
 type ChatTab = {
   id: string;
   title: string;
   isActive: boolean;
 };
+
+/**
+ * Attachment button — compact ghost icon on the left of the prompt row, sized
+ * to match the send button (size-9) with a muted paperclip that doesn't
+ * compete with the text or the send action. Reads the attachments context.
+ *
+ * Hoisted to MODULE scope deliberately: it used to be defined inside
+ * ChatInterface's render, which makes React see a brand-new component type
+ * every render — unmounting and remounting the subtree each time (transient
+ * state/focus loss + wasted work). A component must never be defined inside
+ * another component's body.
+ */
+function AttachButton() {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      variant="ghost"
+      size="icon"
+      // Icon-only affordance: no hover background (the ghost circle looked
+      // odd next to the textarea), the icon just steps up the text ramp.
+      className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
+      aria-label="Attach files"
+      onClick={() => attachments.openFileDialog()}
+    >
+      {/* lucide's Paperclip runs bottom-left→top-right; rotate -45° to
+          stand it upright (vertical). */}
+      <PaperclipIcon className="size-4 -rotate-45" />
+    </PromptInputButton>
+  );
+}
 
 export default function ChatInterface({ id, initialMessages, config, onClose, headerActions }: { id?: string; initialMessages?: any[]; config?: any; onClose?: () => void; headerActions?: React.ReactNode } = {}) {
   // Storage key prefix is scoped to (agent, user). It is `null` when identity
@@ -93,6 +175,21 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const { storageKeyPrefix } = useChatStorageKey();
   const storageKey = (key: string): string | null =>
     storageKeyPrefix ? `chat-${storageKeyPrefix}-${key}` : null;
+
+  // Base path for every widget request, normalised ONCE: a trailing slash on
+  // the configured apiBase (an easy config typo, especially for cross-origin
+  // embeds) would otherwise produce double-slash URLs (`…/api/chat//upload`)
+  // that literal-matching routers and proxies 404. feedback.ts already guards
+  // this on its own path — this brings the other five call sites in line.
+  // A bare '/' (root mount) strips to '' so `${apiBase}/history` stays a
+  // proper root-relative path instead of a scheme-relative '//history'.
+  const apiBase = String(config?.apiBase ?? '/api/chat').replace(/\/+$/, '');
+
+  // Per-tab composer drafts (sessionStorage — see safeSession above). Scoped
+  // exactly like every other persisted key; null when identity is incomplete,
+  // in which case drafts simply don't persist.
+  const draftKey = (tabId: string): string | null =>
+    storageKeyPrefix && tabId ? `chat-${storageKeyPrefix}-draft-${tabId}` : null;
 
   // Get theme mode from config (defaults to 'light')
 
@@ -181,6 +278,41 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Ref-based initialization guard to ensure initialization runs only once
   const hasInitialized = useRef(false);
 
+  // Live mirrors for values that async callbacks must read FRESH. A callback
+  // that awaited a fetch would otherwise act on the state it closed over at
+  // call time — exactly the stale view that lets one tab's response land in
+  // another tab. `activeTabIdRef` is written synchronously at every activation
+  // site (not in an effect) so even an await that resolves between commits
+  // sees the truth; `statusRef` mirrors the stream status for callbacks whose
+  // dep arrays would otherwise go stale (e.g. createNewTab).
+  const activeTabIdRef = useRef<string>('');
+  const statusRef = useRef<string>('ready');
+  // Monotonic generation for conversation loads: a resolved fetch applies only
+  // if it is still the LATEST load AND its conversation is still active.
+  // Guards the tab-switch race (slow tab-A fetch resolving after tab B was
+  // activated) without threading AbortControllers through every path.
+  const loadGenRef = useRef(0);
+
+  // Mounted flag for async flows (uploads, history fetches) whose resolutions
+  // can outlive the component — e.g. the popup unmounts this whole tree on
+  // close while an upload is mid-flight. NOTE: (re)set in the effect BODY, not
+  // the ref initialiser — React 18 StrictMode runs mount → cleanup → mount,
+  // and an initialiser-only flag would stay false after the second mount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // `initialMessages` (public prop, previously accepted-but-ignored): the
+  // seed transcript for conversations that don't exist server-side yet — a
+  // welcome exchange, an SSR-prepared transcript. Captured ONCE by contract
+  // ("initial"); reacting to later mutations would fight the server as the
+  // source of truth once a conversation persists.
+  const initialMessagesRef = useRef<any[] | undefined>(initialMessages);
+
   // First-class per-turn context (#162). Held in a ref so the transport's
   // prepareSendMessagesRequest always reads the latest value without
   // re-creating the chat (and resetting the stream) on every context change.
@@ -192,13 +324,16 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
-      api: `${config?.apiBase ?? '/api/chat'}`,
+      api: apiBase || '/',
       headers: {
         'X-User-Id': config?.userId || '',
         // Extra headers the host injects (e.g. the dashboard playground sends
         // its unsaved draft model/system-prompt for an owner-authed preview).
         ...(config?.extraHeaders ?? {}),
       },
+      // Cookie mode for cross-origin apiBase deployments whose getUserId
+      // reads a session cookie (see ChatWidgetConfig.requestCredentials).
+      credentials: config?.requestCredentials,
       // Attach first-class per-turn context (#162) to the request body. Read
       // from a ref so the latest context is sent without re-creating the chat.
       // When `context` is undefined it serialises away — zero overhead.
@@ -224,6 +359,35 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     experimental_throttle: config?.streamingThrottleMs ?? 50,
   });
 
+  // Keep the live status mirror in sync (see statusRef above).
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  // Single activation point for changing the active tab: writes the live ref
+  // SYNCHRONOUSLY (before React re-renders) so any in-flight load's staleness
+  // check compares against the real active tab, then updates state. Every
+  // path that changes the active tab MUST go through this.
+  const activateTab = (tabId: string) => {
+    activeTabIdRef.current = tabId;
+    setActiveTabId(tabId);
+  };
+
+  // Abort an in-flight stream before the active conversation changes. Without
+  // this, the previous tab's still-open stream keeps writing into whatever
+  // chat instance is current — contaminating the newly-activated conversation
+  // on screen AND in what gets persisted on finish. Reads the status mirror so
+  // stale-closure callers (memoised callbacks) still see the live value.
+  const stopIfStreaming = () => {
+    if (statusRef.current === 'submitted' || statusRef.current === 'streaming') {
+      try {
+        stop();
+      } catch {
+        /* stop() is best-effort — never let an abort failure block a tab switch */
+      }
+    }
+  };
+
   // Approve / deny a paused tool (human-in-the-loop). Passed down to the tool
   // renderer; the SDK auto-resumes via sendAutomaticallyWhen above.
   const handleToolApproval = useCallback(
@@ -233,6 +397,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [addToolApprovalResponse],
   );
 
+  // Synchronous in-flight latch for handleSubmit. `status` only flips to
+  // 'submitted' once sendMessage() runs — which, with attachments, is AFTER
+  // the entire upload round-trip. For that whole window `status` still reads
+  // 'ready', so a second Enter (or a starter-prompt double-click — they all
+  // funnel through handleSubmit) would start a parallel upload and a
+  // duplicate turn. A ref flips synchronously and closes the window.
+  const submittingRef = useRef(false);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // Ignore submits while a turn is in flight. The send button already swaps to
     // a Stop button when streaming, but pressing Enter bypasses the button and
@@ -240,7 +412,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // queue a second message (or several) mid-response. This is the single choke
     // point both Enter and the button funnel through, so guarding here covers
     // every submission path. To interrupt, the user uses the Stop button.
-    if (status === 'submitted' || status === 'streaming') {
+    if (submittingRef.current || status === 'submitted' || status === 'streaming') {
       return false;
     }
 
@@ -250,6 +422,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     if (!(hasText || hasAttachments)) {
       return false;
     }
+
+    submittingRef.current = true;
+    try {
 
     // Upload files to Supabase first if there are attachments
     let uploadedFiles: any[] = [];
@@ -262,24 +437,37 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             const response = await fetch(file.url);
             const blob = await response.blob();
             const fileObj = new File([blob], file.filename || 'unknown', { type: file.mediaType });
-            
+
             // Upload to our API
             const formData = new FormData();
             formData.append('file', fileObj);
             formData.append('conversationId', activeTabId || 'default');
-            formData.append('userId', config?.userId || 'demo-user');
+            // Informational only — the server derives identity from its
+            // verified getChatUserId, never from this field. (It used to
+            // fall back to a 'demo-user' literal, which read like a trust
+            // path that doesn't exist.)
+            formData.append('userId', config?.userId ?? '');
 
-            const uploadResponse = await fetch(`${config?.apiBase ?? '/api/chat'}/upload`, {
+            // Same identity/extra headers as the chat transport and feedback
+            // POSTs — uploads were the one call site sending none, silently
+            // bypassing hosts that read them (e.g. the dashboard playground's
+            // draft-preview headers).
+            const uploadResponse = await fetch(`${apiBase}/upload`, {
               method: 'POST',
-              body: formData
+              headers: {
+                'X-User-Id': config?.userId || '',
+                ...(config?.extraHeaders ?? {}),
+              },
+              body: formData,
+              credentials: config?.requestCredentials
             });
-            
+
             if (!uploadResponse.ok) {
-              const errorText = await uploadResponse.text();
+              const errorText = await uploadResponse.text().catch(() => '<unreadable body>');
               console.error(`Upload failed for ${file.filename}:`, errorText);
               return null; // Return null for failed uploads
             }
-            
+
             const uploadResult = await uploadResponse.json();
             return {
               id: (file as any).id || 'unknown',
@@ -297,7 +485,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
         // Wait for all uploads to complete
         const results = await Promise.all(uploadPromises);
-        
+
         // Filter out null results (failed uploads)
         uploadedFiles = results.filter(result => result !== null);
 
@@ -323,7 +511,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setUploadError(errorMsg);
         console.error('Error in file upload process:', error);
         // Re-throw so PromptInput's submit handler preserves the attachments
-        // for retry instead of clearing them.
+        // for retry instead of clearing them. (The finally below still clears
+        // the in-flight latch on this path.)
         throw error instanceof Error ? error : new Error(errorMsg);
       }
     }
@@ -348,30 +537,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     setInput('');
+    // The sent message is no longer a draft.
+    const sentDraftKey = draftKey(activeTabId);
+    if (sentDraftKey) safeSession.remove(sentDraftKey);
     // StickToBottom handles scrolling automatically
-  };
 
-  // Attachment button component that uses the attachments context.
-  // Compact ghost icon button on the left of the prompt row — sized to match
-  // the send button (size-9) so the row reads as balanced, with a muted
-  // paperclip that doesn't compete with the text or the send action.
-  const AttachButton = () => {
-    const attachments = usePromptInputAttachments();
-    return (
-      <PromptInputButton
-        variant="ghost"
-        size="icon"
-        // Icon-only affordance: no hover background (the ghost circle looked
-        // odd next to the textarea), the icon just steps up the text ramp.
-        className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        aria-label="Attach files"
-        onClick={() => attachments.openFileDialog()}
-      >
-        {/* lucide's Paperclip runs bottom-left→top-right; rotate -45° to
-            stand it upright (vertical). */}
-        <PaperclipIcon className="size-4 -rotate-45" />
-      </PromptInputButton>
-    );
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   // Centralized function to load a conversation's messages
@@ -381,36 +554,55 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return;
     }
 
+    // Staleness guard: this load only gets to write state while it is BOTH the
+    // latest load started (gen) and loading the tab that is still active
+    // (activeTabIdRef). Otherwise a slow fetch for a previously-viewed tab
+    // would overwrite the current tab's messages and corrupt the reverse-
+    // pagination cursor. Checked after EVERY await.
+    const gen = ++loadGenRef.current;
+    const isCurrent = () =>
+      mountedRef.current &&
+      gen === loadGenRef.current &&
+      conversationId === activeTabIdRef.current;
+
     try {
       // Initial load: only the most-recent page. Older messages stream in as the
       // user scrolls up (loadOlderMessages), so a long conversation opens fast
       // and pinned to the bottom instead of pulling its whole history at once.
+      // conversationId/userId are free-form host-supplied strings (emails with
+      // '+', ids with '/', '#'…) — encode them or the URL truncates/mis-routes.
+      // The userId param is informational only (identity is server-verified);
+      // cache:'no-store' keeps one user's history out of any intermediary
+      // cache regardless of response-header handling.
       const response = await fetch(
-        `${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}&limit=${HISTORY_PAGE_SIZE}`,
+        `${apiBase}/history/${encodeURIComponent(conversationId)}?userId=${encodeURIComponent(config.userId)}&limit=${HISTORY_PAGE_SIZE}`,
+        { cache: 'no-store', credentials: config?.requestCredentials },
       );
+      if (!isCurrent()) return;
       if (response.ok) {
         const data = await response.json();
+        if (!isCurrent()) return;
         const loadedMessages = data.messages || [];
 
         // Seed the reverse-pagination cursor from the oldest loaded message.
         oldestTsRef.current = loadedMessages.length ? loadedMessages[0].created_at ?? null : null;
         setHasMoreHistory(Boolean(data.hasMore));
-
-        // Set messages after ensuring activeTabId state has updated
-        setTimeout(() => {
-          setMessages(loadedMessages);
-        }, 0);
+        // Safe to apply immediately: by the time the fetch resolved, the
+        // render that re-keyed useChat to this conversation has long since
+        // committed, and isCurrent() above proves this tab is still active.
+        setMessages(loadedMessages);
       } else if (response.status === 404) {
-        // Conversation doesn't exist yet - this is normal for new chats
-        console.log('Conversation not found in database yet (new chat)');
-        // Clear messages for new chat
+        // Conversation doesn't exist yet - this is normal for new chats.
+        // Fresh conversations start from the host's initialMessages seed
+        // (usually undefined → empty).
         oldestTsRef.current = null;
         setHasMoreHistory(false);
-        setMessages([]);
+        setMessages(initialMessagesRef.current ?? []);
       } else {
         console.error('Error loading messages:', response.status, response.statusText);
       }
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Error loading conversation:', error);
     }
   };
@@ -426,17 +618,26 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     loadingOlderRef.current = true;
     setLoadingOlder(true);
 
+    // The page we fetch belongs to THIS conversation. If the user switches
+    // tabs while the fetch is in flight, dropping the result is the only
+    // correct move — prepending it would splice another conversation's
+    // messages (and cursor) into the newly-active tab.
+    const conversationId = activeTabId;
+    const isCurrent = () => mountedRef.current && conversationId === activeTabIdRef.current;
+
     const viewport = scrollViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight ?? 0;
     const prevScrollTop = viewport?.scrollTop ?? 0;
 
     try {
       const res = await fetch(
-        `${config.apiBase ?? '/api/chat'}/history/${activeTabId}?userId=${config.userId}` +
+        `${apiBase}/history/${encodeURIComponent(activeTabId)}?userId=${encodeURIComponent(config.userId)}` +
           `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+        { cache: 'no-store', credentials: config?.requestCredentials },
       );
-      if (!res.ok) return;
+      if (!res.ok || !isCurrent()) return;
       const data = await res.json();
+      if (!isCurrent()) return;
       const older = data.messages || [];
       if (older.length === 0) {
         setHasMoreHistory(false);
@@ -488,6 +689,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return;
     }
 
+    // A new tab must never inherit the previous tab's in-flight stream.
+    stopIfStreaming();
+
     // Generate a unique ID for the new tab
     const newTabId = generateUniqueTabId();
 
@@ -514,8 +718,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return [...updatedTabs, newTab];
     });
 
-    setActiveTabId(newTabId);
-    setMessages([]);
+    activateTab(newTabId);
+    // New conversations start from the host's initialMessages seed (usually
+    // undefined → empty) — same as the 404 path in loadConversation.
+    setMessages(initialMessagesRef.current ?? []);
     setInput('');
   }, [initialTabCreated]);
 
@@ -531,12 +737,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const prev = prevPrefixRef.current;
     if (prev && prev !== storageKeyPrefix) {
       const stalePrefix = `chat-${prev}-`;
-      const toRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(stalePrefix)) toRemove.push(k);
-      }
-      toRemove.forEach((k) => localStorage.removeItem(k));
+      safeStorage
+        .keys()
+        .filter((k) => k.startsWith(stalePrefix))
+        .forEach((k) => safeStorage.remove(k));
     }
     prevPrefixRef.current = storageKeyPrefix;
   }, [storageKeyPrefix]);
@@ -544,6 +748,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const switchToTab = async (tabId: string) => {
     const targetTab = tabs.find(tab => tab.id === tabId);
     if (!targetTab) return;
+
+    // Abort any in-flight stream BEFORE re-keying useChat — otherwise the
+    // previous tab's open stream keeps appending into the current chat
+    // instance, i.e. into the tab we're switching to.
+    stopIfStreaming();
 
     // Update active tab (metadata only)
     setTabs(prevTabs =>
@@ -556,7 +765,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Change active tab - useChat will reinitialize with new ID. Setting
     // isLoadingMessages immediately gates the starter-prompt empty state
     // so we don't flash it during the API fetch below.
-    setActiveTabId(tabId);
+    activateTab(tabId);
     setIsLoadingMessages(true);
     try {
       await loadConversation(tabId);
@@ -567,6 +776,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
   const closeTab = (tabId: string) => {
     if (tabs.length <= 1) return; // Don't close the last tab
+
+    // A closed tab's draft goes with it.
+    const closedDraftKey = draftKey(tabId);
+    if (closedDraftKey) safeSession.remove(closedDraftKey);
 
     const filteredTabs = tabs.filter(tab => tab.id !== tabId);
 
@@ -590,11 +803,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Update localStorage immediately when tab is closed
     const tabsKey = storageKey('tabs');
     if (filteredTabs.length > 0 && tabsKey) {
-      localStorage.setItem(tabsKey, JSON.stringify(filteredTabs));
+      safeStorage.set(tabsKey, JSON.stringify(filteredTabs));
       if (tabId === activeTabId) {
         const newActiveTab = filteredTabs[0];
         const activeKey = storageKey('active-tab-id');
-        if (activeKey) localStorage.setItem(activeKey, newActiveTab.id);
+        if (activeKey) safeStorage.set(activeKey, newActiveTab.id);
       }
     }
   };
@@ -607,21 +820,25 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     setLoadingHistory(true);
     try {
-      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history?userId=${config.userId}`);
+      const response = await fetch(
+        `${apiBase}/history?userId=${encodeURIComponent(config.userId)}`,
+        { cache: 'no-store', credentials: config?.requestCredentials },
+      );
 
       if (response.ok) {
         const data = await response.json();
+        if (!mountedRef.current) return;
         setConversations(data.conversations || []);
         setHistoryLoaded(true);
       } else {
         console.error('[ChatInterface] Failed to fetch chat history, status:', response.status);
-        const errorText = await response.text();
+        const errorText = await response.text().catch(() => '<unreadable body>');
         console.error('[ChatInterface] Error response:', errorText);
       }
     } catch (error) {
       console.error('[ChatInterface] Error fetching chat history:', error);
     } finally {
-      setLoadingHistory(false);
+      if (mountedRef.current) setLoadingHistory(false);
     }
   };
 
@@ -650,13 +867,28 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       const timeoutId = setTimeout(() => {
         const tabsKey = storageKey('tabs');
         const activeKey = storageKey('active-tab-id');
-        if (tabsKey) localStorage.setItem(tabsKey, JSON.stringify(tabs));
-        if (activeKey) localStorage.setItem(activeKey, activeTabId);
+        if (tabsKey) safeStorage.set(tabsKey, JSON.stringify(tabs));
+        if (activeKey) safeStorage.set(activeKey, activeTabId);
       }, 500); // Debounce 500ms
 
       return () => clearTimeout(timeoutId);
     }
   }, [tabs, activeTabId, storageKeyPrefix]);
+
+  // Draft persistence: a half-typed message survives tab switches AND panel
+  // close/reopen (the popup unmounts this whole tree on close — losing the
+  // draft was the single most jarring data loss in the widget). Debounced;
+  // an empty input removes the key so abandoned tabs don't accrete junk.
+  useEffect(() => {
+    if (isInitializing) return; // never persist the pre-restore empty state
+    const key = draftKey(activeTabId);
+    if (!key) return;
+    const timeoutId = setTimeout(() => {
+      if (input) safeSession.set(key, input);
+      else safeSession.remove(key);
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [input, activeTabId, storageKeyPrefix, isInitializing]);
 
   // Tab Persistence: restore tabs from localStorage. Runs once PER REAL SCOPE.
   // If identity (agent, user) isn't known at mount, we provisionally start a
@@ -665,10 +897,24 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   useEffect(() => {
     if (hasInitialized.current) return;
 
+    // A host-pinned conversation (the public `conversationId` prop — the
+    // ChatInterface `id`) wins over restored tabs: the widget opens ON that
+    // conversation, whether or not it exists server-side yet (a brand-new id
+    // 404s in loadConversation and starts from the initialMessages seed).
+    // Restored tabs would silently override the host's explicit navigation
+    // intent. Both props were previously accepted-but-ignored.
+    if (id) {
+      setTabs([{ id, title: 'Chat', isActive: true }]);
+      activateTab(id);
+      setInitialTabCreated(true);
+      hasInitialized.current = true;
+      return;
+    }
+
     const startCleanTab = () => {
       const initialTabId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setTabs([{ id: initialTabId, title: 'New Chat', isActive: true }]);
-      setActiveTabId(initialTabId);
+      activateTab(initialTabId);
       setInitialTabCreated(true);
       setIsInitializing(false);
     };
@@ -681,18 +927,41 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     const loadInitialTabs = () => {
-      const savedTabs = localStorage.getItem(`chat-${storageKeyPrefix}-tabs`);
-      const savedActiveTabId = localStorage.getItem(`chat-${storageKeyPrefix}-active-tab-id`);
+      const savedTabs = safeStorage.get(`chat-${storageKeyPrefix}-tabs`);
+      const savedActiveTabId = safeStorage.get(`chat-${storageKeyPrefix}-active-tab-id`);
 
       if (savedTabs && savedTabs !== '[]') {
         // Restore saved tabs. Don't flip isInitializing yet — the
         // separate message-load effect below owns that, so the empty
         // state stays gated until we know whether there are messages
         // to render.
-        const parsedTabs = JSON.parse(savedTabs);
-        setTabs(parsedTabs);
-        const activeId = savedActiveTabId || parsedTabs[0]?.id;
-        setActiveTabId(activeId);
+        //
+        // Trust NOTHING about the stored shape. JSON.parse succeeding does
+        // not mean the value is a tab array: a corrupted write, another
+        // script sharing the key, or a legacy widget version's schema would
+        // all parse fine and then crash tabs.map() at render. Keep only
+        // structurally-valid entries, drop unknown fields, and recompute
+        // isActive from the restored active id (stored flags can be stale).
+        const parsed: unknown = JSON.parse(savedTabs);
+        const validTabs = (Array.isArray(parsed) ? parsed : []).filter(
+          (t): t is { id: string; title: string } =>
+            !!t &&
+            typeof (t as { id?: unknown }).id === 'string' &&
+            ((t as { id: string }).id.length > 0) &&
+            typeof (t as { title?: unknown }).title === 'string'
+        );
+        if (validTabs.length === 0) {
+          startCleanTab();
+          return;
+        }
+        // The stored active id must point at a restored tab — a stale or
+        // foreign value would key useChat to a tab that doesn't exist.
+        const activeId =
+          savedActiveTabId && validTabs.some((t) => t.id === savedActiveTabId)
+            ? savedActiveTabId
+            : validTabs[0].id;
+        setTabs(validTabs.map((t) => ({ id: t.id, title: t.title, isActive: t.id === activeId })));
+        activateTab(activeId);
         setInitialTabCreated(true);
       } else if (tabs.length === 0) {
         // Clean start (no saved tabs) — create one empty tab and finish.
@@ -703,14 +972,23 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     try {
       loadInitialTabs();
     } catch (err) {
-      // localStorage parse failure or similar — never leave the widget
-      // stuck on the loader; fall back to a clean state.
+      // Corrupted stored JSON or similar — never leave the widget stuck on
+      // the loader OR tabless. The previous version of this catch logged
+      // "falling back to a clean state" without actually creating one,
+      // leaving zero tabs and useChat keyed to nothing.
       console.error('[chat-widget] init failed, falling back to clean start:', err);
-      setIsInitializing(false);
+      try {
+        startCleanTab();
+      } catch {
+        setIsInitializing(false);
+      }
     }
     // Only lock initialization once a REAL scope has been processed.
     hasInitialized.current = true;
-  }, [storageKeyPrefix]); // Re-run when identity arrives (null → real)
+    // Re-run when identity arrives (null → real). `id` is captured for lint
+    // completeness; the hasInitialized lock makes later changes no-ops (the
+    // prop is initial-only by contract).
+  }, [storageKeyPrefix, id]);
 
   // Load messages for active tab when identity is fully resolved.
   const hasLoadedInitialMessages = useRef(false);
@@ -720,8 +998,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Wait for a complete (agent, user) identity before consuming the one-shot
     // guard. Otherwise, if agentId arrives AFTER userId, the provisional
     // null-phase clean tab would consume this ref and the restored tab (swapped
-    // in once the real prefix lands) would render with no messages.
-    if (!storageKeyPrefix) return;
+    // in once the real prefix lands) would render with no messages. A
+    // host-pinned conversation is exempt: there is no restore to wait for, and
+    // pinned hosts may legitimately run without an agentId (no persistence).
+    if (!storageKeyPrefix && !id) return;
     if (!activeTabId) return; // Wait for activeTabId to be set
 
     // Load the conversation messages, then flip isInitializing false. This
@@ -735,7 +1015,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setIsInitializing(false);
       }
     })();
-  }, [config?.userId, activeTabId, storageKeyPrefix]);
+  }, [config?.userId, activeTabId, storageKeyPrefix, id]);
 
   // Handle state updates when active tab changes
   // Messages are loaded in switchToTab function, not here
@@ -744,7 +1024,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     if (activeTabId && tabs.length > 0 && activeTabId !== lastSyncedTabId.current) {
       lastSyncedTabId.current = activeTabId;
-      setInput('');
+      // Restore this tab's saved draft instead of unconditionally wiping the
+      // composer — switching tabs used to destroy a half-typed message.
+      const key = draftKey(activeTabId);
+      setInput((key && safeSession.get(key)) || '');
     }
   }, [activeTabId, isInitializing, tabs.length]); // Only depend on activeTabId
 
@@ -835,6 +1118,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Stable regenerate handler so the memoized list / MessageItem don't see a
   // new function reference each render.
   const handleRegenerate = useCallback(() => {
+    // Defense in depth: the regenerate button only renders when the turn is
+    // done, but this callback is also handed to renderers that could invoke
+    // it at any time. Starting a second turn while one is streaming is the
+    // same contamination class as an un-aborted tab switch. (The error
+    // banner's retry path is separate and intentionally allows status
+    // 'error'.) Reads the live mirror, not the render-time status, because
+    // this callback is memoised.
+    if (statusRef.current !== 'ready') return;
     regenerate?.();
   }, [regenerate]);
 
@@ -874,10 +1165,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           conversationId={activeTabId}
           feedbackApiBase={config?.apiBase}
           feedbackHeaders={feedbackHeaders}
+          feedbackCredentials={config?.requestCredentials}
           onFeedback={config?.onFeedback}
         />
       )),
-    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.onFeedback],
+    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
   );
 
   // Follow-up chips (#134): after an assistant turn settles, derive up to
@@ -938,6 +1230,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         return;
       }
 
+      // Opening a conversation from history is an activation like any other —
+      // abort any stream still writing into the current chat instance first.
+      stopIfStreaming();
+
       // Create a new tab with the loaded conversation metadata
       const newTab: ChatTab = {
         id: selectedConversationId,
@@ -954,7 +1250,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         return [...updatedTabs, newTab];
       });
 
-      setActiveTabId(selectedConversationId);
+      activateTab(selectedConversationId);
 
       // Load messages using centralized function
       await loadConversation(selectedConversationId);
@@ -1012,12 +1308,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-divider))]">
       <div className="flex flex-col h-full w-full overflow-hidden relative chat-widget-container">
         {/* Header Section with Tabs */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b backdrop-blur-sm relative z-20" style={{
+        {/* backdrop-blur removed: the header is a flex sibling of the scroll
+            area, nothing ever renders behind it — the blur was dead CSS
+            implying a frosted effect that never happened. */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b relative z-20" style={{
           borderColor: 'var(--chat-divider)',
           backgroundColor: 'hsl(var(--chat-background))'
         }}>
           {/* Tabs Container with Scroll */}
-          <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide py-0.5 scroll-smooth">
+          <div
+            className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide py-0.5 scroll-smooth"
+            role="tablist"
+            aria-label="Conversations"
+          >
             {/* Apple-style Tab Pills */}
             {tabs.map((tab, index) => (
               <div
@@ -1045,31 +1348,46 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                   e.stopPropagation();
                   switchToTab(tab.id);
                 }}
+                // Keyboard operability: these pills were click-only <div>s —
+                // a keyboard user could not switch conversations at all.
+                role="tab"
+                aria-selected={tab.isActive}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    switchToTab(tab.id);
+                  }
+                }}
               >
                 {/* Tab Title */}
                 <span className="truncate max-w-28 text-[13px] font-medium transition-colors">
                   {tab.title}
                 </span>
 
-                {/* Close Button */}
+                {/* Close Button. Two rules learned the hard way:
+                    (1) while hidden it must be pointer-events-none — an
+                    invisible-but-tappable X swallowed touch taps meant to
+                    ACTIVATE the tab (touch has no hover to reveal it);
+                    (2) keyboard focus isn't blocked by pointer-events, and
+                    focus-visible re-reveals + re-enables it, so it stays
+                    keyboard-closable. Hover reveal rides the pill's `group`. */}
                 {tabs.length > 1 && (
                   <button
+                    type="button"
+                    aria-label={`Close ${tab.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeTab(tab.id);
                     }}
-                    className="rounded-lg p-1 transition-all duration-150 flex-shrink-0 -mr-1"
-                    style={{
-                      opacity: tab.isActive ? 0.6 : 0
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = '1';
-                      e.currentTarget.style.backgroundColor = 'hsl(var(--chat-surface-hover))';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = tab.isActive ? '0.6' : '0';
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
+                    className={cn(
+                      'rounded-lg p-1 transition-all duration-150 flex-shrink-0 -mr-1',
+                      'hover:bg-[hsl(var(--chat-surface-hover))]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]',
+                      tab.isActive
+                        ? 'opacity-60 hover:opacity-100 focus-visible:opacity-100'
+                        : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto'
+                    )}
                   >
                     <XIcon className="h-3 w-3" strokeWidth={2.5} />
                   </button>
@@ -1188,9 +1506,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                       {groupedConversations.map(([groupName, groupConversations]) => (
                         <div key={groupName} className="mb-0.5">
                           {/* Group Header */}
+                          {/* Sticky group header DOES overlay the scrolling
+                              list — a translucent background makes the
+                              backdrop blur real (it was inert behind an
+                              opaque fill). */}
                           <div className="px-2.5 py-1 sticky top-0 backdrop-blur-sm z-10" style={{
-                            backgroundColor: 'hsl(var(--chat-background))'
+                            backgroundColor: 'hsl(var(--chat-background) / 0.85)'
                           }}>
+
                             <h3 className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'hsl(var(--chat-text-muted))' }}>{groupName}</h3>
                           </div>
 
@@ -1316,9 +1639,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         </Conversation>
 
         <div className="px-5 pb-5">
-          {/* Upload Error Display */}
+          {/* Upload Error Display — themed via the semantic danger token
+              (raw red-* utilities keyed to the OS dark: variant clashed with
+              custom themes and disagreed with ChatErrorBanner below). */}
           {uploadError && (
-            <div className="mb-3 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200/60 dark:border-red-800/60 rounded-2xl text-sm text-red-700 dark:text-red-400 shadow-sm">
+            <div
+              role="alert"
+              className="mb-3 px-4 py-3 rounded-2xl text-sm shadow-sm"
+              style={{
+                backgroundColor: 'hsl(var(--chat-danger) / 0.08)',
+                border: '1px solid hsl(var(--chat-danger) / 0.25)',
+                color: 'hsl(var(--chat-danger))',
+              }}
+            >
               {uploadError}
             </div>
           )}

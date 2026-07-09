@@ -69,6 +69,9 @@ export function useSmoothText(target: string, enabled: boolean): string {
   const lastTargetLenRef = useRef(target.length);
   const lastTimeRef = useRef(0);
   const shownFracRef = useRef(target.length); // fractional reveal cursor
+  // The target string as of the last tick/setup, used to detect identity
+  // changes (see the invariant check inside `tick` below).
+  const prevTargetRef = useRef(target);
 
   targetRef.current = target;
 
@@ -81,6 +84,7 @@ export function useSmoothText(target: string, enabled: boolean): string {
       shownLenRef.current = target.length;
       shownFracRef.current = target.length;
       lastTargetLenRef.current = target.length;
+      prevTargetRef.current = target;
       setDisplayed(target);
       return;
     }
@@ -93,9 +97,34 @@ export function useSmoothText(target: string, enabled: boolean): string {
     rateRef.current = 0;
     lastTargetLenRef.current = target.length;
     lastTimeRef.current = 0;
+    prevTargetRef.current = target;
 
     const tick = (now: number) => {
       const full = targetRef.current;
+
+      // IDENTITY CHECK: reset whenever the target is not a pure append to
+      // what we've already revealed — streaming only ever appends. A shrink
+      // is one case of "not an append" and is already handled above at
+      // effect-setup time, but this hook instance can also be recycled for a
+      // DIFFERENT, LONGER message between ticks (e.g. a stable-keyed row
+      // reused by the parent) without the effect itself re-running. In that
+      // case the new target never shrank, so the setup-time check above
+      // can't catch it — without this, the longer target would reveal
+      // starting from the stale cursor and flash the wrong prefix. Compare
+      // against the previously shown prefix (not the full previous target)
+      // so a genuine append — where `full` extends what we've revealed so
+      // far but happens to diverge from `prevTargetRef` further out, e.g.
+      // trailing edits behind the reveal cursor — is not mistaken for a
+      // swap.
+      const prevTarget = prevTargetRef.current;
+      if (full !== prevTarget) {
+        const shownPrefix = prevTarget.slice(0, Math.min(shownLenRef.current, prevTarget.length));
+        if (!full.startsWith(shownPrefix)) {
+          shownLenRef.current = 0;
+          shownFracRef.current = 0;
+        }
+        prevTargetRef.current = full;
+      }
 
       // dt since last frame (ms). First frame seeds time and bails.
       if (lastTimeRef.current === 0) {

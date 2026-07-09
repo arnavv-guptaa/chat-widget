@@ -15,6 +15,16 @@ export interface ChatWidgetConfig {
   userId: string;
 
   /**
+   * `credentials` mode for every request the widget makes (chat stream,
+   * history, uploads, feedback). Defaults to the platform default
+   * (`same-origin`). Set `'include'` when the widget calls a CROSS-ORIGIN
+   * `apiBase` whose `getUserId` reads a session cookie — and pair it with
+   * the handler's `cors: { allowOrigins: […], allowCredentials: true }`,
+   * since credentialed CORS requires both ends to opt in.
+   */
+  requestCredentials?: RequestCredentials;
+
+  /**
    * AI Model configuration
    */
   model?: string;

@@ -11,7 +11,7 @@
  * earlier ones unless the consumer overrides via `alwaysVisible`.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
   CopyIcon,
@@ -50,6 +50,8 @@ export interface MessageActionsProps {
   /** Headers mirroring the chat transport (`X-User-Id` + host extras) for the
    *  best-effort feedback POST. */
   feedbackHeaders?: Record<string, string>;
+  /** Credentials mode mirroring the chat transport (cross-origin cookie auth). */
+  feedbackCredentials?: RequestCredentials;
   /** Host callback fired on every submission (fires even with no network). */
   onFeedback?: (feedback: FeedbackEvent) => void;
 }
@@ -65,6 +67,7 @@ export function MessageActions({
   conversationId,
   feedbackApiBase,
   feedbackHeaders,
+  feedbackCredentials,
   onFeedback,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
@@ -77,12 +80,23 @@ export function MessageActions({
   // Drives the polite sr-only confirmation after a submission lands.
   const [submitted, setSubmitted] = useState(false);
 
+  // Timer id for the "copied" flash, so a rapid re-copy (or unmount) can
+  // clear the pending reset instead of leaking it.
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   const handleCopy = async () => {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // Browsers without clipboard access — silently no-op.
     }
@@ -100,7 +114,7 @@ export function MessageActions({
       messageId,
       rating: r,
       reason: trimmedReason,
-    });
+    }, feedbackCredentials);
     // Always fire the host callback so BYO / headless hosts still get the event.
     onFeedback?.({ messageId, conversationId, rating: r, reason: trimmedReason });
     setSubmitted(true);
