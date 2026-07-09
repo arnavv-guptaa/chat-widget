@@ -106,7 +106,10 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
         const safeImageSrc = isImage ? safeUrl(attachment.url) : undefined;
         if (isImage && safeImageSrc) {
           return (
-            <div key={index} className="group relative h-14 w-14 rounded-lg">
+            <div
+              key={`${attachment.url ?? attachment.filename ?? "att"}-${index}`}
+              className="group relative h-14 w-14 rounded-lg"
+            >
               <img
                 src={safeImageSrc}
                 alt={attachment.filename}
@@ -119,7 +122,7 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
         const { Icon, label } = describeFile(attachment);
         return (
           <button
-            key={index}
+            key={`${attachment.url ?? attachment.filename ?? "att"}-${index}`}
             type="button"
             onClick={() => openAttachment(attachment)}
             className={cn(
