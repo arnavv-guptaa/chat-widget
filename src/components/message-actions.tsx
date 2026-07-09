@@ -50,6 +50,8 @@ export interface MessageActionsProps {
   /** Headers mirroring the chat transport (`X-User-Id` + host extras) for the
    *  best-effort feedback POST. */
   feedbackHeaders?: Record<string, string>;
+  /** Credentials mode mirroring the chat transport (cross-origin cookie auth). */
+  feedbackCredentials?: RequestCredentials;
   /** Host callback fired on every submission (fires even with no network). */
   onFeedback?: (feedback: FeedbackEvent) => void;
 }
@@ -65,6 +67,7 @@ export function MessageActions({
   conversationId,
   feedbackApiBase,
   feedbackHeaders,
+  feedbackCredentials,
   onFeedback,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
@@ -111,7 +114,7 @@ export function MessageActions({
       messageId,
       rating: r,
       reason: trimmedReason,
-    });
+    }, feedbackCredentials);
     // Always fire the host callback so BYO / headless hosts still get the event.
     onFeedback?.({ messageId, conversationId, rating: r, reason: trimmedReason });
     setSubmitted(true);

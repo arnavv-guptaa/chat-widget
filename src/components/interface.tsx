@@ -331,6 +331,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // its unsaved draft model/system-prompt for an owner-authed preview).
         ...(config?.extraHeaders ?? {}),
       },
+      // Cookie mode for cross-origin apiBase deployments whose getUserId
+      // reads a session cookie (see ChatWidgetConfig.requestCredentials).
+      credentials: config?.requestCredentials,
       // Attach first-class per-turn context (#162) to the request body. Read
       // from a ref so the latest context is sent without re-creating the chat.
       // When `context` is undefined it serialises away — zero overhead.
@@ -455,7 +458,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 'X-User-Id': config?.userId || '',
                 ...(config?.extraHeaders ?? {}),
               },
-              body: formData
+              body: formData,
+              credentials: config?.requestCredentials
             });
 
             if (!uploadResponse.ok) {
@@ -572,7 +576,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // cache regardless of response-header handling.
       const response = await fetch(
         `${apiBase}/history/${encodeURIComponent(conversationId)}?userId=${encodeURIComponent(config.userId)}&limit=${HISTORY_PAGE_SIZE}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', credentials: config?.requestCredentials },
       );
       if (!isCurrent()) return;
       if (response.ok) {
@@ -629,7 +633,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       const res = await fetch(
         `${apiBase}/history/${encodeURIComponent(activeTabId)}?userId=${encodeURIComponent(config.userId)}` +
           `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', credentials: config?.requestCredentials },
       );
       if (!res.ok || !isCurrent()) return;
       const data = await res.json();
@@ -818,7 +822,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     try {
       const response = await fetch(
         `${apiBase}/history?userId=${encodeURIComponent(config.userId)}`,
-        { cache: 'no-store' },
+        { cache: 'no-store', credentials: config?.requestCredentials },
       );
 
       if (response.ok) {
@@ -1158,10 +1162,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           conversationId={activeTabId}
           feedbackApiBase={config?.apiBase}
           feedbackHeaders={feedbackHeaders}
+          feedbackCredentials={config?.requestCredentials}
           onFeedback={config?.onFeedback}
         />
       )),
-    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.onFeedback],
+    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
   );
 
   // Follow-up chips (#134): after an assistant turn settles, derive up to

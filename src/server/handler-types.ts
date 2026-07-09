@@ -142,6 +142,14 @@ export interface UploadPolicy {
   maxBytes?: number;
 }
 
+/** See `CreateChatHandlerOptions.cors`. */
+export interface CorsPolicy {
+  /** Exact allowed origins (`https://docs.example.com`), or `'*'` for any. */
+  allowOrigins: string[];
+  /** Emit `Access-Control-Allow-Credentials: true` (cookie-based getUserId). */
+  allowCredentials?: boolean;
+}
+
 /**
  * Knowledge (RAG) retrieval config. Omit the whole `retrieval` option to disable
  * retrieval (default = off). When present, the handler resolves the namespaces
@@ -473,6 +481,28 @@ export interface CreateChatHandlerOptions {
 
   /** Server-side upload policy (types + size). See `UploadPolicy`. */
   upload?: UploadPolicy;
+
+  /**
+   * Opt-in CORS for cross-origin embeds — the script-tag embed (or any
+   * widget) calling this handler from ANOTHER origin, e.g. the widget on
+   * docs.example.com with `apiBase` pointing at app.example.com. The widget
+   * sends `X-User-Id` (a custom header), so every cross-origin request
+   * triggers a preflight; without this option the handler never answers it
+   * and every cross-origin embed fails silently in the console.
+   *
+   * Off by default on purpose: same-origin apps need nothing, and reflecting
+   * arbitrary origins unasked would be a security hole. `allowOrigins` are
+   * exact origin matches (`scheme://host[:port]`), or the literal `'*'` for
+   * any origin. `allowCredentials` additionally allows cookies — needed only
+   * when `getUserId` reads a session cookie cross-origin (pair it with the
+   * widget's `requestCredentials: 'include'`); with `'*'` + credentials the
+   * concrete request origin is reflected, since the spec forbids a literal
+   * `*` on credentialed responses.
+   *
+   * Remember to export the new method from your route file:
+   * `export const { GET, POST, DELETE, OPTIONS } = createChatHandler({…})`.
+   */
+  cors?: CorsPolicy;
 
   /**
    * How many of the most-recent messages to send to the model (sliding

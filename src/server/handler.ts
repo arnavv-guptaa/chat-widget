@@ -183,6 +183,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     logErrors = true,
     stopWhen,
     upload,
+    cors,
     maxRequestBytes = DEFAULT_MAX_REQUEST_BYTES,
     streamTimeoutMs,
     retrieval,
@@ -992,7 +993,69 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   }
 
   // ── Dispatch ───────────────────────────────────────────────────────────────
+  // ── CORS (opt-in; see CreateChatHandlerOptions.cors) ──────────────────────
+
+  /** The Allow-Origin value for this request, or null when CORS doesn't apply. */
+  function corsOriginFor(request: Request): string | null {
+    if (!cors) return null;
+    const origin = request.headers.get('origin');
+    if (!origin) return null;
+    if (cors.allowOrigins.includes('*')) {
+      // The spec forbids the literal '*' on credentialed responses — reflect
+      // the concrete origin instead when credentials are on.
+      return cors.allowCredentials ? origin : '*';
+    }
+    return cors.allowOrigins.includes(origin) ? origin : null;
+  }
+
+  /**
+   * Stamp CORS headers onto a response. Only runs when `cors` is configured;
+   * `Vary: Origin` is always appended in that case so no shared cache ever
+   * reuses one origin's response for another (allowed or not).
+   */
+  function applyCors(request: Request, response: Response, preflight = false): Response {
+    if (!cors) return response;
+    response.headers.append('Vary', 'Origin');
+    const allowOrigin = corsOriginFor(request);
+    if (!allowOrigin) return response;
+    response.headers.set('Access-Control-Allow-Origin', allowOrigin);
+    if (cors.allowCredentials) {
+      response.headers.set('Access-Control-Allow-Credentials', 'true');
+    }
+    if (preflight) {
+      response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      // Reflect whatever the browser asked to send (covers X-User-Id plus any
+      // host extraHeaders) rather than maintaining a hardcoded list.
+      const requested = request.headers.get('access-control-request-headers');
+      response.headers.set(
+        'Access-Control-Allow-Headers',
+        requested || 'Content-Type, X-User-Id',
+      );
+      response.headers.set('Access-Control-Max-Age', '86400');
+    }
+    return response;
+  }
+
+  /**
+   * Preflight endpoint. The widget's X-User-Id header makes EVERY cross-origin
+   * call preflight, so a cross-origin embed is only usable when the route file
+   * exports this (`export const { GET, POST, DELETE, OPTIONS } = …`). Without
+   * a configured `cors` (or for a disallowed origin) it answers 204 with no
+   * CORS headers — the browser then fails the request exactly as it does
+   * today, and same-origin traffic never sends OPTIONS at all.
+   */
+  async function preflight(request: Request): Promise<Response> {
+    return applyCors(request, new Response(null, { status: 204 }), true);
+  }
+
   async function dispatch(request: Request): Promise<Response> {
+    const response = await dispatchInner(request);
+    // Actual (non-preflight) responses need Allow-Origin too — a passed
+    // preflight only permits the request; each response must still opt in.
+    return applyCors(request, response);
+  }
+
+  async function dispatchInner(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const segments = subSegments(url);
     const method = request.method.toUpperCase();
@@ -1046,11 +1109,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   }
 
   // Next.js App Router expects named method exports. We point them all at the
-  // same dispatcher so one catch-all route file mounts everything.
+  // same dispatcher so one catch-all route file mounts everything. OPTIONS is
+  // additive (existing routes that don't re-export it behave exactly as
+  // before); it exists for cross-origin embeds — see the `cors` option.
   return {
     GET: dispatch,
     POST: dispatch,
     DELETE: dispatch,
+    OPTIONS: preflight,
   };
 }
 

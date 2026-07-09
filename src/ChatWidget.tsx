@@ -92,6 +92,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   agentId,
   apiBase,
   extraHeaders,
+  requestCredentials,
   widgetId,
   conversationId,
   initialMessages,
@@ -485,6 +486,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     userId,
     apiBase: apiBase ?? '/api/chat',
     extraHeaders: stableExtraHeaders,
+    requestCredentials,
     model,
     systemPrompt,
     temperature,
@@ -501,7 +503,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     followUps,
     feedback,
     onFeedback,
-  }), [userId, apiBase, stableExtraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
+  }), [userId, apiBase, stableExtraHeaders, requestCredentials, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
 
   // Default launcher position respects iOS safe areas (home indicator /
   // rounded corners) — a fixed 24px bottom put the FAB under the home

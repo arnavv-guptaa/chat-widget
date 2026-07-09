@@ -45,6 +45,8 @@ interface MessageItemProps {
   conversationId?: string;
   feedbackApiBase?: string;
   feedbackHeaders?: Record<string, string>;
+  /** Credentials mode mirroring the chat transport (cross-origin cookie auth). */
+  feedbackCredentials?: RequestCredentials;
   onFeedback?: (feedback: FeedbackEvent) => void;
 }
 
@@ -54,7 +56,7 @@ function sourceTitle(part: SourceUrlPart): string {
   return part.title || part.url;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, onFeedback }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, feedbackCredentials, onFeedback }: MessageItemProps) {
   const sourceParts = useMemo(
     () => (message.parts?.filter((part) => part.type === 'source-url') ?? []) as SourceUrlPart[],
     [message.parts],
@@ -173,6 +175,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
           conversationId={conversationId}
           feedbackApiBase={feedbackApiBase}
           feedbackHeaders={feedbackHeaders}
+          feedbackCredentials={feedbackCredentials}
           onFeedback={onFeedback}
         />
       )}

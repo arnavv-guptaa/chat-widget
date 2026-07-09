@@ -57,6 +57,7 @@ export async function submitFeedback(
   base: string | undefined,
   headers: Record<string, string> | undefined,
   body: FeedbackSubmission,
+  credentials?: RequestCredentials,
 ): Promise<boolean> {
   // Not hosted / no base URL → rely solely on the host `onFeedback` callback.
   // Trim so an accidental whitespace-only base is treated as absent.
@@ -74,6 +75,9 @@ export async function submitFeedback(
         ...(headers ?? {}),
         'Content-Type': 'application/json',
       },
+      // Same credentials mode as every other widget request (cross-origin
+      // cookie-auth deployments; see ChatWidgetConfig.requestCredentials).
+      credentials,
       body: JSON.stringify({
         conversationId: body.conversationId,
         messageId: body.messageId,
