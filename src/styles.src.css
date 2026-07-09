@@ -858,6 +858,20 @@
   border-left: 1px solid var(--chat-divider);
   background-color: hsl(var(--chat-background));
   animation: chat-slide-in-right 0.3s ease-out forwards;
+  /* Keep the composer above the iOS home indicator (and clear of rounded
+     corners in landscape). Zero everywhere env() is unsupported/irrelevant. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Exit choreography: ChatWidget keeps the panel mounted with
+   data-closing="true" until this animation ends (with a JS timer safety net),
+   so closing mirrors the entrance instead of vanishing in one frame. The
+   panel is inert while it leaves. Reduced-motion skips the closing state in
+   JS entirely (and the block below force-disables animation as belt and
+   braces). */
+.chat-widget-container.chat-widget-popup[data-closing="true"] {
+  animation: chat-slide-out-right 0.24s ease-in forwards;
+  pointer-events: none;
 }
 
 /* ============================================
@@ -895,7 +909,9 @@
   transition: none;
 }
 
-/* Resize handle */
+/* Resize handle. touch-action: none is REQUIRED for the Pointer Events drag —
+   without it the browser claims vertical touch moves for scrolling and
+   cancels the pointer stream mid-drag. */
 .chat-widget-container .chat-widget-resize-handle {
   position: absolute;
   left: 0;
@@ -906,11 +922,19 @@
   background: transparent;
   transition: background-color 0.2s ease;
   z-index: 10;
+  touch-action: none;
 }
 
 .chat-widget-container .chat-widget-resize-handle:hover,
 .chat-widget-container .chat-widget-resize-handle:active {
   background-color: hsl(var(--chat-primary) / 0.2);
+}
+
+/* The handle is keyboard-operable (role=separator + arrow keys) — it needs a
+   visible focus affordance like every other interactive element. */
+.chat-widget-container .chat-widget-resize-handle:focus-visible {
+  outline: none;
+  background-color: hsl(var(--chat-primary) / 0.35);
 }
 
 /* ============================================
