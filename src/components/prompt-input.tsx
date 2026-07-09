@@ -604,7 +604,9 @@ export const PromptInput = ({
           // the styles.src.css `.chat-widget-container form ...` rules so
           // there's a single token (--chat-border) controlling both.
           // No utility classes for border colour here.
-          "w-full overflow-hidden rounded-xl bg-background transition-colors",
+          // bg-transparent: the surrounding .chat-prompt-box pill provides the
+          // single composer fill (--chat-surface); a bg here re-split the pill.
+          "w-full overflow-hidden rounded-xl bg-transparent transition-colors",
           "[&:focus-within]:shadow-none [&:focus]:shadow-none shadow-none",
           className
         )}

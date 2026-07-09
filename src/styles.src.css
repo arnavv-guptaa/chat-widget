@@ -479,8 +479,12 @@
   box-shadow: var(--chat-shadow-md);
 }
 
+/* Transparent: the composer pill (.chat-prompt-box, --chat-surface) is the
+   ONE fill behind the whole composer. Painting --chat-background here split
+   the pill into two visibly different zones once surface moved to the 0.05
+   stop (pre-consolidation surface-deep was 0.02 — the mismatch just hid). */
 .chat-widget-container textarea {
-  background-color: hsl(var(--chat-background));
+  background-color: transparent;
   color: hsl(var(--chat-text));
 }
 
