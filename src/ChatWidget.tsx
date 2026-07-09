@@ -294,7 +294,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // dialog) already claimed the keypress via preventDefault.
   const handlePanelKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) {
+      // isComposing: an IME user pressing Escape is cancelling their
+      // composition, not the panel.
+      if (e.key === 'Escape' && !e.defaultPrevented && !e.nativeEvent.isComposing) {
         e.stopPropagation();
         setIsOpen(false);
       }

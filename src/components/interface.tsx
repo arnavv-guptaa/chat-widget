@@ -985,7 +985,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
     // Only lock initialization once a REAL scope has been processed.
     hasInitialized.current = true;
-  }, [storageKeyPrefix]); // Re-run when identity arrives (null → real)
+    // Re-run when identity arrives (null → real). `id` is captured for lint
+    // completeness; the hasInitialized lock makes later changes no-ops (the
+    // prop is initial-only by contract).
+  }, [storageKeyPrefix, id]);
 
   // Load messages for active tab when identity is fully resolved.
   const hasLoadedInitialMessages = useRef(false);
