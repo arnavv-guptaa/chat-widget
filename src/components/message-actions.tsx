@@ -11,7 +11,7 @@
  * earlier ones unless the consumer overrides via `alwaysVisible`.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
   CopyIcon,
@@ -77,12 +77,23 @@ export function MessageActions({
   // Drives the polite sr-only confirmation after a submission lands.
   const [submitted, setSubmitted] = useState(false);
 
+  // Timer id for the "copied" flash, so a rapid re-copy (or unmount) can
+  // clear the pending reset instead of leaking it.
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   const handleCopy = async () => {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // Browsers without clipboard access — silently no-op.
     }

@@ -313,6 +313,32 @@ export const PromptInput = ({
   const anchorRef = useRef<HTMLSpanElement>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
 
+  // Mirror of `items` for the unmount-only cleanup below, so that effect can
+  // stay `[]`-deps (run once) while still seeing the latest attachment list
+  // when the component actually unmounts.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  // `remove` and `clear` revoke the blob: URLs they create, but neither one
+  // fires if the widget itself unmounts (e.g. the host tears down the chat
+  // panel) while attachments are still staged — those object URLs would
+  // otherwise leak for the life of the document. Revoke whatever's left on
+  // unmount, guarded to blob: URLs only (server-hosted/data: URLs aren't ours
+  // to revoke).
+  useEffect(() => {
+    return () => {
+      for (const file of itemsRef.current) {
+        if (file.url?.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(file.url);
+          } catch {
+            // Already revoked / invalid — nothing to do.
+          }
+        }
+      }
+    };
+  }, []);
+
   // Find nearest form to scope drag & drop
   useEffect(() => {
     const root = anchorRef.current?.closest("form");
