@@ -6,6 +6,10 @@
  * values so user typos can never produce broken CSS.
  */
 export function hexToHslTriplet(value: string): string | null {
+  // Guard non-string input (e.g. a partial theme object with a missing color):
+  // the contract is "return null for anything not a valid hex", and a crash on
+  // `undefined.trim()` would break the whole widget render.
+  if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   const match = /^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.exec(trimmed);
   if (!match) return null;

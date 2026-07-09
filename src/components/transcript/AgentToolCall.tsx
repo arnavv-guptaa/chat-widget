@@ -108,7 +108,13 @@ function AgentToolCallImpl({
             : undefined
         }
       >
-        <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
+        {/* While running, the shimmering text alone signals "in progress" — no
+            leading spinner. The status icon still renders for terminal/actionable
+            states (done check, error cross, approval clock) where a glyph carries
+            meaning the text can't. */}
+        {!isPending && (
+          <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
+        )}
 
         <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
           {isPending ? (

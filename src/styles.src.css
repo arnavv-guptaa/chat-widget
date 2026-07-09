@@ -412,8 +412,13 @@
    FORM & INPUT ELEMENTS
    ============================================ */
 
+/* Send button = the brand accent (--chat-primary), so it matches the Stop
+   button shown mid-stream (which is primary) and honors a themed primaryColor.
+   Previously this used --chat-text, which looked fine only because the default
+   text/primary are both near-black — but a themed primaryColor made send (dark)
+   and stop (brand) diverge. */
 .chat-widget-container button[type="submit"] {
-  background-color: hsl(var(--chat-text));
+  background-color: hsl(var(--chat-primary));
   color: hsl(var(--chat-background));
   border-radius: 12px;
   border: 1px solid var(--chat-divider);
