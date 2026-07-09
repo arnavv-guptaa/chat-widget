@@ -6,6 +6,15 @@
  * upstream holds the request — and the connection-pool slot / serverless compute
  * behind it — open until the platform kills it, which on a chat turn means a
  * wedged reply. `withFetchTimeout` bounds every call with a wall-clock deadline.
+ *
+ * It also defaults every request to `cache: 'no-store'`. These clients run
+ * inside Next.js route handlers, whose patched `fetch` caches GETs by default —
+ * keyed on URL ONLY, so a per-user header like `X-Chat-User` does not vary the
+ * cache key. Left uncorrected, that means one user's hosted-backend response
+ * (their conversation list, their config) can be served straight to another
+ * user, and a since-updated history can be served stale. Per-user data must
+ * never enter that cache, so the wrapper opts every wrapped call out of it;
+ * callers that legitimately want caching can still override via `init`.
  */
 
 import 'server-only';
@@ -37,9 +46,9 @@ export function withFetchTimeout(fetchImpl: typeof fetch, timeoutMs: number): ty
       else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
     }
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    return Promise.resolve(fetchImpl(input, { ...init, signal: controller.signal })).finally(() =>
-      clearTimeout(timer),
-    );
+    return Promise.resolve(
+      fetchImpl(input, { cache: 'no-store', ...init, signal: controller.signal }),
+    ).finally(() => clearTimeout(timer));
   };
   return wrapped as typeof fetch;
 }

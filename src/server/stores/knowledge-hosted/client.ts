@@ -73,7 +73,11 @@ class HostedKnowledgeRetriever implements Retriever {
   async query(input: string, opts: QueryOptions = {}): Promise<RetrievedChunk[]> {
     const res = await this.doFetch(`${this.base}/v1/knowledge/query`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
       body: JSON.stringify({
         agentId: this.agentId,
         query: input,

@@ -85,6 +85,7 @@ class HostedChatStore implements ChatStore {
     const h: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       'X-Chat-User': this.userId,
+      Accept: 'application/json',
     };
     if (json) h['Content-Type'] = 'application/json';
     return h;
@@ -97,16 +98,19 @@ class HostedChatStore implements ChatStore {
   async listConversations(): Promise<StoredConversation[]> {
     const res = await this.req('/conversations', { headers: this.headers() });
     if (!res.ok) return [];
-    const data = (await res.json()) as { conversations?: any[] };
-    return (data.conversations ?? []).map(normaliseConversation);
+    // A 200 with an empty/HTML body (proxy, WAF, maintenance page) must not
+    // throw and 500 the whole turn — fall through to the same soft-fail as !res.ok.
+    const data = (await res.json().catch(() => null)) as { conversations?: any[] } | null;
+    return (data?.conversations ?? []).map(normaliseConversation);
   }
 
   async getConversation(id: string): Promise<StoredConversation | null> {
     const res = await this.req(`/conversations/${encodeURIComponent(id)}`, { headers: this.headers() });
     if (res.status === 404) return null;
     if (!res.ok) return null;
-    const data = (await res.json()) as { conversation?: any };
-    return data.conversation ? normaliseConversation(data.conversation) : null;
+    // See listConversations: a malformed 200 body must not throw.
+    const data = (await res.json().catch(() => null)) as { conversation?: any } | null;
+    return data?.conversation ? normaliseConversation(data.conversation) : null;
   }
 
   async ensureConversation(id: string): Promise<StoredConversation> {
@@ -146,8 +150,9 @@ class HostedChatStore implements ChatStore {
   async listMessages(conversationId: string, _opts?: ListMessagesOptions): Promise<StoredMessage[]> {
     const res = await this.req(`/conversations/${encodeURIComponent(conversationId)}`, { headers: this.headers() });
     if (!res.ok) return [];
-    const data = (await res.json()) as { messages?: any[] };
-    return (data.messages ?? []).map(normaliseMessage);
+    // See listConversations: a malformed 200 body must not throw.
+    const data = (await res.json().catch(() => null)) as { messages?: any[] } | null;
+    return (data?.messages ?? []).map(normaliseMessage);
   }
 
   async saveTurn(input: SaveTurnInput): Promise<void> {
@@ -195,7 +200,11 @@ class HostedStorageAdapter implements StorageAdapter {
       body: form,
     });
     if (!res.ok) throw new Error(`[chat-widget] hosted upload failed: ${res.status}`);
-    const r = (await res.json()) as UploadResult;
+    // A 200 with an empty/HTML body (proxy, WAF, maintenance page) currently
+    // throws uncaught and 500s the whole turn — guard it, and on a malformed
+    // body fail the same way the !res.ok branch above does.
+    const r = (await res.json().catch(() => null)) as UploadResult | null;
+    if (!r) throw new Error(`[chat-widget] hosted upload failed: malformed response body`);
     return r;
   }
 
@@ -208,8 +217,9 @@ class HostedStorageAdapter implements StorageAdapter {
       body: JSON.stringify({ storagePath }),
     });
     if (!res.ok) return null;
-    const r = (await res.json()) as { url?: string };
-    return r.url ?? null;
+    // Malformed body → same soft-fail as !res.ok.
+    const r = (await res.json().catch(() => null)) as { url?: string } | null;
+    return r?.url ?? null;
   }
 
   async remove(storagePath: string): Promise<void> {
@@ -258,12 +268,23 @@ export function createHostedConfig(options: HostedOptions) {
   const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   const apiKey = options.apiKey;
   const CONFIG_TTL_MS = 60_000;
-
-  let cached: { value: HostedAgentConfig | null; at: number } | null = null;
+  // The GET sends `X-Chat-User: ctx.userId`, so a single keyless cache slot
+  // would serve the FIRST caller's config to every user for the TTL (and
+  // multiple agents sharing one apiKey would collapse into that one slot).
+  // Key per userId instead. Evicted lazily on read; if the map somehow grows
+  // past a sane bound (many distinct users hitting an un-recycled process),
+  // clear it rather than let it grow unbounded — simplest possible cap.
+  const cache = new Map<string, { value: HostedAgentConfig | null; at: number }>();
+  const MAX_CACHE_ENTRIES = 200;
 
   return async (ctx: ChatRequestContext): Promise<HostedAgentConfig | null> => {
+    const key = ctx.userId ?? '';
     const now = Date.now();
-    if (cached && now - cached.at < CONFIG_TTL_MS) return cached.value;
+    const entry = cache.get(key);
+    if (entry) {
+      if (now - entry.at < CONFIG_TTL_MS) return entry.value;
+      cache.delete(key);
+    }
 
     try {
       const res = await fetchImpl(`${baseUrl}/v1/config`, {
@@ -271,10 +292,16 @@ export function createHostedConfig(options: HostedOptions) {
         headers: { Authorization: `Bearer ${apiKey}`, 'X-Chat-User': ctx.userId },
       });
       if (!res.ok) {
-        cached = { value: null, at: now };
+        cache.set(key, { value: null, at: now });
         return null;
       }
-      const raw = (await res.json()) as HostedAgentConfig;
+      // A 200 with an empty/HTML body (proxy, WAF, maintenance page) must not
+      // throw and 500 the whole turn — fall through to the same soft-fail null.
+      const raw = (await res.json().catch(() => null)) as HostedAgentConfig | null;
+      if (!raw) {
+        cache.set(key, { value: null, at: now });
+        return null;
+      }
       const value: HostedAgentConfig = {
         model: raw.model ?? null,
         systemPrompt: raw.systemPrompt ?? null,
@@ -286,10 +313,11 @@ export function createHostedConfig(options: HostedOptions) {
         // fetcher's normalisation or the dashboard switch is silently dead.
         compression: raw.compression ?? null,
       };
-      cached = { value, at: now };
+      if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
+      cache.set(key, { value, at: now });
       return value;
     } catch {
-      cached = { value: null, at: now };
+      cache.set(key, { value: null, at: now });
       return null;
     }
   };

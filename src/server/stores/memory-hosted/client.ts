@@ -59,6 +59,7 @@ class HostedMemoryAdapter implements MemoryAdapter {
     const h: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       'X-Chat-User': this.userId,
+      Accept: 'application/json',
     };
     if (json) h['Content-Type'] = 'application/json';
     return h;
