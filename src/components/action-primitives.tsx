@@ -55,7 +55,7 @@ export function ActionButton({
       className={cn(
         'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)] disabled:pointer-events-none disabled:opacity-50',
         variant === 'primary' && 'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))] hover:opacity-90',
-        variant === 'secondary' && 'border-[var(--chat-divider)] bg-[hsl(var(--chat-surface-deep))] text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-surface-hover))]',
+        variant === 'secondary' && 'border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-hover-bg))]',
         variant === 'ghost' && 'border-transparent bg-transparent text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-text)/0.06)] hover:text-[hsl(var(--chat-text))]',
         className,
       )}
@@ -101,8 +101,8 @@ export interface EntityCardProps extends ComponentProps<'article'> {
 export function EntityCard({ item, onAction, className, ...props }: EntityCardProps) {
   return (
     <article
-      className={cn('not-prose overflow-hidden rounded-2xl border bg-[hsl(var(--chat-surface-deep))]', className)}
-      style={{ borderColor: 'var(--chat-divider)' }}
+      className={cn('not-prose overflow-hidden rounded-2xl border bg-[hsl(var(--chat-surface))]', className)}
+      style={{ borderColor: 'hsl(var(--chat-border))' }}
       {...props}
     >
       {item.imageUrl && safeUrl(item.imageUrl) && (
@@ -115,7 +115,7 @@ export function EntityCard({ item, onAction, className, ...props }: EntityCardPr
             {item.subtitle && <p className="mt-0.5 text-[12px] text-[hsl(var(--chat-text-muted))]">{item.subtitle}</p>}
           </div>
           {(item.price || item.badge) && (
-            <span className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--chat-text))]" style={{ borderColor: 'var(--chat-divider)' }}>
+            <span className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--chat-text))]" style={{ borderColor: 'hsl(var(--chat-border))' }}>
               {item.price ?? item.badge}
             </span>
           )}
@@ -145,8 +145,8 @@ export function EntityCard({ item, onAction, className, ...props }: EntityCardPr
                     href={safeHref}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-surface-hover))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
-                    style={{ borderColor: 'var(--chat-divider)' }}
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
+                    style={{ borderColor: 'hsl(var(--chat-border))' }}
                   >
                     {entityAction.label}
                     <ExternalLinkIcon className="size-3" aria-hidden="true" />
@@ -227,8 +227,8 @@ export function ActionForm({
 
   return (
     <form
-      className={cn('not-prose space-y-3 rounded-2xl border bg-[hsl(var(--chat-surface-deep))] p-3 shadow-sm', className)}
-      style={{ borderColor: 'var(--chat-divider)' }}
+      className={cn('not-prose space-y-3 rounded-2xl border bg-[hsl(var(--chat-surface))] p-3 shadow-sm', className)}
+      style={{ borderColor: 'hsl(var(--chat-border))' }}
       onSubmit={onSubmit}
       {...props}
     >
@@ -248,7 +248,7 @@ export function ActionForm({
             defaultValue: field.defaultValue,
             className:
               'min-h-9 rounded-lg border bg-[hsl(var(--chat-background))] px-2.5 py-1.5 text-[13px] text-[hsl(var(--chat-text))] placeholder:text-[hsl(var(--chat-text-subtle))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]',
-            style: { borderColor: 'var(--chat-divider)' },
+            style: { borderColor: 'hsl(var(--chat-border))' },
           };
           return (
             <label key={field.name} className="grid gap-1 text-[12px] font-medium text-[hsl(var(--chat-text))]" htmlFor={field.name}>
@@ -276,7 +276,7 @@ export interface SummaryCardProps extends ComponentProps<'section'> {
 
 export function SummaryCard({ title, description, rows, action, onAction, actionLabel, className, ...props }: SummaryCardProps) {
   return (
-    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface-deep))] p-3', className)} style={{ borderColor: 'var(--chat-divider)' }} {...props}>
+    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
       <div className="flex items-start gap-2">
         <CheckCircle2 className="mt-0.5 size-4 text-[hsl(var(--chat-primary))]" aria-hidden="true" />
         <div className="min-w-0 flex-1 space-y-2">
@@ -323,7 +323,7 @@ export function ConfirmationCard({
   ...props
 }: ConfirmationCardProps) {
   return (
-    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface-deep))] p-3', className)} style={{ borderColor: 'var(--chat-divider)' }} {...props}>
+    <section className={cn('not-prose rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
       <div className="flex gap-2">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[hsl(var(--chat-primary))]" aria-hidden="true" />
         <div className="min-w-0 flex-1 space-y-3">
@@ -338,8 +338,8 @@ export function ConfirmationCard({
             <button
               type="button"
               onClick={onCancel}
-              className="inline-flex min-h-8 items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-surface-hover))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
-              style={{ borderColor: 'var(--chat-divider)' }}
+              className="inline-flex min-h-8 items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]"
+              style={{ borderColor: 'hsl(var(--chat-border))' }}
             >
               {cancelLabel}
             </button>
@@ -356,7 +356,7 @@ export interface StatusTrackerProps extends ComponentProps<'ol'> {
 
 export function StatusTracker({ steps, className, ...props }: StatusTrackerProps) {
   return (
-    <ol className={cn('not-prose grid gap-2 rounded-2xl border bg-[hsl(var(--chat-surface-deep))] p-3', className)} style={{ borderColor: 'var(--chat-divider)' }} {...props}>
+    <ol className={cn('not-prose grid gap-2 rounded-2xl border bg-[hsl(var(--chat-surface))] p-3', className)} style={{ borderColor: 'hsl(var(--chat-border))' }} {...props}>
       {steps.map((step) => (
         <li key={step.id} className="flex gap-2">
           <span
@@ -365,7 +365,7 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
               step.status === 'complete' && 'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))]',
               step.status === 'current' && 'border-[hsl(var(--chat-primary))] text-[hsl(var(--chat-primary))]',
               step.status === 'error' && 'border-red-500 text-red-500',
-              (!step.status || step.status === 'pending') && 'border-[var(--chat-divider)] text-[hsl(var(--chat-text-muted))]',
+              (!step.status || step.status === 'pending') && 'border-[hsl(var(--chat-border))] text-[hsl(var(--chat-text-muted))]',
             )}
             aria-hidden="true"
           >

@@ -366,16 +366,18 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
         return `${(lerp(0, hueDelta, f) + bg.h + 360) % 360} ${lerp(bg.s, text.s, f)}% ${l}%`;
       };
 
+      // Consolidated neutral set: one background, one raised/inset fill, one
+      // hover state, one hairline. The old 0.02/0.035/0.05 surface triplets
+      // and the divider/border twins were imperceptibly close (≤1.3% L apart)
+      // — six names for three distinguishable colors. Every surviving pair is
+      // now ≥4% L apart, and all tokens are raw HSL triplets (consumed inside
+      // hsl(...)), no full-color exceptions.
       styles['--chat-background'] = tone(0);
-      styles['--chat-surface-deep'] = structuralTone(0.02, 1.5); // composer / deep fills
-      styles['--chat-muted'] = structuralTone(0.035, 2.5);
-      styles['--chat-surface'] = structuralTone(0.05, 3.5);
-      styles['--chat-hover-bg'] = `hsl(${structuralTone(0.06, 4)})`;
-      styles['--chat-divider'] = `hsl(${structuralTone(0.1, 6)})`;
-      styles['--chat-border'] = structuralTone(0.12, 7);
-      styles['--chat-surface-hover'] = structuralTone(0.12, 7);
+      styles['--chat-surface'] = structuralTone(0.05, 3.5); // cards, composer, fills
+      styles['--chat-hover-bg'] = structuralTone(0.1, 6); // the one hover state
+      styles['--chat-border'] = structuralTone(0.12, 7); // hairlines + input borders
       styles['--chat-text-subtle'] = tone(0.42); // placeholder / disabled
-      styles['--chat-text-muted'] = tone(0.64); // icons / secondary text
+      styles['--chat-text-muted'] = tone(0.75); // icons / secondary text — close to text, still clearly secondary
       styles['--chat-text-strong'] = tone(0.88);
       styles['--chat-text'] = tone(1);
       styles['--chat-primary'] = primaryTriplet;

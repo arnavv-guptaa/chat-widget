@@ -39,7 +39,7 @@ export function ActionResultCard({
   return (
     <div
       className={cn('not-prose my-2 w-full overflow-hidden rounded-2xl border', className)}
-      style={{ borderColor: 'var(--chat-divider)', backgroundColor: 'hsl(var(--chat-surface-deep))' }}
+      style={{ borderColor: 'hsl(var(--chat-border))', backgroundColor: 'hsl(var(--chat-surface))' }}
       role="status"
     >
       <div className="flex items-start gap-3 px-3 py-3">
@@ -61,7 +61,7 @@ export function ActionResultCard({
             </span>
             <span
               className="rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
-              style={{ borderColor: 'var(--chat-divider)', color: 'hsl(var(--chat-text-muted))' }}
+              style={{ borderColor: 'hsl(var(--chat-border))', color: 'hsl(var(--chat-text-muted))' }}
             >
               {s.label}
             </span>

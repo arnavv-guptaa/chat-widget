@@ -602,7 +602,7 @@ export const PromptInput = ({
         className={cn(
           // The form border + horizontal divider colour both come from
           // the styles.src.css `.chat-widget-container form ...` rules so
-          // there's a single token (--chat-divider) controlling both.
+          // there's a single token (--chat-border) controlling both.
           // No utility classes for border colour here.
           "w-full overflow-hidden rounded-xl bg-background transition-colors",
           "[&:focus-within]:shadow-none [&:focus]:shadow-none shadow-none",

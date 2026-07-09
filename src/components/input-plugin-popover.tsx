@@ -276,9 +276,9 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
       onMouseDown={(e) => e.preventDefault()}
       style={{
         width: "96%",
-        borderTop: "1px solid var(--chat-divider)",
-        borderLeft: "1px solid var(--chat-divider)",
-        borderRight: "1px solid var(--chat-divider)",
+        borderTop: "1px solid hsl(var(--chat-border))",
+        borderLeft: "1px solid hsl(var(--chat-border))",
+        borderRight: "1px solid hsl(var(--chat-border))",
         // Pull down 1px so our bottom edge overlaps the form's top
         // border, removing the visible seam between the two surfaces.
         marginBottom: -1,
@@ -289,7 +289,7 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
           className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide"
           style={{
             color: "hsl(var(--chat-text)/0.5)",
-            borderBottom: "1px solid var(--chat-divider)",
+            borderBottom: "1px solid hsl(var(--chat-border))",
           }}
         >
           {plugin.heading}
@@ -358,7 +358,7 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
                 {idx < items.length - 1 && (
                   <div
                     className="h-px mx-3"
-                    style={{ backgroundColor: "var(--chat-divider)" }}
+                    style={{ backgroundColor: "hsl(var(--chat-border))" }}
                   />
                 )}
               </div>

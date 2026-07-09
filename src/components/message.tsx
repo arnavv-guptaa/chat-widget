@@ -44,7 +44,7 @@ const messageContentVariants = cva(
         ],
         surface: [
           "rounded-2xl border px-4 py-3 shadow-sm",
-          "border-[var(--chat-divider)] bg-[hsl(var(--chat-surface)/0.64)]",
+          "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.64)]",
           "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-br-lg",
           "group-[.is-assistant]:max-w-full group-[.is-assistant]:rounded-bl-lg",
         ],

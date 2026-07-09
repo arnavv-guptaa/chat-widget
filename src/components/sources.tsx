@@ -32,8 +32,8 @@ export const SourcesTrigger = ({
   <CollapsibleTrigger
     className={cn(
       "group/source-trigger inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-      "border-[var(--chat-divider)] bg-[hsl(var(--chat-surface)/0.72)] text-[hsl(var(--chat-text-muted))]",
-      "hover:bg-[hsl(var(--chat-surface-hover)/0.58)] hover:text-[hsl(var(--chat-text))]",
+      "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.72)] text-[hsl(var(--chat-text-muted))]",
+      "hover:bg-[hsl(var(--chat-hover-bg)/0.58)] hover:text-[hsl(var(--chat-text))]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]",
       className
     )}
@@ -112,7 +112,7 @@ export const Source = ({ href, title, children, index, className, ...props }: So
     <>
       <span
         className="flex size-7 shrink-0 items-center justify-center rounded-lg border text-[11px] font-semibold"
-        style={{ borderColor: "var(--chat-divider)", backgroundColor: "hsl(var(--chat-surface))", color: "hsl(var(--chat-text-muted))" }}
+        style={{ borderColor: "hsl(var(--chat-border))", backgroundColor: "hsl(var(--chat-surface))", color: "hsl(var(--chat-text-muted))" }}
         aria-hidden="true"
       >
         {typeof index === "number" ? index + 1 : <FileTextIcon className="size-3.5" />}
@@ -136,7 +136,7 @@ export const Source = ({ href, title, children, index, className, ...props }: So
       <span
         className={cn(
           "flex w-full min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2",
-          "border-[var(--chat-divider)] bg-[hsl(var(--chat-surface)/0.52)]",
+          "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.52)]",
           className
         )}
       >
@@ -149,8 +149,8 @@ export const Source = ({ href, title, children, index, className, ...props }: So
     <a
       className={cn(
         "flex w-full min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2 transition-colors",
-        "border-[var(--chat-divider)] bg-[hsl(var(--chat-surface)/0.52)]",
-        "hover:bg-[hsl(var(--chat-surface-hover)/0.48)]",
+        "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.52)]",
+        "hover:bg-[hsl(var(--chat-hover-bg)/0.48)]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]",
         className
       )}

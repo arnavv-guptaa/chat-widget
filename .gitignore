@@ -24,3 +24,8 @@ npm-debug.log*
 
 # npm auth (NEVER commit)
 .npmrc
+
+# tokensave code-graph index (machine-local; Tailwind v4 auto source detection
+# scans any non-gitignored file, and this DB holds old source text — leaving it
+# unignored resurrected deleted utility classes in dist/styles.css)
+.tokensave/

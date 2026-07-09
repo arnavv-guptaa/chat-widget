@@ -88,7 +88,7 @@ function AgentToolCallImpl({
         className={cn(
           'flex items-center gap-2 rounded-md px-2 py-1 -mx-2 transition-colors',
           hasDetail &&
-            'cursor-pointer hover:bg-[var(--chat-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]',
+            'cursor-pointer hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]',
         )}
         style={HOVER}
         // Only the rows that actually expand a payload are interactive — expose

@@ -27,7 +27,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
     // `group` is required so the ToolHeader chevron's
     // `group-data-[state=open]:rotate-180` resolves against this collapsible
     // root — without it the expand/collapse caret never rotated.
-    className={cn("group not-prose w-full rounded-md border border-[var(--chat-divider)]", className)}
+    className={cn("group not-prose w-full rounded-md border border-[hsl(var(--chat-border))]", className)}
     {...props}
   />
 );

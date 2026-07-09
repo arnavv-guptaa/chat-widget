@@ -63,7 +63,7 @@ function AgentThinkingToolImpl({ text, turn, isStreaming }: AgentThinkingToolPro
             setIsExpanded((v) => !v);
           }
         }}
-        className="group/think flex items-center gap-2 rounded-md px-2 py-1 -mx-2 cursor-pointer transition-colors hover:bg-[var(--chat-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]"
+        className="group/think flex items-center gap-2 rounded-md px-2 py-1 -mx-2 cursor-pointer transition-colors hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]"
       >
         <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
           {isPending ? (

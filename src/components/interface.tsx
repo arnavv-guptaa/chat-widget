@@ -1314,14 +1314,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const planningVerb = pickPlanningVerb(lastUserMessageId);
 
   return (
-    <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-divider))]">
+    <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-border))]">
       <div className="flex flex-col h-full w-full overflow-hidden relative chat-widget-container">
         {/* Header Section with Tabs */}
         {/* backdrop-blur removed: the header is a flex sibling of the scroll
             area, nothing ever renders behind it — the blur was dead CSS
             implying a frosted effect that never happened. */}
         <div className="flex items-center gap-2 px-3 py-2 border-b relative z-20" style={{
-          borderColor: 'var(--chat-divider)',
+          borderColor: 'hsl(var(--chat-border))',
           backgroundColor: 'hsl(var(--chat-background))'
         }}>
           {/* Tabs Container with Scroll */}
@@ -1345,7 +1345,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 }}
                 onMouseEnter={(e) => {
                   if (!tab.isActive) {
-                    e.currentTarget.style.backgroundColor = 'var(--chat-hover-bg)';
+                    e.currentTarget.style.backgroundColor = 'hsl(var(--chat-hover-bg))';
                   }
                 }}
                 onMouseLeave={(e) => {
@@ -1391,7 +1391,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                     }}
                     className={cn(
                       'rounded-lg p-1 transition-all duration-150 flex-shrink-0 -mr-1',
-                      'hover:bg-[hsl(var(--chat-surface-hover))]',
+                      'hover:bg-[hsl(var(--chat-hover-bg))]',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]',
                       tab.isActive
                         ? 'opacity-60 hover:opacity-100 focus-visible:opacity-100'
@@ -1461,11 +1461,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             {showHistory && (
               <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl shadow-[var(--chat-shadow-md)] z-50 animate-in fade-in slide-in-from-top-1 duration-150 overflow-hidden" style={{
                 backgroundColor: 'hsl(var(--chat-background))',
-                border: `1px solid ${'var(--chat-divider)'}`
+                border: `1px solid ${'hsl(var(--chat-border))'}`
               }}>
                 {/* Search Header */}
                 <div className="p-2.5 border-b" style={{
-                  borderColor: 'var(--chat-divider)',
+                  borderColor: 'hsl(var(--chat-border))',
                   backgroundColor: 'var(--chat-overlay)'
                 }}>
                   <div className="relative">
@@ -1476,8 +1476,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="w-full h-7 px-2.5 text-[13px] rounded-lg focus:outline-none transition-all"
                       style={{
-                        backgroundColor: 'hsl(var(--chat-surface-deep))',
-                        border: `1px solid ${'var(--chat-divider)'}`,
+                        backgroundColor: 'hsl(var(--chat-surface))',
+                        border: `1px solid ${'hsl(var(--chat-border))'}`,
                         color: 'hsl(var(--chat-text))'
                       }}
                     />
@@ -1541,7 +1541,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                                   }}
                                   onMouseEnter={(e) => {
                                     if (!isActiveConversation) {
-                                      e.currentTarget.style.backgroundColor = 'var(--chat-hover-bg)';
+                                      e.currentTarget.style.backgroundColor = 'hsl(var(--chat-hover-bg))';
                                     }
                                   }}
                                   onMouseLeave={(e) => {

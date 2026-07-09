@@ -43,7 +43,7 @@ export function ChatErrorBanner({
       className="flex items-start gap-2 px-3 py-2 mb-2 rounded-lg text-[13px]"
       style={{
         backgroundColor: "hsl(var(--chat-text)/0.04)",
-        border: "1px solid var(--chat-divider)",
+        border: "1px solid hsl(var(--chat-border))",
       }}
       title={error.message}
     >

@@ -112,7 +112,7 @@ export const CodeBlock = ({
     <CodeBlockContext.Provider value={{ code }}>
       <div
         className={cn(
-          "relative w-full overflow-hidden rounded-lg bg-[hsl(var(--chat-text)/0.03)] border border-[var(--chat-divider)]",
+          "relative w-full overflow-hidden rounded-lg bg-[hsl(var(--chat-text)/0.03)] border border-[hsl(var(--chat-border))]",
           className
         )}
         {...props}

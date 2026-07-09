@@ -63,10 +63,10 @@ export function StarterMessages({
             onClick={() => onPromptSelect(prompt)}
           />
           {index < prompts.length - 1 && (
-            // 1px-tall element used as a divider — same --chat-divider token
+            // 1px-tall element used as a divider — same --chat-border token
             // every other separator in the widget uses, so consumers only
             // need to override one variable to recolour all of them.
-            <div className="h-px mx-3" style={{ backgroundColor: 'var(--chat-divider)' }} />
+            <div className="h-px mx-3" style={{ backgroundColor: 'hsl(var(--chat-border))' }} />
           )}
         </div>
       ))}
