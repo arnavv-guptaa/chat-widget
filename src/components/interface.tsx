@@ -139,6 +139,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const storageKey = (key: string): string | null =>
     storageKeyPrefix ? `chat-${storageKeyPrefix}-${key}` : null;
 
+  // Base path for every widget request, normalised ONCE: a trailing slash on
+  // the configured apiBase (an easy config typo, especially for cross-origin
+  // embeds) would otherwise produce double-slash URLs (`…/api/chat//upload`)
+  // that literal-matching routers and proxies 404. feedback.ts already guards
+  // this on its own path — this brings the other five call sites in line.
+  // A bare '/' (root mount) strips to '' so `${apiBase}/history` stays a
+  // proper root-relative path instead of a scheme-relative '//history'.
+  const apiBase = String(config?.apiBase ?? '/api/chat').replace(/\/+$/, '');
+
   // Get theme mode from config (defaults to 'light')
 
   const [input, setInput] = useState('');
@@ -252,7 +261,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
-      api: `${config?.apiBase ?? '/api/chat'}`,
+      api: apiBase || '/',
       headers: {
         'X-User-Id': config?.userId || '',
         // Extra headers the host injects (e.g. the dashboard playground sends
@@ -322,6 +331,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [addToolApprovalResponse],
   );
 
+  // Synchronous in-flight latch for handleSubmit. `status` only flips to
+  // 'submitted' once sendMessage() runs — which, with attachments, is AFTER
+  // the entire upload round-trip. For that whole window `status` still reads
+  // 'ready', so a second Enter (or a starter-prompt double-click — they all
+  // funnel through handleSubmit) would start a parallel upload and a
+  // duplicate turn. A ref flips synchronously and closes the window.
+  const submittingRef = useRef(false);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // Ignore submits while a turn is in flight. The send button already swaps to
     // a Stop button when streaming, but pressing Enter bypasses the button and
@@ -329,7 +346,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // queue a second message (or several) mid-response. This is the single choke
     // point both Enter and the button funnel through, so guarding here covers
     // every submission path. To interrupt, the user uses the Stop button.
-    if (status === 'submitted' || status === 'streaming') {
+    if (submittingRef.current || status === 'submitted' || status === 'streaming') {
       return false;
     }
 
@@ -339,6 +356,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     if (!(hasText || hasAttachments)) {
       return false;
     }
+
+    submittingRef.current = true;
+    try {
 
     // Upload files to Supabase first if there are attachments
     let uploadedFiles: any[] = [];
@@ -351,24 +371,36 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             const response = await fetch(file.url);
             const blob = await response.blob();
             const fileObj = new File([blob], file.filename || 'unknown', { type: file.mediaType });
-            
+
             // Upload to our API
             const formData = new FormData();
             formData.append('file', fileObj);
             formData.append('conversationId', activeTabId || 'default');
-            formData.append('userId', config?.userId || 'demo-user');
+            // Informational only — the server derives identity from its
+            // verified getChatUserId, never from this field. (It used to
+            // fall back to a 'demo-user' literal, which read like a trust
+            // path that doesn't exist.)
+            formData.append('userId', config?.userId ?? '');
 
-            const uploadResponse = await fetch(`${config?.apiBase ?? '/api/chat'}/upload`, {
+            // Same identity/extra headers as the chat transport and feedback
+            // POSTs — uploads were the one call site sending none, silently
+            // bypassing hosts that read them (e.g. the dashboard playground's
+            // draft-preview headers).
+            const uploadResponse = await fetch(`${apiBase}/upload`, {
               method: 'POST',
+              headers: {
+                'X-User-Id': config?.userId || '',
+                ...(config?.extraHeaders ?? {}),
+              },
               body: formData
             });
-            
+
             if (!uploadResponse.ok) {
-              const errorText = await uploadResponse.text();
+              const errorText = await uploadResponse.text().catch(() => '<unreadable body>');
               console.error(`Upload failed for ${file.filename}:`, errorText);
               return null; // Return null for failed uploads
             }
-            
+
             const uploadResult = await uploadResponse.json();
             return {
               id: (file as any).id || 'unknown',
@@ -386,7 +418,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
         // Wait for all uploads to complete
         const results = await Promise.all(uploadPromises);
-        
+
         // Filter out null results (failed uploads)
         uploadedFiles = results.filter(result => result !== null);
 
@@ -412,7 +444,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setUploadError(errorMsg);
         console.error('Error in file upload process:', error);
         // Re-throw so PromptInput's submit handler preserves the attachments
-        // for retry instead of clearing them.
+        // for retry instead of clearing them. (The finally below still clears
+        // the in-flight latch on this path.)
         throw error instanceof Error ? error : new Error(errorMsg);
       }
     }
@@ -438,6 +471,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     setInput('');
     // StickToBottom handles scrolling automatically
+
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   // Attachment button component that uses the attachments context.
@@ -483,8 +520,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // Initial load: only the most-recent page. Older messages stream in as the
       // user scrolls up (loadOlderMessages), so a long conversation opens fast
       // and pinned to the bottom instead of pulling its whole history at once.
+      // conversationId/userId are free-form host-supplied strings (emails with
+      // '+', ids with '/', '#'…) — encode them or the URL truncates/mis-routes.
+      // The userId param is informational only (identity is server-verified);
+      // cache:'no-store' keeps one user's history out of any intermediary
+      // cache regardless of response-header handling.
       const response = await fetch(
-        `${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}&limit=${HISTORY_PAGE_SIZE}`,
+        `${apiBase}/history/${encodeURIComponent(conversationId)}?userId=${encodeURIComponent(config.userId)}&limit=${HISTORY_PAGE_SIZE}`,
+        { cache: 'no-store' },
       );
       if (!isCurrent()) return;
       if (response.ok) {
@@ -538,8 +581,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     try {
       const res = await fetch(
-        `${config.apiBase ?? '/api/chat'}/history/${activeTabId}?userId=${config.userId}` +
+        `${apiBase}/history/${encodeURIComponent(activeTabId)}?userId=${encodeURIComponent(config.userId)}` +
           `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+        { cache: 'no-store' },
       );
       if (!res.ok || !isCurrent()) return;
       const data = await res.json();
@@ -720,7 +764,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     setLoadingHistory(true);
     try {
-      const response = await fetch(`${config?.apiBase ?? '/api/chat'}/history?userId=${config.userId}`);
+      const response = await fetch(
+        `${apiBase}/history?userId=${encodeURIComponent(config.userId)}`,
+        { cache: 'no-store' },
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -728,7 +775,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setHistoryLoaded(true);
       } else {
         console.error('[ChatInterface] Failed to fetch chat history, status:', response.status);
-        const errorText = await response.text();
+        const errorText = await response.text().catch(() => '<unreadable body>');
         console.error('[ChatInterface] Error response:', errorText);
       }
     } catch (error) {
@@ -977,6 +1024,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Stable regenerate handler so the memoized list / MessageItem don't see a
   // new function reference each render.
   const handleRegenerate = useCallback(() => {
+    // Defense in depth: the regenerate button only renders when the turn is
+    // done, but this callback is also handed to renderers that could invoke
+    // it at any time. Starting a second turn while one is streaming is the
+    // same contamination class as an un-aborted tab switch. (The error
+    // banner's retry path is separate and intentionally allows status
+    // 'error'.) Reads the live mirror, not the render-time status, because
+    // this callback is memoised.
+    if (statusRef.current !== 'ready') return;
     regenerate?.();
   }, [regenerate]);
 
