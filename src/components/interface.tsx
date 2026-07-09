@@ -80,6 +80,51 @@ type Conversation = {
   metadata?: any;
 };
 
+/**
+ * localStorage access that can never throw. Safari private mode (historically
+ * a QuotaExceededError on ANY setItem), storage disabled by policy, a full
+ * origin quota, or SSR must all degrade to "no persistence" — never to a
+ * crashed widget inside someone else's app. Every other file already guards
+ * its storage access; interface.tsx was the lone gap and holds the most
+ * storage code, so the guard lives here as one helper instead of ad-hoc
+ * try/catch at nine call sites.
+ */
+const safeStorage = {
+  get(key: string): string | null {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      /* persistence is best-effort */
+    }
+  },
+  remove(key: string): void {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  },
+  keys(): string[] {
+    try {
+      const out: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k) out.push(k);
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  },
+};
+
 type ChatTab = {
   id: string;
   title: string;
@@ -596,12 +641,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const prev = prevPrefixRef.current;
     if (prev && prev !== storageKeyPrefix) {
       const stalePrefix = `chat-${prev}-`;
-      const toRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(stalePrefix)) toRemove.push(k);
-      }
-      toRemove.forEach((k) => localStorage.removeItem(k));
+      safeStorage
+        .keys()
+        .filter((k) => k.startsWith(stalePrefix))
+        .forEach((k) => safeStorage.remove(k));
     }
     prevPrefixRef.current = storageKeyPrefix;
   }, [storageKeyPrefix]);
@@ -660,11 +703,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Update localStorage immediately when tab is closed
     const tabsKey = storageKey('tabs');
     if (filteredTabs.length > 0 && tabsKey) {
-      localStorage.setItem(tabsKey, JSON.stringify(filteredTabs));
+      safeStorage.set(tabsKey, JSON.stringify(filteredTabs));
       if (tabId === activeTabId) {
         const newActiveTab = filteredTabs[0];
         const activeKey = storageKey('active-tab-id');
-        if (activeKey) localStorage.setItem(activeKey, newActiveTab.id);
+        if (activeKey) safeStorage.set(activeKey, newActiveTab.id);
       }
     }
   };
@@ -720,8 +763,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       const timeoutId = setTimeout(() => {
         const tabsKey = storageKey('tabs');
         const activeKey = storageKey('active-tab-id');
-        if (tabsKey) localStorage.setItem(tabsKey, JSON.stringify(tabs));
-        if (activeKey) localStorage.setItem(activeKey, activeTabId);
+        if (tabsKey) safeStorage.set(tabsKey, JSON.stringify(tabs));
+        if (activeKey) safeStorage.set(activeKey, activeTabId);
       }, 500); // Debounce 500ms
 
       return () => clearTimeout(timeoutId);
@@ -751,17 +794,40 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     const loadInitialTabs = () => {
-      const savedTabs = localStorage.getItem(`chat-${storageKeyPrefix}-tabs`);
-      const savedActiveTabId = localStorage.getItem(`chat-${storageKeyPrefix}-active-tab-id`);
+      const savedTabs = safeStorage.get(`chat-${storageKeyPrefix}-tabs`);
+      const savedActiveTabId = safeStorage.get(`chat-${storageKeyPrefix}-active-tab-id`);
 
       if (savedTabs && savedTabs !== '[]') {
         // Restore saved tabs. Don't flip isInitializing yet — the
         // separate message-load effect below owns that, so the empty
         // state stays gated until we know whether there are messages
         // to render.
-        const parsedTabs = JSON.parse(savedTabs);
-        setTabs(parsedTabs);
-        const activeId = savedActiveTabId || parsedTabs[0]?.id;
+        //
+        // Trust NOTHING about the stored shape. JSON.parse succeeding does
+        // not mean the value is a tab array: a corrupted write, another
+        // script sharing the key, or a legacy widget version's schema would
+        // all parse fine and then crash tabs.map() at render. Keep only
+        // structurally-valid entries, drop unknown fields, and recompute
+        // isActive from the restored active id (stored flags can be stale).
+        const parsed: unknown = JSON.parse(savedTabs);
+        const validTabs = (Array.isArray(parsed) ? parsed : []).filter(
+          (t): t is { id: string; title: string } =>
+            !!t &&
+            typeof (t as { id?: unknown }).id === 'string' &&
+            ((t as { id: string }).id.length > 0) &&
+            typeof (t as { title?: unknown }).title === 'string'
+        );
+        if (validTabs.length === 0) {
+          startCleanTab();
+          return;
+        }
+        // The stored active id must point at a restored tab — a stale or
+        // foreign value would key useChat to a tab that doesn't exist.
+        const activeId =
+          savedActiveTabId && validTabs.some((t) => t.id === savedActiveTabId)
+            ? savedActiveTabId
+            : validTabs[0].id;
+        setTabs(validTabs.map((t) => ({ id: t.id, title: t.title, isActive: t.id === activeId })));
         activateTab(activeId);
         setInitialTabCreated(true);
       } else if (tabs.length === 0) {
@@ -773,10 +839,16 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     try {
       loadInitialTabs();
     } catch (err) {
-      // localStorage parse failure or similar — never leave the widget
-      // stuck on the loader; fall back to a clean state.
+      // Corrupted stored JSON or similar — never leave the widget stuck on
+      // the loader OR tabless. The previous version of this catch logged
+      // "falling back to a clean state" without actually creating one,
+      // leaving zero tabs and useChat keyed to nothing.
       console.error('[chat-widget] init failed, falling back to clean start:', err);
-      setIsInitializing(false);
+      try {
+        startCleanTab();
+      } catch {
+        setIsInitializing(false);
+      }
     }
     // Only lock initialization once a REAL scope has been processed.
     hasInitialized.current = true;
