@@ -15,9 +15,9 @@ type StatusStyle = { Icon: ComponentType<{ className?: string; style?: object; s
 
 const STATUS_STYLES: Record<ActionResultStatus, StatusStyle> = {
   pending: { Icon: Loader2, color: 'hsl(var(--chat-text-subtle))', spin: true, label: 'Pending' },
-  success: { Icon: CheckCircle2, color: '#22c55e', spin: false, label: 'Done' },
-  partial: { Icon: AlertTriangle, color: '#f59e0b', spin: false, label: 'Partial' },
-  error: { Icon: XCircle, color: '#ef4444', spin: false, label: 'Failed' },
+  success: { Icon: CheckCircle2, color: 'hsl(var(--chat-success))', spin: false, label: 'Done' },
+  partial: { Icon: AlertTriangle, color: 'hsl(var(--chat-warning))', spin: false, label: 'Partial' },
+  error: { Icon: XCircle, color: 'hsl(var(--chat-danger))', spin: false, label: 'Failed' },
 };
 
 export interface ActionResultCardProps extends ActionResult {

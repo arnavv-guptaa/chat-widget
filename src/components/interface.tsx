@@ -1462,9 +1462,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         </Conversation>
 
         <div className="px-5 pb-5">
-          {/* Upload Error Display */}
+          {/* Upload Error Display — themed via the semantic danger token
+              (raw red-* utilities keyed to the OS dark: variant clashed with
+              custom themes and disagreed with ChatErrorBanner below). */}
           {uploadError && (
-            <div className="mb-3 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200/60 dark:border-red-800/60 rounded-2xl text-sm text-red-700 dark:text-red-400 shadow-sm">
+            <div
+              role="alert"
+              className="mb-3 px-4 py-3 rounded-2xl text-sm shadow-sm"
+              style={{
+                backgroundColor: 'hsl(var(--chat-danger) / 0.08)',
+                border: '1px solid hsl(var(--chat-danger) / 0.25)',
+                color: 'hsl(var(--chat-danger))',
+              }}
+            >
               {uploadError}
             </div>
           )}

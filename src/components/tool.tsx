@@ -63,10 +63,10 @@ const STATUS_LABELS: Record<ToolUIPart["state"], string> = {
 const STATUS_ICONS: Record<ToolUIPart["state"], ReactElement> = {
   "input-streaming": <CircleIcon className="size-4" />,
   "input-available": <ClockIcon className="size-4 animate-pulse" />,
-  "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
-  "output-error": <XCircleIcon className="size-4 text-red-600" />,
-  "approval-requested": <ClockIcon className="size-4 text-amber-600" />,
-  "approval-responded": <CheckCircleIcon className="size-4 text-amber-600" />,
+  "output-available": <CheckCircleIcon className="size-4 text-[hsl(var(--chat-success))]" />,
+  "output-error": <XCircleIcon className="size-4 text-[hsl(var(--chat-danger))]" />,
+  "approval-requested": <ClockIcon className="size-4 text-[hsl(var(--chat-warning))]" />,
+  "approval-responded": <CheckCircleIcon className="size-4 text-[hsl(var(--chat-warning))]" />,
   "output-denied": <XCircleIcon className="size-4 text-muted-foreground" />,
 };
 

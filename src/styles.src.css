@@ -111,6 +111,17 @@
   --chat-text-muted:  0 0% 45.1%;      /* light: #737373 — secondary text */
   --chat-text-subtle: 0 0% 63.9%;      /* light: #a3a3a3 — placeholder/disabled */
 
+  /* Semantic status colors — success / warning / danger (HSL triplets, like
+     every other color token; consume as hsl(var(--chat-success)) or with
+     alpha). ONE token set so tool-call status dots, action-result cards, and
+     error banners read consistently on every theme — previously three files
+     hardcoded three different greens, tuned only for one surface. Dark-tuned
+     variants live on .chat-dark below (status hues need more lightness to
+     read on dark surfaces). */
+  --chat-success: 142 76% 36%;         /* light: #16a34a */
+  --chat-warning: 32 95% 44%;          /* light: #d97706 */
+  --chat-danger:  0 72% 51%;           /* light: #dc2626 */
+
   /* Translucent overlays — full color values, not HSL triplets, since they
      bake in alpha on a fixed base. Use them directly: backgroundColor:
      'var(--chat-hover-bg)'. */
@@ -179,6 +190,11 @@
 .chat-widget-container.chat-dark:where(:not(.chat-widget-container *)) {
   --chat-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --chat-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+
+  /* Status hues need more lightness to read on dark surfaces. */
+  --chat-success: 142 69% 58%;         /* dark: #4ade80 */
+  --chat-warning: 43 96% 56%;          /* dark: #fbbf24 */
+  --chat-danger:  0 91% 71%;           /* dark: #f87171 */
 }
 
 /* ============================================
