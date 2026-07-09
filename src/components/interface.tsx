@@ -81,41 +81,42 @@ type Conversation = {
 };
 
 /**
- * localStorage access that can never throw. Safari private mode (historically
- * a QuotaExceededError on ANY setItem), storage disabled by policy, a full
+ * Storage access that can never throw. Safari private mode (historically a
+ * QuotaExceededError on ANY setItem), storage disabled by policy, a full
  * origin quota, or SSR must all degrade to "no persistence" — never to a
  * crashed widget inside someone else's app. Every other file already guards
  * its storage access; interface.tsx was the lone gap and holds the most
  * storage code, so the guard lives here as one helper instead of ad-hoc
- * try/catch at nine call sites.
+ * try/catch at every call site.
  */
-const safeStorage = {
+const makeSafeStorage = (resolve: () => Storage) => ({
   get(key: string): string | null {
     try {
-      return window.localStorage.getItem(key);
+      return resolve().getItem(key);
     } catch {
       return null;
     }
   },
   set(key: string, value: string): void {
     try {
-      window.localStorage.setItem(key, value);
+      resolve().setItem(key, value);
     } catch {
       /* persistence is best-effort */
     }
   },
   remove(key: string): void {
     try {
-      window.localStorage.removeItem(key);
+      resolve().removeItem(key);
     } catch {
       /* ignore */
     }
   },
   keys(): string[] {
     try {
+      const store = resolve();
       const out: string[] = [];
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const k = window.localStorage.key(i);
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
         if (k) out.push(k);
       }
       return out;
@@ -123,13 +124,49 @@ const safeStorage = {
       return [];
     }
   },
-};
+});
+
+const safeStorage = makeSafeStorage(() => window.localStorage);
+// Drafts live in sessionStorage on purpose: a half-typed message should
+// survive tab switches and panel close/reopen within the visit, but is not
+// worth carrying across browser sessions the way conversation tabs are.
+const safeSession = makeSafeStorage(() => window.sessionStorage);
 
 type ChatTab = {
   id: string;
   title: string;
   isActive: boolean;
 };
+
+/**
+ * Attachment button — compact ghost icon on the left of the prompt row, sized
+ * to match the send button (size-9) with a muted paperclip that doesn't
+ * compete with the text or the send action. Reads the attachments context.
+ *
+ * Hoisted to MODULE scope deliberately: it used to be defined inside
+ * ChatInterface's render, which makes React see a brand-new component type
+ * every render — unmounting and remounting the subtree each time (transient
+ * state/focus loss + wasted work). A component must never be defined inside
+ * another component's body.
+ */
+function AttachButton() {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      variant="ghost"
+      size="icon"
+      // Icon-only affordance: no hover background (the ghost circle looked
+      // odd next to the textarea), the icon just steps up the text ramp.
+      className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
+      aria-label="Attach files"
+      onClick={() => attachments.openFileDialog()}
+    >
+      {/* lucide's Paperclip runs bottom-left→top-right; rotate -45° to
+          stand it upright (vertical). */}
+      <PaperclipIcon className="size-4 -rotate-45" />
+    </PromptInputButton>
+  );
+}
 
 export default function ChatInterface({ id, initialMessages, config, onClose, headerActions }: { id?: string; initialMessages?: any[]; config?: any; onClose?: () => void; headerActions?: React.ReactNode } = {}) {
   // Storage key prefix is scoped to (agent, user). It is `null` when identity
@@ -147,6 +184,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // A bare '/' (root mount) strips to '' so `${apiBase}/history` stays a
   // proper root-relative path instead of a scheme-relative '//history'.
   const apiBase = String(config?.apiBase ?? '/api/chat').replace(/\/+$/, '');
+
+  // Per-tab composer drafts (sessionStorage — see safeSession above). Scoped
+  // exactly like every other persisted key; null when identity is incomplete,
+  // in which case drafts simply don't persist.
+  const draftKey = (tabId: string): string | null =>
+    storageKeyPrefix && tabId ? `chat-${storageKeyPrefix}-draft-${tabId}` : null;
 
   // Get theme mode from config (defaults to 'light')
 
@@ -249,6 +292,26 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Guards the tab-switch race (slow tab-A fetch resolving after tab B was
   // activated) without threading AbortControllers through every path.
   const loadGenRef = useRef(0);
+
+  // Mounted flag for async flows (uploads, history fetches) whose resolutions
+  // can outlive the component — e.g. the popup unmounts this whole tree on
+  // close while an upload is mid-flight. NOTE: (re)set in the effect BODY, not
+  // the ref initialiser — React 18 StrictMode runs mount → cleanup → mount,
+  // and an initialiser-only flag would stay false after the second mount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // `initialMessages` (public prop, previously accepted-but-ignored): the
+  // seed transcript for conversations that don't exist server-side yet — a
+  // welcome exchange, an SSR-prepared transcript. Captured ONCE by contract
+  // ("initial"); reacting to later mutations would fight the server as the
+  // source of truth once a conversation persists.
+  const initialMessagesRef = useRef<any[] | undefined>(initialMessages);
 
   // First-class per-turn context (#162). Held in a ref so the transport's
   // prepareSendMessagesRequest always reads the latest value without
@@ -470,34 +533,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     setInput('');
+    // The sent message is no longer a draft.
+    const sentDraftKey = draftKey(activeTabId);
+    if (sentDraftKey) safeSession.remove(sentDraftKey);
     // StickToBottom handles scrolling automatically
 
     } finally {
       submittingRef.current = false;
     }
-  };
-
-  // Attachment button component that uses the attachments context.
-  // Compact ghost icon button on the left of the prompt row — sized to match
-  // the send button (size-9) so the row reads as balanced, with a muted
-  // paperclip that doesn't compete with the text or the send action.
-  const AttachButton = () => {
-    const attachments = usePromptInputAttachments();
-    return (
-      <PromptInputButton
-        variant="ghost"
-        size="icon"
-        // Icon-only affordance: no hover background (the ghost circle looked
-        // odd next to the textarea), the icon just steps up the text ramp.
-        className="size-9 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        aria-label="Attach files"
-        onClick={() => attachments.openFileDialog()}
-      >
-        {/* lucide's Paperclip runs bottom-left→top-right; rotate -45° to
-            stand it upright (vertical). */}
-        <PaperclipIcon className="size-4 -rotate-45" />
-      </PromptInputButton>
-    );
   };
 
   // Centralized function to load a conversation's messages
@@ -514,7 +557,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // pagination cursor. Checked after EVERY await.
     const gen = ++loadGenRef.current;
     const isCurrent = () =>
-      gen === loadGenRef.current && conversationId === activeTabIdRef.current;
+      mountedRef.current &&
+      gen === loadGenRef.current &&
+      conversationId === activeTabIdRef.current;
 
     try {
       // Initial load: only the most-recent page. Older messages stream in as the
@@ -543,11 +588,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // committed, and isCurrent() above proves this tab is still active.
         setMessages(loadedMessages);
       } else if (response.status === 404) {
-        // Conversation doesn't exist yet - this is normal for new chats
-        // Clear messages for new chat
+        // Conversation doesn't exist yet - this is normal for new chats.
+        // Fresh conversations start from the host's initialMessages seed
+        // (usually undefined → empty).
         oldestTsRef.current = null;
         setHasMoreHistory(false);
-        setMessages([]);
+        setMessages(initialMessagesRef.current ?? []);
       } else {
         console.error('Error loading messages:', response.status, response.statusText);
       }
@@ -573,7 +619,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // correct move — prepending it would splice another conversation's
     // messages (and cursor) into the newly-active tab.
     const conversationId = activeTabId;
-    const isCurrent = () => conversationId === activeTabIdRef.current;
+    const isCurrent = () => mountedRef.current && conversationId === activeTabIdRef.current;
 
     const viewport = scrollViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight ?? 0;
@@ -669,7 +715,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     });
 
     activateTab(newTabId);
-    setMessages([]);
+    // New conversations start from the host's initialMessages seed (usually
+    // undefined → empty) — same as the 404 path in loadConversation.
+    setMessages(initialMessagesRef.current ?? []);
     setInput('');
   }, [initialTabCreated]);
 
@@ -725,6 +773,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const closeTab = (tabId: string) => {
     if (tabs.length <= 1) return; // Don't close the last tab
 
+    // A closed tab's draft goes with it.
+    const closedDraftKey = draftKey(tabId);
+    if (closedDraftKey) safeSession.remove(closedDraftKey);
+
     const filteredTabs = tabs.filter(tab => tab.id !== tabId);
 
     // If we're closing the active tab, switch to another tab
@@ -771,6 +823,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
       if (response.ok) {
         const data = await response.json();
+        if (!mountedRef.current) return;
         setConversations(data.conversations || []);
         setHistoryLoaded(true);
       } else {
@@ -781,7 +834,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     } catch (error) {
       console.error('[ChatInterface] Error fetching chat history:', error);
     } finally {
-      setLoadingHistory(false);
+      if (mountedRef.current) setLoadingHistory(false);
     }
   };
 
@@ -818,12 +871,41 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
   }, [tabs, activeTabId, storageKeyPrefix]);
 
+  // Draft persistence: a half-typed message survives tab switches AND panel
+  // close/reopen (the popup unmounts this whole tree on close — losing the
+  // draft was the single most jarring data loss in the widget). Debounced;
+  // an empty input removes the key so abandoned tabs don't accrete junk.
+  useEffect(() => {
+    if (isInitializing) return; // never persist the pre-restore empty state
+    const key = draftKey(activeTabId);
+    if (!key) return;
+    const timeoutId = setTimeout(() => {
+      if (input) safeSession.set(key, input);
+      else safeSession.remove(key);
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [input, activeTabId, storageKeyPrefix, isInitializing]);
+
   // Tab Persistence: restore tabs from localStorage. Runs once PER REAL SCOPE.
   // If identity (agent, user) isn't known at mount, we provisionally start a
   // clean tab but stay un-initialized, so when the prefix transitions
   // null → real this effect re-runs and restores that scope's saved tabs.
   useEffect(() => {
     if (hasInitialized.current) return;
+
+    // A host-pinned conversation (the public `conversationId` prop — the
+    // ChatInterface `id`) wins over restored tabs: the widget opens ON that
+    // conversation, whether or not it exists server-side yet (a brand-new id
+    // 404s in loadConversation and starts from the initialMessages seed).
+    // Restored tabs would silently override the host's explicit navigation
+    // intent. Both props were previously accepted-but-ignored.
+    if (id) {
+      setTabs([{ id, title: 'Chat', isActive: true }]);
+      activateTab(id);
+      setInitialTabCreated(true);
+      hasInitialized.current = true;
+      return;
+    }
 
     const startCleanTab = () => {
       const initialTabId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -909,8 +991,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Wait for a complete (agent, user) identity before consuming the one-shot
     // guard. Otherwise, if agentId arrives AFTER userId, the provisional
     // null-phase clean tab would consume this ref and the restored tab (swapped
-    // in once the real prefix lands) would render with no messages.
-    if (!storageKeyPrefix) return;
+    // in once the real prefix lands) would render with no messages. A
+    // host-pinned conversation is exempt: there is no restore to wait for, and
+    // pinned hosts may legitimately run without an agentId (no persistence).
+    if (!storageKeyPrefix && !id) return;
     if (!activeTabId) return; // Wait for activeTabId to be set
 
     // Load the conversation messages, then flip isInitializing false. This
@@ -924,7 +1008,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setIsInitializing(false);
       }
     })();
-  }, [config?.userId, activeTabId, storageKeyPrefix]);
+  }, [config?.userId, activeTabId, storageKeyPrefix, id]);
 
   // Handle state updates when active tab changes
   // Messages are loaded in switchToTab function, not here
@@ -933,7 +1017,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     if (activeTabId && tabs.length > 0 && activeTabId !== lastSyncedTabId.current) {
       lastSyncedTabId.current = activeTabId;
-      setInput('');
+      // Restore this tab's saved draft instead of unconditionally wiping the
+      // composer — switching tabs used to destroy a half-typed message.
+      const key = draftKey(activeTabId);
+      setInput((key && safeSession.get(key)) || '');
     }
   }, [activeTabId, isInitializing, tabs.length]); // Only depend on activeTabId
 
