@@ -1300,12 +1300,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     <div className="w-full h-full flex flex-col bg-[hsl(var(--chat-background))] overflow-hidden ring-1 ring-[hsl(var(--chat-divider))]">
       <div className="flex flex-col h-full w-full overflow-hidden relative chat-widget-container">
         {/* Header Section with Tabs */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b backdrop-blur-sm relative z-20" style={{
+        {/* backdrop-blur removed: the header is a flex sibling of the scroll
+            area, nothing ever renders behind it — the blur was dead CSS
+            implying a frosted effect that never happened. */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b relative z-20" style={{
           borderColor: 'var(--chat-divider)',
           backgroundColor: 'hsl(var(--chat-background))'
         }}>
           {/* Tabs Container with Scroll */}
-          <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide py-0.5 scroll-smooth">
+          <div
+            className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide py-0.5 scroll-smooth"
+            role="tablist"
+            aria-label="Conversations"
+          >
             {/* Apple-style Tab Pills */}
             {tabs.map((tab, index) => (
               <div
@@ -1333,31 +1340,46 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                   e.stopPropagation();
                   switchToTab(tab.id);
                 }}
+                // Keyboard operability: these pills were click-only <div>s —
+                // a keyboard user could not switch conversations at all.
+                role="tab"
+                aria-selected={tab.isActive}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    switchToTab(tab.id);
+                  }
+                }}
               >
                 {/* Tab Title */}
                 <span className="truncate max-w-28 text-[13px] font-medium transition-colors">
                   {tab.title}
                 </span>
 
-                {/* Close Button */}
+                {/* Close Button. Two rules learned the hard way:
+                    (1) while hidden it must be pointer-events-none — an
+                    invisible-but-tappable X swallowed touch taps meant to
+                    ACTIVATE the tab (touch has no hover to reveal it);
+                    (2) keyboard focus isn't blocked by pointer-events, and
+                    focus-visible re-reveals + re-enables it, so it stays
+                    keyboard-closable. Hover reveal rides the pill's `group`. */}
                 {tabs.length > 1 && (
                   <button
+                    type="button"
+                    aria-label={`Close ${tab.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeTab(tab.id);
                     }}
-                    className="rounded-lg p-1 transition-all duration-150 flex-shrink-0 -mr-1"
-                    style={{
-                      opacity: tab.isActive ? 0.6 : 0
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = '1';
-                      e.currentTarget.style.backgroundColor = 'hsl(var(--chat-surface-hover))';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = tab.isActive ? '0.6' : '0';
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
+                    className={cn(
+                      'rounded-lg p-1 transition-all duration-150 flex-shrink-0 -mr-1',
+                      'hover:bg-[hsl(var(--chat-surface-hover))]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]',
+                      tab.isActive
+                        ? 'opacity-60 hover:opacity-100 focus-visible:opacity-100'
+                        : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto'
+                    )}
                   >
                     <XIcon className="h-3 w-3" strokeWidth={2.5} />
                   </button>
@@ -1476,9 +1498,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                       {groupedConversations.map(([groupName, groupConversations]) => (
                         <div key={groupName} className="mb-0.5">
                           {/* Group Header */}
+                          {/* Sticky group header DOES overlay the scrolling
+                              list — a translucent background makes the
+                              backdrop blur real (it was inert behind an
+                              opaque fill). */}
                           <div className="px-2.5 py-1 sticky top-0 backdrop-blur-sm z-10" style={{
-                            backgroundColor: 'hsl(var(--chat-background))'
+                            backgroundColor: 'hsl(var(--chat-background) / 0.85)'
                           }}>
+
                             <h3 className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'hsl(var(--chat-text-muted))' }}>{groupName}</h3>
                           </div>
 

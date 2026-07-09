@@ -604,6 +604,18 @@
   color: var(--shiki-dark) !important;
 }
 
+/* Under .chat-dark, code sits on a NEUTRAL near-black canvas instead of the
+   theme-tinted surface: github-dark's token palette was tuned for neutral
+   near-black — on a saturated custom background (navy, forest) its dim tokens
+   (comments, punctuation) lose contrast against the tint. The widget's other
+   furniture stays theme-tinted; only the code canvas gets the surface the
+   palette was designed for. On the stock dark ramp this is visually
+   indistinguishable from the tinted value. */
+.chat-widget-container.chat-dark .chat-code-body,
+.chat-widget-container.chat-dark .code-block-shiki {
+  background-color: hsl(0 0% 9%);
+}
+
 /* The injected `.shiki` <pre> sits inside our own chrome wrappers (the prose
    `.chat-code-body` and the tool `.code-block-shiki`, which already own
    padding / surface / scroll). Strip the browser's default <pre> margin so it
