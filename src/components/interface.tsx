@@ -35,6 +35,7 @@ import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PaperclipIcon, PlusIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { useActionDispatcher } from '../hooks/use-action-dispatcher';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
@@ -852,6 +853,22 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [config?.userId, config?.extraHeaders],
   );
 
+  // Generative-GUI action dispatcher. The single dispatcher shared by every GUI
+  // primitive rendered in the transcript: it runs the host `onAction` first, then
+  // applies built-in client behavior (open URL / send message), then POSTs
+  // server/hosted actions to `${apiBase}/v1/action` (reusing the transport headers
+  // above). `sendMessage` reuses the same composer submit path chips use, so a
+  // `mordn.ui.send_message` action behaves exactly like a user turn. Consequential
+  // actions are gated while streaming (isStreaming) so nothing mutates mid-answer.
+  const sendActionMessage = useCallback((text: string) => { void handleSubmit({ text }); }, [handleSubmit]);
+  const dispatchAction = useActionDispatcher({
+    onAction: config?.onAction,
+    apiBase: config?.apiBase,
+    headers: feedbackHeaders,
+    sendMessage: sendActionMessage,
+    isStreaming: status === 'streaming' || status === 'submitted',
+  });
+
   // Memoized message list. Each message is a memoized <MessageItem>; the SDK
   // reuses old message refs and clones only the streaming (last) one, so only
   // the active bubble re-renders per tick. Assistant turns render through the
@@ -868,6 +885,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           status={status}
           toolRenderers={config?.toolRenderers}
           actionRenderers={config?.actionRenderers}
+          uiRenderers={config?.uiRenderers}
+          onAction={dispatchAction}
           onRegenerate={handleRegenerate}
           onToolApproval={handleToolApproval}
           feedbackEnabled={config?.feedback === true}
@@ -877,7 +896,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           onFeedback={config?.onFeedback}
         />
       )),
-    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.onFeedback],
+    [messages, status, config?.toolRenderers, config?.actionRenderers, config?.uiRenderers, dispatchAction, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.onFeedback],
   );
 
   // Follow-up chips (#134): after an assistant turn settles, derive up to

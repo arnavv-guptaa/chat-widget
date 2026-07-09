@@ -94,7 +94,7 @@ const MAX_CONTEXT_BYTES = 256 * 1024;
 // `subSegments` scans from the END for the last known head, so it matches
 // whether the incoming path is `…/feedback` or `…/v1/feedback` — the optional
 // leading `v1` (or any other mount prefix) is simply ignored. See handleFeedback.
-const KNOWN_SEGMENTS = new Set(['upload', 'history', 'memory', 'feedback']);
+const KNOWN_SEGMENTS = new Set(['upload', 'history', 'memory', 'feedback', 'action']);
 
 // Memory defaults.
 const DEFAULT_MEMORY_LIMIT = 6;
@@ -188,6 +188,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     retrieval,
     memory,
     onFeedback,
+    onAction,
     maxHistoryMessages = DEFAULT_MAX_HISTORY_MESSAGES,
     maxMessageChars = DEFAULT_MAX_MESSAGE_CHARS,
     summarizeHistory,
@@ -991,6 +992,81 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return json({ ok: true });
   }
 
+  // ── POST /action ─────────────────────────────────────────────────────────
+  // Executes a typed action emitted by a generative-GUI primitive (button, form,
+  // selection group, confirmation card). The widget POSTs
+  // `{ type, payload?, idempotencyKey?, confirmation? }` to `${apiBase}/v1/action`
+  // with the browser-controlled `X-User-Id` header; that header is NOT trusted —
+  // we resolve the VERIFIED user through the same `authenticate`/`getUserId` gate
+  // every other route uses, so a forged client id can never execute an action as
+  // another user (the same IDOR defence as chat/history/feedback).
+  //
+  // The action `payload` is UNTRUSTED client input. The handler does NOT execute
+  // anything itself — it validates the envelope, then hands the invocation to the
+  // `onAction` seam (mirrors how `onFeedback` / `store` / memory `adapter` are
+  // injected). The seam owns payload validation, authorization, confirmation, and
+  // idempotency. With no seam configured this is a clean no-op (`{status:'success'}`)
+  // so a widget wired for GUI actions against a backend that hasn't implemented
+  // them yet never sees a 404/503. Best-effort by contract: a seam throw is logged
+  // and swallowed and we still return a safe `{status:'error'}` — an action must
+  // never 500 the chat.
+  async function handleAction(request: Request): Promise<Response> {
+    // Read under the same hard byte cap as chat so an oversized payload can't
+    // force an unbounded parse (DoS).
+    const read = await readJsonWithLimit(request, maxRequestBytes);
+    if (!read.ok) {
+      return read.reason === 'too_large'
+        ? json({ status: 'error', errorCode: 'too_large' }, 413)
+        : json({ status: 'error', errorCode: 'invalid_json' }, 400);
+    }
+    const body = read.body as {
+      type?: unknown;
+      payload?: unknown;
+      idempotencyKey?: unknown;
+      confirmation?: unknown;
+    };
+
+    // Validate the envelope: a non-empty string `type` is the only hard
+    // requirement. Everything else is optional and passed through untrusted.
+    const type = typeof body.type === 'string' ? body.type.trim() : '';
+    if (!type) return json({ status: 'error', errorCode: 'missing_type' }, 400);
+    const idempotencyKey =
+      typeof body.idempotencyKey === 'string' && body.idempotencyKey ? body.idempotencyKey : undefined;
+    const confirmation =
+      body.confirmation === 'none' || body.confirmation === 'recommended' || body.confirmation === 'required'
+        ? body.confirmation
+        : undefined;
+
+    // Resolve the VERIFIED identity through the shared gate (never the client id).
+    // No conversation binding is required for a bare action; pass '' like feedback.
+    const ctx = await authenticate(request, '');
+    if (!ctx) return new Response('Unauthorized', { status: 401 });
+
+    // No seam configured → clean no-op success. GUI actions against a backend
+    // that hasn't wired `onAction` yet are simply acknowledged.
+    if (!onAction) return json({ status: 'success' });
+
+    try {
+      const result = await onAction(
+        { type, payload: body.payload, idempotencyKey, confirmation },
+        ctx,
+      );
+      // A seam that returns nothing = fire-and-forget success.
+      return json(result ?? { status: 'success' });
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'action.execute_failed',
+          userId: ctx.userId,
+          type,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      // Best-effort: never surface a 5xx to the widget for an action failure.
+      return json({ status: 'error', errorCode: 'action_failed' });
+    }
+  }
+
   // ── Dispatch ───────────────────────────────────────────────────────────────
   async function dispatch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -1036,6 +1112,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // so the widget's best-effort POST never sees a 404/503 that would log
         // noise. `rest` (anything after 'feedback') is ignored.
         if (method === 'POST') return await handleFeedback(request);
+        return methodNotAllowed();
+      }
+      if (head === 'action') {
+        // POST only. Like feedback, NOT gated on config: with no `onAction` seam
+        // the handler cleanly no-ops ({status:'success'}), so a GUI-enabled widget
+        // pointed at a backend that hasn't wired actions never sees a 404/503.
+        // `rest` (anything after 'action') is ignored.
+        if (method === 'POST') return await handleAction(request);
         return methodNotAllowed();
       }
       return json({ error: 'Not found' }, 404);

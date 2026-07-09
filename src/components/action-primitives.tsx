@@ -7,7 +7,7 @@ import {
   Loader2,
   ShieldCheck,
 } from 'lucide-react';
-import type { ComponentProps, FormEvent, ReactNode } from 'react';
+import { useState, type ComponentProps, type FormEvent, type ReactNode } from 'react';
 import { safeUrl } from '../utils/url-safety';
 import { cn } from '../utils/cn';
 import type {
@@ -15,6 +15,7 @@ import type {
   MordnActionDispatcher,
   MordnActionPrimitiveProps,
   MordnEntityItem,
+  MordnSelectionOption,
   MordnStatusStep,
 } from '../actions/types';
 
@@ -378,5 +379,98 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
         </li>
       ))}
     </ol>
+  );
+}
+
+export interface SelectionGroupProps extends Omit<ComponentProps<'div'>, 'onSelect'> {
+  options: MordnSelectionOption[];
+  /** Allow multiple selections (checkbox semantics). Default false (radio). */
+  multiple?: boolean;
+  label?: string;
+  submitLabel?: string;
+  action: MordnActionConfig;
+  onAction?: MordnActionDispatcher;
+}
+
+/**
+ * Single- or multi-choice selector (party size, size/color, plan, room type…).
+ * Submits the picked value(s) into the action payload under `selected` — a
+ * string for single-select, a string[] for multi-select — mirroring how
+ * ActionForm folds form values into the dispatch. Fully keyboard-operable via
+ * native radio/checkbox inputs; the visual chip is a styled <label>.
+ */
+export function SelectionGroup({
+  options,
+  multiple = false,
+  label,
+  submitLabel = 'Continue',
+  action,
+  onAction,
+  className,
+  ...props
+}: SelectionGroupProps) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggle(value: string) {
+    setSelected((prev) => {
+      if (multiple) {
+        return prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value];
+      }
+      return [value];
+    });
+  }
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    dispatchAction(onAction, action, 'selection-group', {
+      selected: multiple ? selected : selected[0],
+    });
+  }
+
+  const name = `mordn-selection-${action.type}`;
+  return (
+    <form
+      className={cn('not-prose space-y-3 rounded-2xl border bg-[hsl(var(--chat-surface-deep))] p-3', className)}
+      style={{ borderColor: 'var(--chat-divider)' }}
+      onSubmit={onSubmit}
+      {...(props as Omit<ComponentProps<'form'>, 'action' | 'onSubmit'>)}
+    >
+      {label && (
+        <p className="text-[12px] font-medium text-[hsl(var(--chat-text))]" id={`${name}-label`}>
+          {label}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1.5" role="group" aria-labelledby={label ? `${name}-label` : undefined}>
+        {options.map((option) => {
+          const isChecked = selected.includes(option.value);
+          return (
+            <label
+              key={option.value}
+              title={option.description}
+              className={cn(
+                'inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors focus-within:ring-2 focus-within:ring-[hsl(var(--chat-text)/0.22)]',
+                isChecked
+                  ? 'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))]'
+                  : 'bg-[hsl(var(--chat-surface-deep))] text-[hsl(var(--chat-text))] hover:bg-[hsl(var(--chat-surface-hover))]',
+              )}
+              style={isChecked ? undefined : { borderColor: 'var(--chat-divider)' }}
+            >
+              <input
+                type={multiple ? 'checkbox' : 'radio'}
+                name={name}
+                value={option.value}
+                checked={isChecked}
+                onChange={() => toggle(option.value)}
+                className="sr-only"
+              />
+              {option.label}
+            </label>
+          );
+        })}
+      </div>
+      <ActionButton action={action} onAction={undefined} variant="primary" type="submit" label={submitLabel} disabled={selected.length === 0}>
+        {submitLabel}
+      </ActionButton>
+    </form>
   );
 }

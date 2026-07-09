@@ -116,6 +116,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   inputPlugins,
   toolRenderers,
   actionRenderers,
+  uiRenderers,
+  onAction,
   followUps,
   feedback,
   onFeedback,
@@ -360,10 +362,12 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     inputPlugins,
     toolRenderers,
     actionRenderers,
+    uiRenderers,
+    onAction,
     followUps,
     feedback,
     onFeedback,
-  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
+  }), [userId, apiBase, extraHeaders, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, uiRenderers, onAction, followUps, feedback, onFeedback]);
 
   const togglePosition = display?.toggleButtonPosition || { bottom: '24px', right: '24px' };
 

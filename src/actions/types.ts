@@ -173,3 +173,82 @@ export interface MordnStatusStep {
   description?: string;
   status?: 'complete' | 'current' | 'pending' | 'error';
 }
+
+/**
+ * A single choice in a {@link SelectionGroup}.
+ */
+export interface MordnSelectionOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generative GUI part model
+//
+// The pieces above are the *contracts* and the *presentational primitives*. What
+// turns them into "GUI ability in the chat interface" is a SERIALISABLE spec an
+// assistant can stream (as a tool output or a `data-mordn-ui` data part) that the
+// widget maps to exactly one of those primitives — no arbitrary HTML/JSX, ever.
+//
+// `MordnGuiSpec` is a small, closed, discriminated union: `kind` selects the
+// component, `props` are its data. It is intentionally JSON-only (no functions,
+// no ReactNode) so it can cross the network from the model/server to the browser.
+// A renderer maps each `kind` to a #217 primitive; an unknown `kind` renders
+// nothing (safe fall-through), a malformed spec renders nothing (never throws).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The primitive a {@link MordnGuiSpec} renders to. Closed set — no open string. */
+export type MordnGuiKind =
+  | 'action-button'
+  | 'action-chips'
+  | 'entity-card'
+  | 'entity-carousel'
+  | 'action-form'
+  | 'selection-group'
+  | 'summary-card'
+  | 'confirmation-card'
+  | 'status-tracker';
+
+/** Serialisable form field (mirrors ActionFormField without React types). */
+export interface MordnGuiFormField {
+  name: string;
+  label: string;
+  type?: 'text' | 'email' | 'tel' | 'date' | 'time' | 'number' | 'textarea';
+  required?: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+}
+
+/** Serialisable key/value row (SummaryCard). `value` is text, not ReactNode. */
+export interface MordnGuiRow {
+  label: string;
+  value: string;
+}
+
+/**
+ * Serialisable entity item. Same shape as {@link MordnEntityItem} but with
+ * string-only `description` (no ReactNode) so it is JSON-safe over the wire.
+ */
+export interface MordnGuiEntityItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  imageUrl?: string;
+  price?: string;
+  badge?: string;
+  attributes?: Array<{ label: string; value: string }>;
+  actions?: MordnEntityAction[];
+}
+
+export type MordnGuiSpec =
+  | { kind: 'action-button'; action: MordnActionConfig; label?: string; variant?: 'primary' | 'secondary' | 'ghost' }
+  | { kind: 'action-chips'; actions: Array<MordnActionConfig & { label: string }> }
+  | { kind: 'entity-card'; item: MordnGuiEntityItem }
+  | { kind: 'entity-carousel'; label?: string; items: MordnGuiEntityItem[] }
+  | { kind: 'action-form'; title?: string; description?: string; fields: MordnGuiFormField[]; submitLabel?: string; action: MordnActionConfig }
+  | { kind: 'selection-group'; label?: string; options: MordnSelectionOption[]; multiple?: boolean; action: MordnActionConfig; submitLabel?: string }
+  | { kind: 'summary-card'; title: string; description?: string; rows?: MordnGuiRow[]; action?: MordnActionConfig; actionLabel?: string }
+  | { kind: 'confirmation-card'; title: string; description?: string; action: MordnActionConfig; confirmLabel?: string; cancelLabel?: string }
+  | { kind: 'status-tracker'; steps: MordnStatusStep[] };

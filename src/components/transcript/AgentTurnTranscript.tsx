@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo } from 'react';
+import { Fragment, memo, useMemo, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { UIMessage } from 'ai';
 import { Message, MessageContent } from '../message';
@@ -14,8 +14,10 @@ import {
   pickPlanningVerb,
 } from './toolRegistry';
 import { toToolPart, type ToolPart, type TurnState } from './types';
-import type { ActionRenderer, ToolRenderer } from '../../types';
+import type { ActionRenderer, ToolRenderer, UiRenderer } from '../../types';
+import type { MordnActionDispatcher } from '../../actions/types';
 import { ActionResultCard } from '../action-result-card';
+import { MordnGuiPart, canRenderGui } from '../gui-part';
 
 /**
  * Renders one assistant turn as a clean, in-order flow — text, reasoning, and
@@ -32,6 +34,8 @@ interface AgentTurnTranscriptProps {
   turn: TurnState;
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
+  uiRenderers?: Record<string, UiRenderer>;
+  onAction?: MordnActionDispatcher;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
 }
 
@@ -40,7 +44,40 @@ const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
 type RenderPart =
   | { kind: 'text'; id: string; text: string; idx: number }
   | { kind: 'reasoning'; id: string; text: string; idx: number }
-  | { kind: 'tool'; id: string; tool: ToolPart; idx: number };
+  | { kind: 'tool'; id: string; tool: ToolPart; idx: number }
+  | { kind: 'gui'; id: string; spec: unknown; idx: number };
+
+/** The AI SDK data-part type that carries a generative-GUI spec. */
+const GUI_DATA_PART = 'data-mordn-ui';
+/** Tool name whose output is a generative-GUI spec (rendered via the built-in path). */
+const GUI_TOOL_NAME = 'mordn_ui';
+
+/**
+ * Resolve a GUI spec to a node: a host `uiRenderers[kind]` wins (returning null
+ * to defer), otherwise the built-in {@link MordnGuiPart} maps it to a primitive.
+ * Returns null when nothing can render it (unknown/ malformed spec), so callers
+ * treat null as "render nothing".
+ */
+function renderGui(
+  spec: unknown,
+  uiRenderers: Record<string, UiRenderer> | undefined,
+  onAction: MordnActionDispatcher | undefined,
+): ReactNode {
+  const kind =
+    spec && typeof spec === 'object' && !Array.isArray(spec)
+      ? (spec as { kind?: unknown }).kind
+      : undefined;
+  // Host renderer for this kind wins; returning null defers to the built-in.
+  if (typeof kind === 'string' && uiRenderers?.[kind]) {
+    const custom = uiRenderers[kind](spec, onAction);
+    if (custom != null) return custom;
+  }
+  // Only render the built-in for kinds it actually knows, so an unknown-kind
+  // spec falls through (null) — e.g. a `mordn_ui` tool can then show the default
+  // tool row instead of an empty node.
+  if (canRenderGui(spec)) return <MordnGuiPart spec={spec} onAction={onAction} />;
+  return null;
+}
 
 function AgentTurnTranscriptImpl({
   message,
@@ -49,6 +86,8 @@ function AgentTurnTranscriptImpl({
   turn,
   toolRenderers,
   actionRenderers,
+  uiRenderers,
+  onAction,
   onToolApproval,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
@@ -65,6 +104,11 @@ function AgentTurnTranscriptImpl({
           text: (part as { text: string }).text,
           idx: i,
         });
+      } else if (part.type === GUI_DATA_PART) {
+        // Generative-GUI data part: the assistant streamed a UI spec directly
+        // (no tool call). `data` holds the MordnGuiSpec; render it as a GUI part.
+        const data = (part as { data?: unknown }).data;
+        out.push({ kind: 'gui', id: `${turnId}-${i}`, spec: data, idx: i });
       } else if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tp = toToolPart(part as any, `${turnId}-${i}`);
@@ -106,8 +150,25 @@ function AgentTurnTranscriptImpl({
             />
           );
         }
+        if (item.kind === 'gui') {
+          // Generative-GUI part (from a `data-mordn-ui` data part). A host
+          // uiRenderer for the spec's kind wins; else the built-in MordnGuiPart
+          // maps it to a primitive. Either returning null renders nothing.
+          const node = renderGui(item.spec, uiRenderers, onAction);
+          return node ? <Fragment key={item.id}>{node}</Fragment> : null;
+        }
         // tool
         const part = item.tool;
+        // Generative-GUI tool: an assistant tool named `mordn_ui` whose output is
+        // a GUI spec. Render it through the same GUI path (host uiRenderer → built-in),
+        // but only once the output is available so a streaming call shows nothing yet.
+        if (part.tool === GUI_TOOL_NAME) {
+          if (part.state.status === 'output-available') {
+            const node = renderGui(part.state.output, uiRenderers, onAction);
+            if (node) return <Fragment key={item.id}>{node}</Fragment>;
+          }
+          return null;
+        }
         const custom = toolRenderers?.[part.tool];
         if (custom) {
           const rendered = custom({

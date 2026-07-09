@@ -79,6 +79,42 @@ export interface FeedbackEvent {
 }
 
 /**
+ * A single action invocation the handler hands to the `onAction` seam, assembled
+ * AFTER authentication. A GUI primitive (button/form/selector/confirmation card)
+ * emits it; the widget POSTs `{ type, payload?, idempotencyKey?, confirmation? }`
+ * to `${apiBase}/v1/action`; the handler validates the shape, resolves the
+ * VERIFIED user, and calls `onAction` with this invocation.
+ *
+ * SECURITY: `payload` is browser-controlled and therefore UNTRUSTED — validate
+ * it in the seam before acting. `idempotencyKey` (when present) lets the seam
+ * de-duplicate retries/double-clicks so a mutation runs at most once.
+ */
+export interface ActionInvocation {
+  /** Namespaced action type, e.g. `lead.capture` or `restaurant.reservation.request`. */
+  type: string;
+  /** UNTRUSTED data supplied by the rendered UI (form/selection values merged in). */
+  payload?: unknown;
+  /** Stable client key for duplicate-click / retry de-duplication. */
+  idempotencyKey?: string;
+  /** Confirmation policy the client believes applies. The seam still decides authoritatively. */
+  confirmation?: 'none' | 'recommended' | 'required';
+}
+
+/**
+ * Structured outcome the `onAction` seam returns; serialised back to the widget
+ * as JSON so a rendered primitive can reflect what actually happened. Mirrors the
+ * client-side `MordnActionResult` (kept as an independent server type so the
+ * handler never imports the client entry).
+ */
+export interface ActionResult {
+  status: 'idle' | 'pending' | 'requires_confirmation' | 'requires_input' | 'success' | 'error';
+  title?: string;
+  message?: string;
+  data?: unknown;
+  errorCode?: string;
+}
+
+/**
  * Per-agent declarative config returned by a hosted control plane. All fields
  * optional — only what the dashboard has set is present; the rest falls through
  * to code/defaults. `model` is a gateway model string (e.g. "anthropic/…").
@@ -404,6 +440,32 @@ export interface CreateChatHandlerOptions {
    * cleanly no-ops, so the widget's POST never errors.
    */
   onFeedback?: (feedback: FeedbackEvent, ctx: ChatRequestContext) => void | Promise<void>;
+
+  /**
+   * Server-side action seam for the generative-GUI runtime. When a rendered GUI
+   * primitive (button, form, selection group, confirmation card…) emits an action
+   * whose `handler` is `'server'` or `'hosted'`, the widget POSTs it to
+   * `${apiBase}/v1/action`; the handler resolves the VERIFIED user (never the
+   * browser-sent `X-User-Id`), then calls this seam with the invocation and the
+   * per-request context.
+   *
+   * SECURITY: `invocation.payload` is UNTRUSTED client input — validate it here
+   * (shape, ranges, ownership) before doing anything consequential, exactly as
+   * you would a normal request body. `ctx.userId` is the trustworthy identity to
+   * authorize against; the conversation is scoped the same way as every other
+   * route. Honour `invocation.confirmation` for mutations.
+   *
+   * Return a {@link ActionResult} to hand the widget a structured outcome (status
+   * + optional message/data) it can render; return nothing for a fire-and-forget
+   * success. Best-effort by contract: a throw is logged and swallowed and the
+   * route still returns `{ status: 'error' }` rather than 500-ing the chat.
+   *
+   * Omit it entirely and the action route cleanly no-ops (`{ status: 'success' }`),
+   * so the widget's POST never errors even before you wire real handlers. Use the
+   * ready-made `createHostedAction({ apiKey, agentId })` (server/hosted) to
+   * forward to chat-api's hosted action plane when that lands.
+   */
+  onAction?: (invocation: ActionInvocation, ctx: ChatRequestContext) => ActionResult | void | Promise<ActionResult | void>;
 
   /**
    * Map a stream error to the user-facing string the widget shows. Lets you

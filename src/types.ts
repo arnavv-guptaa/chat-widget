@@ -258,7 +258,49 @@ export interface ChatWidgetConfig {
    * `reason` is present only when the user typed one (thumbs-down).
    */
   onFeedback?: (feedback: FeedbackEvent) => void;
+
+  /**
+   * Generative-GUI action dispatcher (#217 runtime). Called whenever a rendered
+   * GUI primitive — an ActionButton, ActionForm submit, SelectionGroup choice,
+   * EntityCard action, ConfirmationCard confirm — is activated. This is the seam
+   * that makes in-chat UI *do* something.
+   *
+   * Resolution order the widget applies around this callback:
+   *   1. `onAction` runs FIRST. Return a `MordnActionResult` to fully own the
+   *      action (the widget stops there). Return `undefined` to just observe and
+   *      let the widget apply its built-in behavior.
+   *   2. Built-in CLIENT actions (no wiring needed): `mordn.ui.open_url` opens a
+   *      safe URL in a new tab; `mordn.ui.send_message` sends `payload.text` as a
+   *      normal user turn.
+   *   3. `handler: 'server' | 'hosted'` actions are POSTed to `${apiBase}/v1/action`
+   *      (best-effort, reusing the chat transport headers) where the server
+   *      resolves the VERIFIED user and runs the handler's `onAction` seam.
+   *
+   * Consequential actions (server/hosted, or `risk: 'mutation'|'regulated'`) are
+   * gated while a turn streams so nothing mutates behind a rendering answer.
+   * Purely local UI actions stay responsive. Off by default — omit it and GUI
+   * primitives simply fall back to built-in client behavior / server POST.
+   */
+  onAction?: MordnActionDispatcher;
+
+  /**
+   * Custom renderers for generative-GUI parts, keyed by the GUI `kind`
+   * (`entity-card`, `action-form`, `selection-group`, …). When the assistant
+   * streams a GUI spec (a `data-mordn-ui` data part or a `mordn_ui` tool output),
+   * the widget looks up a renderer here first; returning `null` (or having no
+   * entry) falls back to the built-in primitive for that kind. Use this to swap
+   * in a bespoke card while keeping the built-ins for everything else. The widget
+   * stays domain-agnostic; the mapping is yours.
+   */
+  uiRenderers?: Record<string, UiRenderer>;
 }
+
+/**
+ * Renders a generative-GUI spec to a node, or returns `null` to fall back to the
+ * built-in primitive for that `kind`. Receives the raw (untrusted) spec object
+ * and the shared action dispatcher.
+ */
+export type UiRenderer = (spec: unknown, onAction?: MordnActionDispatcher) => ReactNode | null;
 
 /**
  * Payload passed to {@link ChatWidgetConfig.onFeedback} when a user rates an
@@ -532,6 +574,7 @@ export interface FeatureConfig {
 export type ChatWidgetSize = 'compact' | 'default' | 'large' | 'full';
 
 import type { ReactNode } from 'react';
+import type { MordnActionDispatcher } from './actions/types';
 
 /**
  * Layout shape the widget renders in.

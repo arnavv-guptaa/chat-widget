@@ -23,6 +23,7 @@ export type {
   ToolRenderer,
   ToolPartLike,
   ActionRenderer,
+  UiRenderer,
   ActionResult,
   ActionResultStatus,
   ActionResultField,
@@ -64,6 +65,7 @@ export {
   ConfirmationCard,
   EntityCard,
   EntityCarousel,
+  SelectionGroup,
   StatusTracker,
   SummaryCard,
 } from './components/action-primitives';
@@ -75,9 +77,18 @@ export type {
   ConfirmationCardProps,
   EntityCardProps,
   EntityCarouselProps,
+  SelectionGroupProps,
   StatusTrackerProps,
   SummaryCardProps,
 } from './components/action-primitives';
+
+// Generative-GUI runtime — turns a serialised GUI spec into an interactive
+// primitive inside the transcript, and dispatches the actions it emits.
+export { MordnGuiPart } from './components/gui-part';
+export type { MordnGuiPartProps } from './components/gui-part';
+export { useActionDispatcher, MORDN_CLIENT_ACTIONS } from './hooks/use-action-dispatcher';
+export type { UseActionDispatcherOptions } from './hooks/use-action-dispatcher';
+export { submitAction } from './utils/action-transport';
 export {
   defaultMordnTemplates,
   docsAssistantTemplate,
@@ -104,6 +115,12 @@ export type {
   MordnEntityAction,
   MordnEntityAttribute,
   MordnEntityItem,
+  MordnGuiEntityItem,
+  MordnGuiFormField,
+  MordnGuiKind,
+  MordnGuiRow,
+  MordnGuiSpec,
+  MordnSelectionOption,
   MordnStatusStep,
   MordnTemplateActionDefinition,
   MordnTemplateCardDefinition,

@@ -8,7 +8,8 @@ import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
 import type { TurnState } from './transcript/types';
-import type { ActionRenderer, ToolRenderer, FeedbackEvent } from '../types';
+import type { ActionRenderer, ToolRenderer, UiRenderer, FeedbackEvent } from '../types';
+import type { MordnActionDispatcher } from '../actions/types';
 
 /**
  * One message in the conversation, as its own memoized component.
@@ -39,6 +40,8 @@ interface MessageItemProps {
   status: ChatStatus;
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
+  uiRenderers?: Record<string, UiRenderer>;
+  onAction?: MordnActionDispatcher;
   onRegenerate?: () => void;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
   feedbackEnabled?: boolean;
@@ -54,7 +57,7 @@ function sourceTitle(part: SourceUrlPart): string {
   return part.title || part.url;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, onFeedback }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, uiRenderers, onAction, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, onFeedback }: MessageItemProps) {
   const sourceParts = useMemo(
     () => (message.parts?.filter((part) => part.type === 'source-url') ?? []) as SourceUrlPart[],
     [message.parts],
@@ -131,6 +134,8 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
               turn={turnState}
               toolRenderers={toolRenderers}
               actionRenderers={actionRenderers}
+              uiRenderers={uiRenderers}
+              onAction={onAction}
               onToolApproval={onToolApproval}
             />
             {!isStreamingThisMessage && sourceParts.length > 0 && (
