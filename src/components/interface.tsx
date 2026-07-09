@@ -181,6 +181,21 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // Ref-based initialization guard to ensure initialization runs only once
   const hasInitialized = useRef(false);
 
+  // Live mirrors for values that async callbacks must read FRESH. A callback
+  // that awaited a fetch would otherwise act on the state it closed over at
+  // call time — exactly the stale view that lets one tab's response land in
+  // another tab. `activeTabIdRef` is written synchronously at every activation
+  // site (not in an effect) so even an await that resolves between commits
+  // sees the truth; `statusRef` mirrors the stream status for callbacks whose
+  // dep arrays would otherwise go stale (e.g. createNewTab).
+  const activeTabIdRef = useRef<string>('');
+  const statusRef = useRef<string>('ready');
+  // Monotonic generation for conversation loads: a resolved fetch applies only
+  // if it is still the LATEST load AND its conversation is still active.
+  // Guards the tab-switch race (slow tab-A fetch resolving after tab B was
+  // activated) without threading AbortControllers through every path.
+  const loadGenRef = useRef(0);
+
   // First-class per-turn context (#162). Held in a ref so the transport's
   // prepareSendMessagesRequest always reads the latest value without
   // re-creating the chat (and resetting the stream) on every context change.
@@ -223,6 +238,35 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // bubble re-renders per tick; see message-item.tsx). Host-tunable.
     experimental_throttle: config?.streamingThrottleMs ?? 50,
   });
+
+  // Keep the live status mirror in sync (see statusRef above).
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  // Single activation point for changing the active tab: writes the live ref
+  // SYNCHRONOUSLY (before React re-renders) so any in-flight load's staleness
+  // check compares against the real active tab, then updates state. Every
+  // path that changes the active tab MUST go through this.
+  const activateTab = (tabId: string) => {
+    activeTabIdRef.current = tabId;
+    setActiveTabId(tabId);
+  };
+
+  // Abort an in-flight stream before the active conversation changes. Without
+  // this, the previous tab's still-open stream keeps writing into whatever
+  // chat instance is current — contaminating the newly-activated conversation
+  // on screen AND in what gets persisted on finish. Reads the status mirror so
+  // stale-closure callers (memoised callbacks) still see the live value.
+  const stopIfStreaming = () => {
+    if (statusRef.current === 'submitted' || statusRef.current === 'streaming') {
+      try {
+        stop();
+      } catch {
+        /* stop() is best-effort — never let an abort failure block a tab switch */
+      }
+    }
+  };
 
   // Approve / deny a paused tool (human-in-the-loop). Passed down to the tool
   // renderer; the SDK auto-resumes via sendAutomaticallyWhen above.
@@ -381,6 +425,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return;
     }
 
+    // Staleness guard: this load only gets to write state while it is BOTH the
+    // latest load started (gen) and loading the tab that is still active
+    // (activeTabIdRef). Otherwise a slow fetch for a previously-viewed tab
+    // would overwrite the current tab's messages and corrupt the reverse-
+    // pagination cursor. Checked after EVERY await.
+    const gen = ++loadGenRef.current;
+    const isCurrent = () =>
+      gen === loadGenRef.current && conversationId === activeTabIdRef.current;
+
     try {
       // Initial load: only the most-recent page. Older messages stream in as the
       // user scrolls up (loadOlderMessages), so a long conversation opens fast
@@ -388,21 +441,21 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       const response = await fetch(
         `${config?.apiBase ?? '/api/chat'}/history/${conversationId}?userId=${config.userId}&limit=${HISTORY_PAGE_SIZE}`,
       );
+      if (!isCurrent()) return;
       if (response.ok) {
         const data = await response.json();
+        if (!isCurrent()) return;
         const loadedMessages = data.messages || [];
 
         // Seed the reverse-pagination cursor from the oldest loaded message.
         oldestTsRef.current = loadedMessages.length ? loadedMessages[0].created_at ?? null : null;
         setHasMoreHistory(Boolean(data.hasMore));
-
-        // Set messages after ensuring activeTabId state has updated
-        setTimeout(() => {
-          setMessages(loadedMessages);
-        }, 0);
+        // Safe to apply immediately: by the time the fetch resolved, the
+        // render that re-keyed useChat to this conversation has long since
+        // committed, and isCurrent() above proves this tab is still active.
+        setMessages(loadedMessages);
       } else if (response.status === 404) {
         // Conversation doesn't exist yet - this is normal for new chats
-        console.log('Conversation not found in database yet (new chat)');
         // Clear messages for new chat
         oldestTsRef.current = null;
         setHasMoreHistory(false);
@@ -411,6 +464,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         console.error('Error loading messages:', response.status, response.statusText);
       }
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Error loading conversation:', error);
     }
   };
@@ -426,6 +480,13 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     loadingOlderRef.current = true;
     setLoadingOlder(true);
 
+    // The page we fetch belongs to THIS conversation. If the user switches
+    // tabs while the fetch is in flight, dropping the result is the only
+    // correct move — prepending it would splice another conversation's
+    // messages (and cursor) into the newly-active tab.
+    const conversationId = activeTabId;
+    const isCurrent = () => conversationId === activeTabIdRef.current;
+
     const viewport = scrollViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight ?? 0;
     const prevScrollTop = viewport?.scrollTop ?? 0;
@@ -435,8 +496,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         `${config.apiBase ?? '/api/chat'}/history/${activeTabId}?userId=${config.userId}` +
           `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
       );
-      if (!res.ok) return;
+      if (!res.ok || !isCurrent()) return;
       const data = await res.json();
+      if (!isCurrent()) return;
       const older = data.messages || [];
       if (older.length === 0) {
         setHasMoreHistory(false);
@@ -488,6 +550,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return;
     }
 
+    // A new tab must never inherit the previous tab's in-flight stream.
+    stopIfStreaming();
+
     // Generate a unique ID for the new tab
     const newTabId = generateUniqueTabId();
 
@@ -514,7 +579,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return [...updatedTabs, newTab];
     });
 
-    setActiveTabId(newTabId);
+    activateTab(newTabId);
     setMessages([]);
     setInput('');
   }, [initialTabCreated]);
@@ -545,6 +610,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const targetTab = tabs.find(tab => tab.id === tabId);
     if (!targetTab) return;
 
+    // Abort any in-flight stream BEFORE re-keying useChat — otherwise the
+    // previous tab's open stream keeps appending into the current chat
+    // instance, i.e. into the tab we're switching to.
+    stopIfStreaming();
+
     // Update active tab (metadata only)
     setTabs(prevTabs =>
       prevTabs.map(tab => ({
@@ -556,7 +626,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // Change active tab - useChat will reinitialize with new ID. Setting
     // isLoadingMessages immediately gates the starter-prompt empty state
     // so we don't flash it during the API fetch below.
-    setActiveTabId(tabId);
+    activateTab(tabId);
     setIsLoadingMessages(true);
     try {
       await loadConversation(tabId);
@@ -668,7 +738,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const startCleanTab = () => {
       const initialTabId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setTabs([{ id: initialTabId, title: 'New Chat', isActive: true }]);
-      setActiveTabId(initialTabId);
+      activateTab(initialTabId);
       setInitialTabCreated(true);
       setIsInitializing(false);
     };
@@ -692,7 +762,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         const parsedTabs = JSON.parse(savedTabs);
         setTabs(parsedTabs);
         const activeId = savedActiveTabId || parsedTabs[0]?.id;
-        setActiveTabId(activeId);
+        activateTab(activeId);
         setInitialTabCreated(true);
       } else if (tabs.length === 0) {
         // Clean start (no saved tabs) — create one empty tab and finish.
@@ -938,6 +1008,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         return;
       }
 
+      // Opening a conversation from history is an activation like any other —
+      // abort any stream still writing into the current chat instance first.
+      stopIfStreaming();
+
       // Create a new tab with the loaded conversation metadata
       const newTab: ChatTab = {
         id: selectedConversationId,
@@ -954,7 +1028,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         return [...updatedTabs, newTab];
       });
 
-      setActiveTabId(selectedConversationId);
+      activateTab(selectedConversationId);
 
       // Load messages using centralized function
       await loadConversation(selectedConversationId);
