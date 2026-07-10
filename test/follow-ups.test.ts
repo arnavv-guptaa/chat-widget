@@ -163,6 +163,7 @@ describe('handler follow-up data part', () => {
     expect(body).toContain('data-follow-ups');
     expect(body).toContain('Show me an example');
     expect(body).toContain('What should I do next?');
+    expect(body.indexOf('data-follow-ups')).toBeLessThan(body.lastIndexOf('"type":"finish"'));
 
     const saveTurn = vi.mocked(store.saveTurn);
     const finalCall = saveTurn.mock.calls.at(-1)?.[0];

@@ -640,17 +640,26 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         finalFinishReason = typeof finishReason === 'string' ? finishReason : undefined;
         finalStepCount = Array.isArray(steps) ? steps.length : undefined;
 
+        // We suppress the inner stream's finish chunk and emit it here AFTER the
+        // optional data part, keeping the UI-message protocol's finish event
+        // last (the AI SDK explicitly requires sendFinish:false when appending
+        // post-generation stream data).
+        const finishUiStream = () => {
+          followUpWriter?.write({ type: 'finish', finishReason });
+        };
+
         // Suggested follow-ups are a SECOND, post-response operation. The main
         // text has fully streamed before this awaits, and the result is appended
         // as a typed data part before the response stream closes. Failures
         // degrade to no chips and never turn a successful answer into an error.
+        if (request.signal.aborted) return; // the SDK's abort chunk is terminal
         if (
           !followUpConfig ||
-          request.signal.aborted ||
           finishReason === 'error' ||
           finishReason === 'content-filter' ||
           !text.trim()
         ) {
+          finishUiStream();
           return;
         }
 
@@ -709,6 +718,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
               error: err instanceof Error ? err.message : String(err),
             }),
           );
+        } finally {
+          finishUiStream();
         }
       },
     });
@@ -750,6 +761,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           result.toUIMessageStream({
             sendSources: true,
             sendReasoning: true,
+            sendFinish: false,
             originalMessages: incoming,
             generateMessageId: generateId,
             onError: mapStreamError,
