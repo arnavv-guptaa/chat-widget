@@ -31,6 +31,8 @@
 import 'server-only';
 import {
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   generateId,
   stepCountIs,
   streamText,
@@ -38,6 +40,7 @@ import {
   type ModelMessage,
   type ToolSet,
   type UIMessage,
+  type UIMessageStreamWriter,
 } from 'ai';
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
@@ -46,6 +49,7 @@ import type { StorageAdapter } from './storage-adapter';
 import type {
   ChatRequestContext,
   CreateChatHandlerOptions,
+  ServerFollowUpConfig,
   UploadPolicy,
 } from './handler-types';
 import type { RetrievedChunk } from './knowledge/types';
@@ -56,6 +60,17 @@ import {
 } from './knowledge/retrieval';
 import type { Memory, MemoryAdapter } from './memory/types';
 import { compressModelMessages, resolveCompression } from './compression';
+import {
+  generateFollowUpSuggestions,
+  mergeLanguageModelUsage,
+  mergeProviderMetadata,
+  toFollowUpMessages,
+} from './follow-ups';
+import {
+  normalizeFollowUpSuggestions,
+  normalizeSerializedFollowUpConfig,
+  resolveFollowUpCount,
+} from '../utils/follow-ups';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -169,6 +184,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     getUserId,
     model: modelOption,
     maxOutputTokens: maxOutputTokensOption,
+    followUps: followUpsOption,
     buildTools,
     store: storeFactory,
     storage: storageFactory,
@@ -230,6 +246,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       '[chat-widget] No `model` provided. Pass a `model` (a LanguageModel or a ' +
         'function returning one), or configure one via hosted config.',
     );
+  }
+
+  function resolveFollowUps(
+    hostedValue: boolean | Omit<ServerFollowUpConfig, 'generate'> | null | undefined,
+  ): ServerFollowUpConfig | null {
+    // Explicit code config always wins — including `false`, which force-disables
+    // a hosted dashboard toggle. When code is silent, use the published config.
+    const value = followUpsOption !== undefined ? followUpsOption : hostedValue;
+    if (value === true) return {};
+    if (!value || value.enabled === false) return null;
+    return value;
   }
 
   // Authenticate and build the per-request context. Returns null when the
@@ -347,6 +374,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // provider object exposing `.modelId`.
     const modelLabel =
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
+
+    // Suggested follow-ups: explicit code config > published hosted config > off.
+    // Accept the normalized top-level field and the control plane's current
+    // appearance.followUps location so custom getHostedConfig implementations
+    // and unsaved playground previews work without a second normalization step.
+    const appearanceFollowUps =
+      hosted?.appearance && typeof hosted.appearance === 'object' && !Array.isArray(hosted.appearance)
+        ? (hosted.appearance as Record<string, unknown>).followUps
+        : undefined;
+    const followUpConfig = resolveFollowUps(
+      hosted?.followUps ?? normalizeSerializedFollowUpConfig(appearanceFollowUps),
+    );
 
     // Max output tokens: code option > hosted (the model's real catalog limit,
     // via /v1/config) > undefined (provider default). Passing the model's true
@@ -580,6 +619,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let finalProviderMetadata: unknown;
     let finalFinishReason: string | undefined;
     let finalStepCount: number | undefined;
+    let followUpWriter: UIMessageStreamWriter | null = null;
 
     const result = streamText({
       model,
@@ -593,36 +633,129 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // answers don't truncate at a low provider default. Omitted → provider default.
       ...(resolvedMaxOutputTokens ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
       stopWhen: stopWhen ?? stepCountIs(DEFAULT_STEP_BUDGET),
-      onFinish: ({ usage, totalUsage, providerMetadata, finishReason, steps }) => {
+      onFinish: async ({ text, usage, totalUsage, providerMetadata, finishReason, steps }) => {
         finalUsage = usage;
         finalTotalUsage = totalUsage;
         finalProviderMetadata = providerMetadata;
         finalFinishReason = typeof finishReason === 'string' ? finishReason : undefined;
         finalStepCount = Array.isArray(steps) ? steps.length : undefined;
+
+        // Suggested follow-ups are a SECOND, post-response operation. The main
+        // text has fully streamed before this awaits, and the result is appended
+        // as a typed data part before the response stream closes. Failures
+        // degrade to no chips and never turn a successful answer into an error.
+        if (
+          !followUpConfig ||
+          request.signal.aborted ||
+          finishReason === 'error' ||
+          finishReason === 'content-filter' ||
+          !text.trim()
+        ) {
+          return;
+        }
+
+        const transcript = toFollowUpMessages([
+          ...incoming,
+          {
+            id: 'follow-up-context',
+            role: 'assistant',
+            parts: [{ type: 'text', text }],
+          },
+        ]);
+        const max = resolveFollowUpCount(followUpConfig.max);
+
+        try {
+          let suggestions: string[];
+          if (followUpConfig.suggestions) {
+            suggestions = normalizeFollowUpSuggestions(followUpConfig.suggestions, max);
+          } else if (followUpConfig.generate) {
+            suggestions = normalizeFollowUpSuggestions(
+              await followUpConfig.generate(transcript, ctx),
+              max,
+            );
+          } else {
+            const generated = await generateFollowUpSuggestions({
+              model,
+              messages: transcript,
+              max,
+              timeoutMs: followUpConfig.timeoutMs,
+              abortSignal: request.signal,
+            });
+            suggestions = generated.suggestions;
+            // Include the secondary call in this turn's token/cost record. The
+            // dashboard must not under-report spend just because the call powers
+            // UI guidance rather than visible answer text.
+            finalUsage = mergeLanguageModelUsage(finalUsage, generated.usage);
+            finalTotalUsage = mergeLanguageModelUsage(finalTotalUsage, generated.usage);
+            finalProviderMetadata = mergeProviderMetadata(
+              finalProviderMetadata,
+              generated.providerMetadata,
+            );
+          }
+
+          if (suggestions.length > 0) {
+            followUpWriter?.write({
+              type: 'data-follow-ups',
+              id: 'follow-ups',
+              data: { suggestions },
+            });
+          }
+        } catch (err) {
+          console.warn(
+            JSON.stringify({
+              event: 'followups.generate_failed',
+              userId: ctx.userId,
+              conversationId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
       },
     });
 
-    return result.toUIMessageStreamResponse({
-      sendSources: true,
-      sendReasoning: true,
-      // Defeat reverse-proxy / CDN response buffering — the #1 cause of
-      // "streaming works locally but arrives as a single blob in production".
-      // `X-Accel-Buffering: no` disables nginx (and several CDNs') buffering
-      // for this response; `no-transform` stops intermediaries from
-      // re-chunking/compressing the SSE body. Hosts behind a proxy that ignores
-      // these still get the startup diagnostic logged above.
-      headers: {
-        'X-Accel-Buffering': 'no',
-        'Cache-Control': 'no-cache, no-transform',
-      },
-      // REQUIRED for correct persistence. Without `generateMessageId` the
-      // assistant message comes back with an empty id, so every assistant turn
-      // in a conversation collides on the same '' primary key and only the
-      // first one survives `saveTurn`'s idempotent insert. `originalMessages`
-      // lets the SDK reuse existing ids (preventing duplicates) and return the
-      // full original+response set in onFinish.
+    let mappedStreamError: string | undefined;
+    const mapStreamError = (err: unknown): string => {
+      // The wrapped stream can observe the same failure twice (once while the
+      // model stream maps it into an error chunk, once while the outer stream
+      // consumes that chunk). Log/map/cleanup exactly once.
+      if (mappedStreamError !== undefined) return mappedStreamError;
+      if (logErrors) {
+        console.error(
+          '[chat-widget] stream error:',
+          err instanceof Error ? (err.stack ?? err.message) : err,
+        );
+      }
+      mappedStreamError = (onError ? onError(err) : GENERIC_STREAM_ERROR_MESSAGE) || GENERIC_STREAM_ERROR_MESSAGE;
+      void runCleanup('on-error');
+      return mappedStreamError;
+    };
+
+    // Wrap the model stream so the server can append typed data parts after the
+    // main text (follow-ups today; other structured post-response UI later)
+    // without inventing a second browser endpoint. The SDK waits for the async
+    // streamText onFinish above, so data-follow-ups lands before the finish event.
+    const uiStream = createUIMessageStream({
+      // REQUIRED for correct persistence. Without a generated response id every
+      // assistant turn collides on the empty-string primary key. Passing the
+      // original messages also lets the SDK reuse ids during continuations.
       originalMessages: incoming,
-      generateMessageId: generateId,
+      generateId,
+      onError: mapStreamError,
+      execute: ({ writer }) => {
+        // streamText is backpressure-driven: onFinish cannot run until this
+        // merged stream is consumed, so the writer is guaranteed to be set
+        // before the follow-up generator attempts to append its data part.
+        followUpWriter = writer;
+        writer.merge(
+          result.toUIMessageStream({
+            sendSources: true,
+            sendReasoning: true,
+            originalMessages: incoming,
+            generateMessageId: generateId,
+            onError: mapStreamError,
+          }),
+        );
+      },
       onFinish: async ({ messages: finalMessages, isAborted }) => {
         // Citations: stamp de-duplicated `source-url` parts for the retrieved
         // chunks onto the assistant message so the existing <Sources> UI renders
@@ -718,21 +851,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
         await runCleanup('on-finish');
       },
-      onError: (err) => {
-        // Surface stream errors by DEFAULT. The AI SDK swallows them to avoid
-        // crashing the server, which is precisely how production failures (bad
-        // key, rate limit, wrong URL) end up with empty logs. We log unless the
-        // host opts out via `logErrors: false` — independently of `onError`,
-        // which only maps the user-facing copy.
-        if (logErrors) {
-          console.error(
-            '[chat-widget] stream error:',
-            err instanceof Error ? (err.stack ?? err.message) : err,
-          );
-        }
-        const message = onError ? onError(err) : GENERIC_STREAM_ERROR_MESSAGE;
-        void runCleanup('on-error');
-        return message;
+    });
+
+    return createUIMessageStreamResponse({
+      stream: uiStream,
+      // Defeat reverse-proxy / CDN response buffering — the #1 cause of
+      // "streaming works locally but arrives as a single blob in production".
+      // `X-Accel-Buffering: no` disables nginx (and several CDNs') buffering;
+      // `no-transform` stops intermediaries from re-chunking/compressing SSE.
+      headers: {
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache, no-transform',
       },
     });
   }

@@ -27,6 +27,7 @@ import type {
   StoredMessage,
 } from '../../types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
+import { normalizeSerializedFollowUpConfig } from '../../../utils/follow-ups';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.dev';
 
@@ -302,16 +303,25 @@ export function createHostedConfig(options: HostedOptions) {
         cache.set(key, { value: null, at: now });
         return null;
       }
+      const appearance = raw.appearance ?? null;
+      const appearanceFollowUps =
+        appearance && typeof appearance === 'object' && !Array.isArray(appearance)
+          ? (appearance as Record<string, unknown>).followUps
+          : undefined;
       const value: HostedAgentConfig = {
         model: raw.model ?? null,
         systemPrompt: raw.systemPrompt ?? null,
         greeting: raw.greeting ?? null,
-        appearance: raw.appearance ?? null,
+        appearance,
         maxOutputTokens: raw.maxOutputTokens ?? null,
         // Dashboard-pushed Headroom compression toggle. Consulted by the handler
         // as `hosted?.compression` (code > hosted > off); it must survive the
         // fetcher's normalisation or the dashboard switch is silently dead.
         compression: raw.compression ?? null,
+        // The control plane currently stores this under appearance.followUps;
+        // also accept a future top-level field so the client survives that API
+        // normalization without another release.
+        followUps: normalizeSerializedFollowUpConfig(raw.followUps ?? appearanceFollowUps),
       };
       if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
       cache.set(key, { value, at: now });

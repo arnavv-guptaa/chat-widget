@@ -13,6 +13,7 @@
  *
  *   OPTIONAL injections — a default exists, swap to take control:
  *     • model              (which LLM)
+ *     • followUps          (post-response suggestion generation)
  *     • buildTools         (your tools, incl. per-request resources)
  *     • store              (persistence; hosted default)
  *     • storage            (attachments; hosted default)
@@ -33,6 +34,7 @@ import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
 import type { CompressionOption } from './compression';
+import type { FollowUpMessage } from '../types';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -104,6 +106,14 @@ export interface HostedAgentConfig {
    * `compression` option (code > hosted > off).
    */
   compression?: CompressionOption | null;
+
+  /**
+   * Server-generated follow-up suggestions resolved from the published agent
+   * config. `true` uses the handler's configured model and defaults; an object
+   * can disable the feature or tune the chip count. Code-level `followUps`
+   * always wins over this hosted value.
+   */
+  followUps?: boolean | Pick<ServerFollowUpConfig, 'enabled' | 'max' | 'suggestions' | 'timeoutMs'> | null;
 }
 
 /**
@@ -266,6 +276,36 @@ export interface MemoryConfig {
   ) => string | null | undefined | Promise<string | null | undefined>;
 }
 
+/**
+ * Server-authoritative suggested follow-ups appended to each completed assistant
+ * message as a `data-follow-ups` UI part. Pass `true` for the built-in generator
+ * (a small structured second call using the same resolved model), or an object
+ * to tune/override it. Off by default.
+ *
+ * Unlike the client `ChatWidgetConfig.followUps.generate` escape hatch, this
+ * never exposes provider credentials in the browser and works for React and the
+ * script-tag embed through the same response stream.
+ */
+export interface ServerFollowUpConfig {
+  /** Master switch. Default true when the object is provided. */
+  enabled?: boolean;
+  /** Number of chips to emit, clamped to 1–5. Default 3. */
+  max?: number;
+  /** Static chips emitted after every reply; skips the second model call. */
+  suggestions?: string[];
+  /** Timeout for the post-response generator. Default 6000ms. */
+  timeoutMs?: number;
+  /**
+   * Optional custom server-side generator. Receives a text-only transcript plus
+   * the verified request context. Return an empty array to emit no chips.
+   * Omit to use the built-in structured model call.
+   */
+  generate?: (
+    messages: FollowUpMessage[],
+    ctx: ChatRequestContext,
+  ) => string[] | Promise<string[]>;
+}
+
 export interface CreateChatHandlerOptions {
   // ── REQUIRED injection ───────────────────────────────────────────────────
 
@@ -299,6 +339,19 @@ export interface CreateChatHandlerOptions {
    * control) — a code value always wins (code > hosted > provider default).
    */
   maxOutputTokens?: number;
+
+  /**
+   * Generate contextual follow-up chips after each completed assistant reply.
+   * `true` uses a small structured second call with the same resolved model;
+   * pass an object to tune the count/timeout, provide static suggestions, or
+   * supply a custom server-side generator. Suggestions are appended to the assistant message as a
+   * `data-follow-ups` part after the main text finishes, so they never delay
+   * first-token streaming and survive history reloads.
+   *
+   * Precedence: code > hosted config > off. Pass `false` to force-disable a
+   * hosted dashboard setting. Default: off.
+   */
+  followUps?: boolean | ServerFollowUpConfig;
 
   /**
    * Build the tool set for this request. Async and context-aware so tools can

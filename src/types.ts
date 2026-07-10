@@ -234,12 +234,13 @@ export interface ChatWidgetConfig {
   actionRenderers?: Record<string, ActionRenderer>;
 
   /**
-   * AI-suggested follow-up question chips shown after each assistant reply
-   * (#134), rendered as tappable pills so users always have a next step and
-   * conversations don't dead-end. Off by default; enable by providing a
-   * `generate` function (a lightweight second model call) or static
-   * `suggestions`. Generated AFTER the reply finishes, so it never blocks
-   * streaming.
+   * Optional client-side override/fallback for follow-up chips shown after an
+   * assistant reply (#134). The recommended path is server-side
+   * `createChatHandler({ followUps: true })`, which emits a safe
+   * `data-follow-ups` part in the response stream automatically — no browser
+   * API key or client generator required. Use this object only to force-hide
+   * server suggestions, provide static chips, or supply a custom client-side
+   * generator for a BYO transport.
    */
   followUps?: FollowUpConfig;
 
@@ -340,24 +341,25 @@ export interface FollowUpMessage {
 }
 
 /**
- * AI-suggested follow-up chips shown after each assistant reply (#134).
+ * Client-side override/fallback for follow-up chips (#134). Prefer the secure
+ * server generator: `createChatHandler({ followUps: true })`.
  */
 export interface FollowUpConfig {
   /**
-   * Master switch. Default: enabled when `generate` or `suggestions` is set;
-   * disabled otherwise. Set `false` to force-disable.
+   * Client display switch. Set `false` to hide server-emitted suggestions too.
+   * Otherwise server data is shown automatically; `generate`/`suggestions` are
+   * used only when the response contains no `data-follow-ups` part.
    */
   enabled?: boolean;
   /**
-   * Generate up to `max` contextual follow-up questions from the completed
-   * conversation. Runs AFTER the assistant reply finishes (off the hot path —
-   * never blocks the main response). Use a lightweight model call here; errors
-   * or a non-array result fall back to no chips.
+   * BYO client generator fallback. Runs after the assistant reply finishes and
+   * never blocks the main response, but provider credentials must stay out of
+   * the browser — call your own authenticated backend from here if needed.
    */
   generate?: (messages: FollowUpMessage[]) => string[] | Promise<string[]>;
-  /** Static follow-ups shown after every reply (used when `generate` is absent). */
+  /** Static fallback chips shown when no server data or `generate` is present. */
   suggestions?: string[];
-  /** Max chips to show. Default 3. */
+  /** Max chips to show, clamped to 1–5. Default 3 for client fallbacks. */
   max?: number;
 }
 
