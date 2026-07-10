@@ -2,9 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## 0.12.0 — UNRELEASED
-
-> Release editor's note: entries referencing an open PR (#183–#187, #197, #198, #207, #212) assume that PR merges before this release — **prune any entry whose PR didn't make the cut**, then replace UNRELEASED with the date.
+## 0.12.0 — 2026-07-10
 
 ### Breaking
 - **Theming API is now exactly three required colors — `theme.mode` is removed.** `ThemeConfig` is `{ backgroundColor, textColor, primaryColor }`, all required hex; omit `theme` for the stock palette. Invalid or partial themes are ignored whole (never half-applied). The luminance auto-contrast flip is gone: the widget renders declared colors faithfully and derives every neutral (surfaces, borders, muted/subtle text, placeholder) from one background→text ramp. Internally, background lightness only selects the syntax-highlight palette and shadow strength (`.chat-dark`, not part of the public API). Assistant links now use `--chat-primary` instead of a hardcoded blue.
@@ -35,6 +33,8 @@ All notable changes to `@mordn/chat-widget` are documented here. The format foll
 
 ### Internal
 - CI PR gates: typecheck, build, strict-ESM import check, and a real Next App-Router consumer smoke build (#183). First behavior tests: vitest harness with handler IDOR/identity-boundary, SSRF net-guard, and URL-safety suites (#187).
+- Neutral color tokens consolidated 14 → 10: `--chat-surface-deep`/`--chat-muted` fold into `--chat-surface`, `--chat-surface-hover` into `--chat-hover-bg` (now the 0.10 ramp stop, so hover feedback is visible), `--chat-divider` into `--chat-border`; `--chat-text-muted` moves 0.64 → 0.75 (icons/secondary text sit closer to the text color). All tokens are uniform HSL triplets now. These are internal names (the public theming API is unchanged), but anyone overriding `--chat-*` vars directly should re-check their overrides. The composer pill is a single fill (transparent textarea/form) — the old two-zone tint split is gone.
+- Ad-hoc `hsl(var(--chat-text) / α)` blends replaced with their ramp-token equivalents, so emphasis/hover colors can't drift between code paths.
 
 ## 0.11.0 — 2026-07-05
 The enterprise consolidation release (#176): six audit-critical fixes (XSS in attachments/links, legacy-store IDOR, AppearanceSettings crash, streaming live region, send-button a11y, tsup externalization), interactive a11y + UI-resilience hardening, prompt-input hardening, action result cards, follow-up chips, streaming reliability, Headroom token compression, message feedback end-to-end, and the knowledge/RAG + memory + MCP engine. Known issue (fixed in 0.12.0): a leftover `react-syntax-highlighter` directory import crashed strict-ESM consumers.
