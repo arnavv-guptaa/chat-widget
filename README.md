@@ -132,6 +132,40 @@ export default function Assistant({ userId }: { userId: string }) {
 > **server ignores it for authorization** — your `getChatUserId` is the only
 > source of identity. See the security note above.
 
+## Suggested follow-ups
+
+Turn on contextual next-step chips with one server-side option:
+
+```ts
+export const { GET, POST, DELETE } = createChatHandler({
+  getUserId: getChatUserId,
+  model: anthropic('claude-sonnet-4-5'),
+  store: createDrizzleChatStore(),
+  followUps: true,
+});
+```
+
+After the main answer finishes streaming, the handler makes a small structured
+second call with the same resolved model and appends up to three suggestions as
+a `data-follow-ups` part on the assistant message. The widget renders them
+automatically; clicking one sends it as the next user message. They are also
+persisted with the message, so history reloads do not need to regenerate them.
+The second call is included in the turn's usage/cost totals.
+
+Tune it or avoid the model call entirely with static chips:
+
+```ts
+followUps: { max: 4, timeoutMs: 5_000 }
+// or
+followUps: { suggestions: ['Show me an example', 'What should I do next?'] }
+```
+
+For a fully custom server generator, pass `generate(messages, ctx)`. Existing
+client-side `ChatWidget` `followUps.generate` / `suggestions` remain available as
+BYO-transport fallbacks, but the server option is recommended because provider
+credentials never reach the browser. Set `followUps: false` in the handler to
+force-disable a hosted dashboard setting.
+
 ---
 
 ## Opening the widget from your site (Ask-AI buttons & shortcuts)

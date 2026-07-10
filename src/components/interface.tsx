@@ -35,6 +35,7 @@ import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PaperclipIcon, PlusIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { normalizeFollowUpSuggestions, resolveFollowUpCount } from '../utils/follow-ups';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
@@ -241,9 +242,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const effectiveStarterPrompts: StarterPrompt[] | undefined =
     (dynamicPrompts && dynamicPrompts.length > 0 ? dynamicPrompts : config?.starterPrompts) ?? undefined;
 
-  // AI follow-up chips (#134), computed once per completed assistant turn and
-  // cleared at the start of the next turn. The ref tracks which assistant
-  // message the current chips belong to, so generation runs exactly once.
+  // AI follow-up chips (#134). The preferred path is a server-emitted
+  // `data-follow-ups` part on the completed assistant message; the legacy
+  // client generator/static config remains as an override/fallback.
   const [followUps, setFollowUps] = useState<string[]>([]);
   const followUpsForRef = useRef<string | null>(null);
 
@@ -1176,39 +1177,61 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
   );
 
-  // Follow-up chips (#134): after an assistant turn settles, derive up to
-  // `max` suggestions (host generator or static list). Off the hot path —
-  // only runs at status 'ready'. Cleared once when the next turn starts so the
-  // chips never linger over a fresh question or flicker during streaming.
+  // Follow-up chips (#134): the handler appends a persistent data part after
+  // the assistant's text settles. Prefer that one-toggle, server-safe path; keep
+  // the original host generator/static list as a backwards-compatible fallback.
+  // Chips clear as soon as a new turn starts, so stale suggestions never sit
+  // above an in-flight response.
   useEffect(() => {
     const fu = config?.followUps;
     const last = messages[messages.length - 1];
-    const active =
-      !!fu && fu.enabled !== false && status === 'ready' && !!last && last.role === 'assistant';
-    if (!active) {
+    const settledAssistant = status === 'ready' && !!last && last.role === 'assistant';
+    if (!settledAssistant || fu?.enabled === false) {
       if (followUpsForRef.current !== null) {
         followUpsForRef.current = null;
         setFollowUps([]);
       }
       return;
     }
+
+    const dataPart = (last.parts ?? []).find(
+      (part) => (part as { type?: string }).type === 'data-follow-ups',
+    ) as { data?: { suggestions?: unknown } } | undefined;
+    const serverSuggestions = normalizeFollowUpSuggestions(
+      dataPart?.data?.suggestions,
+      fu?.max ?? 5,
+    );
+    if (serverSuggestions.length > 0) {
+      followUpsForRef.current = last.id;
+      setFollowUps(serverSuggestions);
+      return;
+    }
+
+    // No server data part: use the legacy client-supplied generator/static list.
+    if (!fu) {
+      if (followUpsForRef.current !== null) setFollowUps([]);
+      followUpsForRef.current = null;
+      return;
+    }
     if (followUpsForRef.current === last.id) return; // already computed this turn
     followUpsForRef.current = last.id;
-    const max = fu.max ?? 3;
+    const max = resolveFollowUpCount(fu.max);
     if (typeof fu.generate === 'function') {
       const textOf = (m: { role: string; parts?: Array<{ type: string; text?: string }> }): FollowUpMessage => ({
         role: m.role,
         content: (m.parts ?? [])
-          .filter((p) => p.type === 'text' && typeof p.text === 'string')
-          .map((p) => p.text as string)
+          .filter((part) => part.type === 'text' && typeof part.text === 'string')
+          .map((part) => part.text as string)
           .join('\n\n'),
       });
       const simplified = messages.map(textOf);
       let cancelled = false;
       Promise.resolve()
         .then(() => fu.generate!(simplified))
-        .then((s) => {
-          if (!cancelled) setFollowUps((Array.isArray(s) ? s : []).filter(Boolean).slice(0, max));
+        .then((suggestions) => {
+          if (!cancelled) {
+            setFollowUps(normalizeFollowUpSuggestions(suggestions, max));
+          }
         })
         .catch(() => {
           if (!cancelled) setFollowUps([]);
@@ -1217,7 +1240,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         cancelled = true;
       };
     }
-    setFollowUps((fu.suggestions ?? []).slice(0, max));
+    setFollowUps(normalizeFollowUpSuggestions(fu.suggestions, max));
   }, [messages, status, config?.followUps]);
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
@@ -1711,7 +1734,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           {followUps.length > 0 && (
             <Suggestions className="mb-3">
               {followUps.map((s, i) => (
-                <Suggestion key={`${s}-${i}`} suggestion={s} onClick={(text) => handleSubmit({ text })} />
+                <Suggestion
+                  key={`${s}-${i}`}
+                  suggestion={s}
+                  onClick={(text) => {
+                    setFollowUps([]);
+                    followUpsForRef.current = null;
+                    void handleSubmit({ text });
+                  }}
+                />
               ))}
             </Suggestions>
           )}
