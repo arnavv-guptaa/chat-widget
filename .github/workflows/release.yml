@@ -42,11 +42,12 @@ jobs:
           # step, so npm uses OIDC trusted publishing rather than token auth.
           registry-url: 'https://registry.npmjs.org'
 
-      # NOTE: no "npm install -g npm@latest" here — upgrading npm over the
-      # toolcache install intermittently leaves a broken tree (publish failed
-      # with MODULE_NOT_FOUND: 'sigstore' from libnpmpublish). The publish step
-      # below runs npm@latest via npx instead: a complete, isolated install
-      # that satisfies Trusted Publishing's npm >= 11.5.1 requirement.
+      # NOTE: the publish step runs a PINNED npm via npx (isolated install,
+      # doesn't touch the toolcache copy). Pinned, not @latest: npm 12.0.0
+      # shipped a provenance regression (libnpmpublish requires 'sigstore'
+      # which it no longer bundles) that failed this workflow twice on
+      # v0.12.0. 11.18.0 is the last known-good 11.x and satisfies Trusted
+      # Publishing's >= 11.5.1 floor.
       - name: Install dependencies
         run: npm ci
 
@@ -69,6 +70,5 @@ jobs:
         # No NPM_TOKEN and no token .npmrc — npm@latest auto-detects the GitHub
         # Actions OIDC environment (id-token: write granted above) and exchanges
         # the OIDC token for a short-lived publish credential. --provenance is
-        # implied under OIDC but kept explicit for clarity. npx -y npm@latest
-        # gives a self-contained current npm without touching the toolcache copy.
-        run: npx -y npm@latest publish --access public --provenance
+        # implied under OIDC but kept explicit for clarity.
+        run: npx -y npm@11.18.0 publish --access public --provenance
