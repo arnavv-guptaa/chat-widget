@@ -1,11 +1,6 @@
 import { cn } from "../utils/cn";
 import { isSafeDataImage, safeUrl } from "../utils/url-safety";
-import {
-  FileIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
-  PresentationIcon,
-} from "lucide-react";
+import { describeFile } from "./file-icons/describe-file";
 
 export type MessageAttachment = {
   filename: string;
@@ -51,45 +46,6 @@ function openAttachment(attachment: MessageAttachment) {
   }
 
   window.open(safe, "_blank", "noopener,noreferrer");
-}
-
-function describeFile(att: MessageAttachment): {
-  Icon: typeof FileIcon;
-  label: string;
-} {
-  const mt = (att.mediaType || "").toLowerCase();
-  const ext = (att.filename || "").toLowerCase().split(".").pop() || "";
-  if (mt === "application/pdf" || ext === "pdf") return { Icon: FileTextIcon, label: "PDF" };
-  if (
-    mt.includes("spreadsheet") ||
-    mt.includes("excel") ||
-    ext === "xlsx" ||
-    ext === "xls" ||
-    ext === "csv" ||
-    ext === "tsv"
-  ) {
-    return { Icon: FileSpreadsheetIcon, label: ext.toUpperCase() || "Spreadsheet" };
-  }
-  if (
-    mt.includes("presentation") ||
-    mt.includes("powerpoint") ||
-    ext === "pptx" ||
-    ext === "ppt"
-  ) {
-    return { Icon: PresentationIcon, label: ext.toUpperCase() || "Slides" };
-  }
-  if (
-    mt.includes("wordprocessing") ||
-    mt.includes("msword") ||
-    ext === "docx" ||
-    ext === "doc"
-  ) {
-    return { Icon: FileTextIcon, label: ext.toUpperCase() || "Doc" };
-  }
-  if (mt.startsWith("text/") || ext === "txt" || ext === "md" || ext === "json") {
-    return { Icon: FileTextIcon, label: ext.toUpperCase() || "Text" };
-  }
-  return { Icon: FileIcon, label: ext.toUpperCase() || "File" };
 }
 
 export function MessageAttachments({ attachments, className }: MessageAttachmentsProps) {

@@ -26,57 +26,21 @@ import {
   ChevronRightIcon,
   CheckIcon,
   CopyIcon,
-  FileCodeIcon,
-  FileJsonIcon,
-  FileTerminalIcon,
-  FileTextIcon,
-  FileTypeIcon,
-  BracesIcon,
-  HashIcon,
-  DatabaseIcon,
-  GlobeIcon,
-  PaletteIcon,
-  CoffeeIcon,
-  AtomIcon,
-  FeatherIcon,
-  type LucideProps,
 } from "lucide-react";
+import { getFileIconByLanguage } from "./file-icons/file-icon-map";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "../utils/cn";
 import { highlightCode } from "../utils/highlight";
 
 /**
- * Map a fenced-code language tag to a fitting file icon, so the collapsed pill
- * reads "⌄ 🪶 python · 24 lines" instead of a generic "<>" for everything.
- * Aliases (ts→typescript, py→python, sh→bash, …) collapse to one entry. Anything
- * unknown falls back to a plain code-file icon — never a crash.
+ * Language icons come from the shared brand-icon map (ported from jarvis /
+ * Crunch): real Python/TypeScript/React/Go glyphs with embedded brand colors —
+ * replacing the old lucide "nearest glyph" stand-ins (a feather for Python, a
+ * coffee cup for Java) that read as bugs. Unknown tags fall back to a generic
+ * file icon — never a crash.
  */
-const LANGUAGE_ICONS: Record<string, ComponentType<LucideProps>> = {
-  // JS / TS family
-  javascript: FileCodeIcon, js: FileCodeIcon, jsx: AtomIcon,
-  typescript: FileCodeIcon, ts: FileCodeIcon, tsx: AtomIcon,
-  // data / config
-  json: FileJsonIcon, jsonc: FileJsonIcon, json5: FileJsonIcon,
-  yaml: BracesIcon, yml: BracesIcon, toml: BracesIcon,
-  // shell
-  bash: FileTerminalIcon, sh: FileTerminalIcon, shell: FileTerminalIcon,
-  zsh: FileTerminalIcon, console: FileTerminalIcon, powershell: FileTerminalIcon,
-  // web
-  html: GlobeIcon, xml: GlobeIcon, svg: GlobeIcon,
-  css: PaletteIcon, scss: PaletteIcon, sass: PaletteIcon, less: PaletteIcon,
-  // db
-  sql: DatabaseIcon, postgres: DatabaseIcon, mysql: DatabaseIcon,
-  // languages with a closer-fitting glyph
-  python: FeatherIcon, py: FeatherIcon,
-  ruby: HashIcon, rb: HashIcon,
-  java: CoffeeIcon, kotlin: CoffeeIcon,
-  markdown: FileTextIcon, md: FileTextIcon, mdx: FileTextIcon, text: FileTextIcon,
-  c: FileTypeIcon, cpp: FileTypeIcon, "c++": FileTypeIcon, csharp: FileTypeIcon, "c#": FileTypeIcon,
-  go: FileCodeIcon, rust: FileCodeIcon, rs: FileCodeIcon, php: FileCodeIcon,
-};
-
-function iconForLanguage(language: string): ComponentType<LucideProps> {
-  return LANGUAGE_ICONS[language.toLowerCase()] ?? FileCodeIcon;
+function iconForLanguage(language: string): ComponentType<{ className?: string }> {
+  return getFileIconByLanguage(language);
 }
 
 function extractText(children: ReactNode): string {

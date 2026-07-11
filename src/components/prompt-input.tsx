@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "../ui/button";
+import { describeFile } from "./file-icons/describe-file";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,13 +27,10 @@ import type { ChatStatus, FileUIPart } from "ai";
 import {
   FileIcon,
   ArrowUpIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
   ImageIcon,
   Loader2Icon,
   PaperclipIcon,
   PlusIcon,
-  PresentationIcon,
   SquareIcon,
   XIcon,
 } from "lucide-react";
@@ -150,47 +148,8 @@ function NonImageChip({ data }: { data: FileUIPart & { id: string } }) {
   );
 }
 
-// Match a file's mediaType / extension to a recognisable icon + short
-// label. Falls back to a generic paperclip + the bare extension or
-// "FILE" so the chip always carries some hint about the content.
-function describeFile(data: FileUIPart & { id: string }): {
-  Icon: typeof FileIcon;
-  label: string;
-} {
-  const mt = (data.mediaType || "").toLowerCase();
-  const ext = (data.filename || "").toLowerCase().split(".").pop() || "";
-  if (mt === "application/pdf" || ext === "pdf") return { Icon: FileTextIcon, label: "PDF" };
-  if (
-    mt.includes("spreadsheet") ||
-    mt.includes("excel") ||
-    ext === "xlsx" ||
-    ext === "xls" ||
-    ext === "csv" ||
-    ext === "tsv"
-  ) {
-    return { Icon: FileSpreadsheetIcon, label: ext.toUpperCase() || "Spreadsheet" };
-  }
-  if (
-    mt.includes("presentation") ||
-    mt.includes("powerpoint") ||
-    ext === "pptx" ||
-    ext === "ppt"
-  ) {
-    return { Icon: PresentationIcon, label: ext.toUpperCase() || "Slides" };
-  }
-  if (
-    mt.includes("wordprocessing") ||
-    mt.includes("msword") ||
-    ext === "docx" ||
-    ext === "doc"
-  ) {
-    return { Icon: FileTextIcon, label: ext.toUpperCase() || "Doc" };
-  }
-  if (mt.startsWith("text/") || ext === "txt" || ext === "md" || ext === "json") {
-    return { Icon: FileTextIcon, label: ext.toUpperCase() || "Text" };
-  }
-  return { Icon: FileIcon, label: ext.toUpperCase() || "File" };
-}
+// describeFile (shared with message attachments) now lives in
+// ./file-icons/describe-file — brand icons + a short uppercase label.
 
 export type PromptInputAttachmentsProps = Omit<
   HTMLAttributes<HTMLDivElement>,
