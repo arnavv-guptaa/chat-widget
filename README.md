@@ -152,19 +152,19 @@ automatically; clicking one sends it as the next user message. They are also
 persisted with the message, so history reloads do not need to regenerate them.
 The second call is included in the turn's usage/cost totals.
 
-Tune it or avoid the model call entirely with static chips:
+Tune the count and generation timeout:
 
 ```ts
 followUps: { max: 4, timeoutMs: 5_000 }
-// or
-followUps: { suggestions: ['Show me an example', 'What should I do next?'] }
 ```
 
-For a fully custom server generator, pass `generate(messages, ctx)`. Existing
-client-side `ChatWidget` `followUps.generate` / `suggestions` remain available as
-BYO-transport fallbacks, but the server option is recommended because provider
+For a fully custom server generator, pass `generate(messages, ctx)`. The
+existing client-side `ChatWidget` `followUps.generate` remains available as a
+BYO-transport fallback, but the server option is recommended because provider
 credentials never reach the browser. Set `followUps: false` in the handler to
-force-disable a hosted dashboard setting.
+force-disable a hosted dashboard setting. (There is deliberately no static
+suggestion list: the same chips after every reply are noise — fixed prompts
+belong in `starterPrompts`.)
 
 ---
 

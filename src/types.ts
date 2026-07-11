@@ -239,8 +239,8 @@ export interface ChatWidgetConfig {
    * `createChatHandler({ followUps: true })`, which emits a safe
    * `data-follow-ups` part in the response stream automatically — no browser
    * API key or client generator required. Use this object only to force-hide
-   * server suggestions, provide static chips, or supply a custom client-side
-   * generator for a BYO transport.
+   * server suggestions or supply a custom client-side generator for a BYO
+   * transport.
    */
   followUps?: FollowUpConfig;
 
@@ -347,8 +347,8 @@ export interface FollowUpMessage {
 export interface FollowUpConfig {
   /**
    * Client display switch. Set `false` to hide server-emitted suggestions too.
-   * Otherwise server data is shown automatically; `generate`/`suggestions` are
-   * used only when the response contains no `data-follow-ups` part.
+   * Otherwise server data is shown automatically; `generate` is used only when
+   * the response contains no `data-follow-ups` part.
    */
   enabled?: boolean;
   /**
@@ -357,8 +357,6 @@ export interface FollowUpConfig {
    * the browser — call your own authenticated backend from here if needed.
    */
   generate?: (messages: FollowUpMessage[]) => string[] | Promise<string[]>;
-  /** Static fallback chips shown when no server data or `generate` is present. */
-  suggestions?: string[];
   /** Max chips to show, clamped to 1–5. Default 3 for client fallbacks. */
   max?: number;
 }

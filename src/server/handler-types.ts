@@ -113,7 +113,7 @@ export interface HostedAgentConfig {
    * can disable the feature or tune the chip count. Code-level `followUps`
    * always wins over this hosted value.
    */
-  followUps?: boolean | Pick<ServerFollowUpConfig, 'enabled' | 'max' | 'suggestions' | 'timeoutMs'> | null;
+  followUps?: boolean | Pick<ServerFollowUpConfig, 'enabled' | 'max' | 'timeoutMs'> | null;
 }
 
 /**
@@ -291,8 +291,6 @@ export interface ServerFollowUpConfig {
   enabled?: boolean;
   /** Number of chips to emit, clamped to 1–5. Default 3. */
   max?: number;
-  /** Static chips emitted after every reply; skips the second model call. */
-  suggestions?: string[];
   /** Timeout for the post-response generator. Default 6000ms. */
   timeoutMs?: number;
   /**
@@ -343,8 +341,8 @@ export interface CreateChatHandlerOptions {
   /**
    * Generate contextual follow-up chips after each completed assistant reply.
    * `true` uses a small structured second call with the same resolved model;
-   * pass an object to tune the count/timeout, provide static suggestions, or
-   * supply a custom server-side generator. Suggestions are appended to the assistant message as a
+   * pass an object to tune the count/timeout or supply a custom server-side
+   * generator. Suggestions are appended to the assistant message as a
    * `data-follow-ups` part after the main text finishes, so they never delay
    * first-token streaming and survive history reloads.
    *

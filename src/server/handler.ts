@@ -675,9 +675,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
         try {
           let suggestions: string[];
-          if (followUpConfig.suggestions) {
-            suggestions = normalizeFollowUpSuggestions(followUpConfig.suggestions, max);
-          } else if (followUpConfig.generate) {
+          if (followUpConfig.generate) {
             suggestions = normalizeFollowUpSuggestions(
               await followUpConfig.generate(transcript, ctx),
               max,

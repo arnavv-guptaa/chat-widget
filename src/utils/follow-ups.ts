@@ -6,7 +6,6 @@ export const MAX_FOLLOW_UP_CHARS = 160;
 export interface SerializedFollowUpConfig {
   enabled?: boolean;
   max?: number;
-  suggestions?: string[];
   timeoutMs?: number;
 }
 
@@ -20,9 +19,6 @@ export function normalizeSerializedFollowUpConfig(
   return {
     ...(typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : {}),
     ...(typeof raw.max === 'number' && Number.isFinite(raw.max) ? { max: raw.max } : {}),
-    ...(Array.isArray(raw.suggestions)
-      ? { suggestions: raw.suggestions.filter((item): item is string => typeof item === 'string') }
-      : {}),
     ...(typeof raw.timeoutMs === 'number' && Number.isFinite(raw.timeoutMs)
       ? { timeoutMs: raw.timeoutMs }
       : {}),

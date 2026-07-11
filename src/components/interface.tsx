@@ -1250,7 +1250,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         cancelled = true;
       };
     }
-    setFollowUps(normalizeFollowUpSuggestions(fu.suggestions, max));
+    // No server data and no client generator → nothing to show. (Static
+    // per-reply suggestion lists were removed: the same chips after every
+    // answer are noise — fixed prompts belong in starterPrompts.)
+    setFollowUps([]);
   }, [messages, status, config?.followUps]);
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {

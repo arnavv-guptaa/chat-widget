@@ -142,7 +142,9 @@ describe('handler follow-up data part', () => {
       model: mockModel(),
       store: () => store,
       followUps: {
-        suggestions: ['Show me an example', 'What should I do next?', 'Show me an example'],
+        // Custom generator (returns a duplicate to prove normalization runs on
+        // the emission path). Static per-reply lists were removed from the API.
+        generate: () => ['Show me an example', 'What should I do next?', 'Show me an example'],
         max: 3,
       },
     });

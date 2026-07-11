@@ -2,6 +2,15 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.13.0 — UNRELEASED
+
+### Added
+- **Server-generated follow-up suggestions** (#220): `createChatHandler({ followUps: true })` makes a bounded structured second call after the main answer, emits a persistent `data-follow-ups` part in the same UI stream, and includes the secondary call in usage/cost totals. Configure `{ max, timeoutMs }` or a custom server `generate(messages, ctx)`; hosted config via `appearance.followUps`. The existing client generator remains a BYO-transport fallback. There is deliberately no static suggestion list — the same chips after every reply are noise; fixed prompts belong in `starterPrompts`.
+- Follow-ups render as a **"Related" block** — a quiet label plus up to three stacked full-width rows attached under the completed reply, inside the transcript (replaces the horizontally scrolling pill row, which truncated suggestions and hid all but the first at widget widths).
+
+### Fixed
+- Chat transport headers are resolved **per request**: hosts that change `extraHeaders` between renders (e.g. the dashboard playground's unsaved draft toggles) no longer send stale mount-time values.
+
 ## 0.12.0 — 2026-07-10
 
 ### Breaking
@@ -18,7 +27,6 @@ All notable changes to `@mordn/chat-widget` are documented here. The format foll
 - Internal: `@supabase/supabase-js` restored as a devDependency so the d.ts build compiles standalone (#182).
 
 ### Added
-- **Server-generated follow-up suggestions** (#134): `createChatHandler({ followUps: true })` now makes a bounded structured second call after the main answer, emits persistent `data-follow-ups` chips in the same UI stream, and includes the secondary call in usage/cost totals. Static and custom server generators are supported; the existing client generator remains a fallback.
 - **`THEME_PRESETS` export** — canonical named three-color presets (Light, Dark, Midnight, Cream, Forest, Ocean) for the playground preset picker; the widget package is the single source of truth.
 - **Syntax highlighting in chat** (#197): fenced code in assistant messages and tool-call code render through a lazy, ESM-clean Shiki pipeline — highlighted on expand, streaming-safe, theme-token-driven (`--shiki-light/-dark` mapped to the widget's light/dark scope), always degrading to plain text on any failure. Tool output is language-detected (JSON vs text) instead of force-labeled JSON.
 - **Open triggers** (#198): `display.keyboardShortcut` (e.g. `"mod+i"` — recommended docs convention next to Cmd+K search), `data-mordn-chat-open|toggle|close` attributes on any element, and a `document` CustomEvent API (`mordn-chat:open|close|toggle`). All routes honor the existing `allowAutoReopen` gate and controlled-mode semantics.
