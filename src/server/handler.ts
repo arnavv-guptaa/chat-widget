@@ -87,6 +87,17 @@ const DEFAULT_ALLOWED_MEDIA_TYPES = [
 ];
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant.';
 
+// Appended to EVERY system prompt (default, hosted, or buildSystemPrompt): it
+// describes the widget's rendering surface, not behavior, so it composes with
+// any operator prompt. Without it, models routinely "draw" tables as
+// ASCII/box-drawing art inside a code fence — which the widget renders as a
+// collapsed code pill instead of the styled GFM table it fully supports.
+const RENDERING_SYSTEM = [
+  'Formatting: replies render as GitHub-Flavored Markdown.',
+  'Present tabular data as GFM pipe tables (`| Col | Col |` with a `| --- |` separator row).',
+  'Never draw tables as ASCII or box-drawing art, and never put a table inside a code fence — fences are for code only.',
+].join(' ');
+
 // Hard cap on the raw chat request body. Enforced against the ACTUAL bytes read
 // off the stream (not the forgeable Content-Length), so a chunked / omitted-
 // length client can't force an unbounded buffer + JSON parse. Overridable via
@@ -572,7 +583,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Fold retrieval + memory + context into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
-    const system = [baseSystem, contextSystem, historySystem, retrievalSystem, memorySystem]
+    const system = [baseSystem, RENDERING_SYSTEM, contextSystem, historySystem, retrievalSystem, memorySystem]
       .filter(Boolean)
       .join('\n\n');
 

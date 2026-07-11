@@ -6,11 +6,15 @@ import { Streamdown } from "streamdown";
 import { useCodeBlockAutoScroll } from "../hooks/use-code-scroll";
 import { useSmoothText } from "../hooks/use-smooth-text";
 import { CollapsibleCode } from "./collapsible-code";
+import { MarkdownTable } from "./markdown-table";
 
 // Override Streamdown's code rendering with our collapsed-by-default block, so a
 // long code file shows as a one-line pill (language · N lines · copy) the user
 // can expand — instead of an inline wall. Inline `code` passes through.
-const STREAMDOWN_COMPONENTS = { code: CollapsibleCode };
+// `table` replaces Streamdown's wrapper (whose Tailwind classes and control
+// buttons the widget's CSS build never generates) with our own rounded,
+// scrollable, copyable card — see markdown-table.tsx.
+const STREAMDOWN_COMPONENTS = { code: CollapsibleCode, table: MarkdownTable };
 
 type ResponseProps = ComponentProps<typeof Streamdown> & {
   isStreaming?: boolean;

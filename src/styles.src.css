@@ -385,33 +385,81 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* Tables — clean hairlines, subtle header. */
-/* Tables can be arbitrarily wide; in a narrow embed `width: 100%` still let a
-   many-column table overflow and get clipped by the bubble's overflow-hidden
-   (losing columns). `display: block` + `overflow-x: auto` makes the table itself
-   a horizontal scroll region, so wide tables stay fully readable at any width. */
-.chat-widget-container .is-assistant .chat-message-content table {
-  /* `display: block` + overflow-x makes a wide (many-column) table its own
-     horizontal scroll region instead of overflowing/clipping the narrow widget
-     column. `width: max-content` lets it size to its content up to that scroll.
-     `-webkit-overflow-scrolling: touch` gives momentum scrolling on iOS. */
-  display: block;
-  width: max-content;
-  max-width: 100%;
+/* Tables — a rounded card, rendered by MarkdownTable (response.tsx), which
+   replaces Streamdown's own wrapper (its Tailwind classes are never generated
+   by the widget build). Design: header row on the surface tone; horizontal
+   hairlines only — no vertical grid; row hover; digits column-aligned via
+   tabular-nums. Wide tables scroll horizontally INSIDE .chat-table-scroll, so
+   the bubble's overflow-hidden never clips columns, and the card's rounded
+   corners clip the scroll region cleanly. */
+.chat-widget-container .is-assistant .chat-message-content .chat-table {
+  position: relative;
+  margin: 0.75em 0;
+  border: 1px solid hsl(var(--chat-border));
+  border-radius: 10px;
+  overflow: hidden;
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table table {
+  width: 100%;
+  margin: 0;
   border-collapse: collapse;
-  margin: 0.6em 0;
   font-size: 0.92em;
+  line-height: 1.45;
 }
-.chat-widget-container .is-assistant .chat-message-content :is(th, td) {
-  border: 1px solid hsl(var(--chat-border));
-  padding: 0.4em 0.6em;
-  text-align: left;
+.chat-widget-container .is-assistant .chat-message-content .chat-table :is(th, td) {
+  padding: 0.5em 0.75em;
+  text-align: left; /* GFM column alignment (:---:) overrides via inline style */
+  font-variant-numeric: tabular-nums;
 }
-.chat-widget-container .is-assistant .chat-message-content th {
+.chat-widget-container .is-assistant .chat-message-content .chat-table th {
   background-color: hsl(var(--chat-surface));
+  border-bottom: 1px solid hsl(var(--chat-border));
+  color: hsl(var(--chat-text));
   font-weight: 600;
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table td {
+  color: hsl(var(--chat-text-strong));
+}
+/* Hairline between body rows (not above the first — the header rule covers it). */
+.chat-widget-container .is-assistant .chat-message-content .chat-table tbody tr + tr td {
+  border-top: 1px solid hsl(var(--chat-border));
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table tbody tr:hover td {
+  background-color: hsl(var(--chat-hover-bg) / 0.5);
+}
+/* Copy-as-TSV — hover-reveal, floating over the header's right edge. Same
+   affordance language as .chat-code-copy. Backed by the surface tone so it
+   stays legible over a scrolled-under header. */
+.chat-widget-container .chat-table-copy {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.375rem;
+  background-color: hsl(var(--chat-surface));
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--chat-text-muted));
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.chat-widget-container .chat-table:hover .chat-table-copy,
+.chat-widget-container .chat-table-copy:focus-visible {
+  opacity: 1;
+}
+.chat-widget-container .chat-table-copy:hover {
+  background-color: hsl(var(--chat-hover-bg));
+  color: hsl(var(--chat-text));
 }
 
 /* Horizontal rule — a quiet divider. */
