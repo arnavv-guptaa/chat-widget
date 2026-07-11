@@ -326,16 +326,29 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     contextRef.current = config?.context;
   }, [config?.context]);
 
+  // Request headers, same ref pattern as context above: the transport captures
+  // its options once, so a plain object here freezes whatever extraHeaders held
+  // at mount. Hosts that change headers per render (the playground sends its
+  // UNSAVED draft toggles this way, e.g. x-mordn-draft-follow-ups) were getting
+  // stale values on every request. `headers` accepts a resolvable — a function
+  // evaluated per request — so route it through a ref instead.
+  const headersRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    headersRef.current = {
+      'X-User-Id': config?.userId || '',
+      // Extra headers the host injects (e.g. the dashboard playground sends
+      // its unsaved draft model/system-prompt for an owner-authed preview).
+      ...(config?.extraHeaders ?? {}),
+    };
+  }, [config?.userId, config?.extraHeaders]);
+
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
     transport: new DefaultChatTransport({
       api: apiBase || '/',
-      headers: {
-        'X-User-Id': config?.userId || '',
-        // Extra headers the host injects (e.g. the dashboard playground sends
-        // its unsaved draft model/system-prompt for an owner-authed preview).
-        ...(config?.extraHeaders ?? {}),
-      },
+      // Resolved PER REQUEST (see headersRef above) so host-injected headers
+      // are never stale — a static object froze the mount-time values.
+      headers: () => headersRef.current,
       // Cookie mode for cross-origin apiBase deployments whose getUserId
       // reads a session cookie (see ChatWidgetConfig.requestCredentials).
       credentials: config?.requestCredentials,
