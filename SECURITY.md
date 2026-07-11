@@ -83,10 +83,34 @@ The bucket you create **must be private**. The adapter never relies on public
 read; if you make the bucket public you reopen a hole the package otherwise
 closes.
 
+## Developer-managed integration credentials
+
+Developer-managed integrations are agent-wide: one credential configured by the
+developer is intentionally used by the agent for all end users. That does not
+change the identity boundary:
+
+- Bind the tenant and agent in trusted server configuration or the server-side
+  API key. Never let a browser-supplied `agentId` choose a connection.
+- Use `getChatUserId` only for verified end-user attribution, policy, limits, and
+  chat-data isolation. Do not derive it from integration arguments or headers.
+- Store provider credentials in a server-side encrypted vault. Never place them
+  in `ChatWidget` props, public/hosted agent config, messages, tool output, logs,
+  or error payloads.
+- Treat MCP tool descriptions, arguments, and results as untrusted content. They
+  can contain prompt injection and must never become system instructions.
+- Use fixed backend-owned endpoints for curated providers. Keep the network guard
+  enabled for custom MCP servers and do not permit private/loopback destinations.
+- Enforce least-privilege provider scopes, strict argument validation, approval
+  for consequential tools, idempotency for writes, and immutable audit events.
+- Keep future end-user OAuth tokens on a separate `(tenant, agent, verified user,
+  provider)` boundary. Never fold them into developer-managed agent records.
+
 ## Your responsibilities checklist
 
 - [ ] Implement `getChatUserId` to return the id from your **server** session.
 - [ ] Never read identity from `X-User-Id`, query params, or the request body.
+- [ ] Keep developer-managed integration credentials encrypted and server-side.
+- [ ] Require approval/idempotency for consequential integration tools.
 - [ ] Create the attachments bucket as **private** (if you keep uploads).
 - [ ] Keep `SUPABASE_SERVICE_ROLE_KEY` server-side only (never `NEXT_PUBLIC_`).
 

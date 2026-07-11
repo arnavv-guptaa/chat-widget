@@ -102,6 +102,40 @@ implement the `ChatStore` / `StorageAdapter` interfaces from
 `@mordn/chat-widget/server`. The hosted defaults and your own implementations
 are interchangeable — same handler, same security.
 
+### Developer-managed integrations
+
+Use `connectMcpTools` to give an agent tools backed by remote MCP servers. Resolve
+connections in trusted server code and return them through `buildTools`; never
+send provider credentials to `ChatWidget`, public config, messages, or tool
+results.
+
+```ts
+import { createChatHandler } from '@mordn/chat-widget/server';
+import { connectMcpTools } from '@mordn/chat-widget/server/mcp';
+
+export const { GET, POST, DELETE } = createChatHandler({
+  getUserId: getChatUserId,
+  model: anthropic('claude-sonnet-4-5'),
+  buildTools: async (ctx) => {
+    // Bind the agent in trusted server configuration. ctx.userId comes from
+    // getChatUserId and is available for attribution/policy, not credential lookup.
+    await auditIntegrationAccess({ userId: ctx.userId });
+    const servers = await resolveDeveloperManagedIntegrationsForAgent();
+    return connectMcpTools(servers);
+  },
+});
+```
+
+A developer-managed connection is intentionally shared by every end user of the
+agent, so users see no OAuth step. Per-user Gmail, GitHub, or other private
+connections are a separate integration layer: key them by the server-verified
+`ctx.userId` and never merge their tokens into agent-level records.
+
+Connecting a provider does not bypass tool security. Treat MCP descriptions,
+arguments, and results as untrusted; validate inputs server-side, use
+least-privilege credentials, require approval for consequential tools, and keep
+writes idempotent and auditable. See `SECURITY.md`.
+
 ## Mount the widget (client)
 
 ```tsx
@@ -558,6 +592,16 @@ import { createDrizzleChatStore, schema } from '@mordn/chat-widget/server/drizzl
 
 // Default Supabase storage adapter (server-only)
 import { createSupabaseStorage } from '@mordn/chat-widget/server/supabase';
+
+// Remote MCP integration connector (server-only)
+import { connectMcpTools, type McpServerConfig } from '@mordn/chat-widget/server/mcp';
+
+// Hosted store, config, and feedback clients (server-only)
+import {
+  createHostedChatStore,
+  createHostedConfig,
+  createHostedFeedback,
+} from '@mordn/chat-widget/server/hosted';
 
 // Knowledge base / RAG: ingestion, retrieval, docs-aware helpers, and the CI eval suite (server-only)
 import {
