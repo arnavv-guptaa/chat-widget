@@ -435,11 +435,16 @@
    button shown mid-stream (which is primary) and honors a themed primaryColor.
    Previously this used --chat-text, which looked fine only because the default
    text/primary are both near-black — but a themed primaryColor made send (dark)
-   and stop (brand) diverge. */
+   and stop (brand) diverge.
+
+   NO border-radius here: the component owns the shape (rounded-full). This
+   rule keys on [type="submit"], and PromptInputSubmit switches to
+   type="button" mid-stream to become a Stop control — a radius here applied
+   only at rest, so the button visibly morphed square→circle when a response
+   started. */
 .chat-widget-container button[type="submit"] {
   background-color: hsl(var(--chat-primary));
   color: hsl(var(--chat-primary-foreground, var(--chat-background)));
-  border-radius: 12px;
   border: 1px solid hsl(var(--chat-border));
   font-weight: 500;
   transition: all 0.2s ease;
