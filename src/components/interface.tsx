@@ -64,10 +64,7 @@ import {
   ToolInput,
   ToolOutput,
 } from './tool';
-import {
-  Suggestion,
-  Suggestions,
-} from './suggestion';
+import { FollowUpSuggestions } from './follow-up-suggestions';
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
@@ -1670,6 +1667,20 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               </div>
             )}
             {renderedMessages}
+            {/* Follow-up suggestions (#134/#220) — a "Related" block attached
+                under the completed assistant reply, INSIDE the conversation so
+                it reads as part of the answer and scrolls away with it.
+                Tapping a row sends it as the next message. */}
+            {followUps.length > 0 && (
+              <FollowUpSuggestions
+                suggestions={followUps}
+                onSelect={(text) => {
+                  setFollowUps([]);
+                  followUpsForRef.current = null;
+                  void handleSubmit({ text });
+                }}
+              />
+            )}
             {showThinking && (
               // The ONLY pre-content indicator: a shimmering planning verb
               // ("One moment", "Working on it", …) with no spinner. Seeded by
@@ -1739,25 +1750,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 )}
               </div>
             ) : null
-          )}
-
-          {/* AI follow-up chips (#134) — shown after a completed assistant
-              reply; tapping one sends it as the next message. Rendered as
-              rounded pills in the StarterMessages style. */}
-          {followUps.length > 0 && (
-            <Suggestions className="mb-3">
-              {followUps.map((s, i) => (
-                <Suggestion
-                  key={`${s}-${i}`}
-                  suggestion={s}
-                  onClick={(text) => {
-                    setFollowUps([]);
-                    followUpsForRef.current = null;
-                    void handleSubmit({ text });
-                  }}
-                />
-              ))}
-            </Suggestions>
           )}
 
           {/* Inline error banner — appears between the message stream
