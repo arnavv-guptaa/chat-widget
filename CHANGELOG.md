@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## 0.13.0 — UNRELEASED
+## 0.13.0 — 2026-07-12
 
 ### Added
 - **Server-generated follow-up suggestions** (#220): `createChatHandler({ followUps: true })` makes a bounded structured second call after the main answer, emits a persistent `data-follow-ups` part in the same UI stream, and includes the secondary call in usage/cost totals. Configure `{ max, timeoutMs }` or a custom server `generate(messages, ctx)`; hosted config via `appearance.followUps`. The existing client generator remains a BYO-transport fallback. There is deliberately no static suggestion list — the same chips after every reply are noise; fixed prompts belong in `starterPrompts`.
