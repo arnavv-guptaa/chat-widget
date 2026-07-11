@@ -97,7 +97,13 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
     ? undefined
     : message.role === 'assistant' && prevRole === 'user'
       ? 'mt-4'
-      : 'mt-6';
+      : message.role === 'assistant' && prevRole === 'assistant'
+        ? // Assistant-after-assistant is a CONTINUATION of the same visual turn
+          // (multi-step tool runs can split one reply across messages). The full
+          // between-turns mt-6 here read as a huge hole above/below tool rows —
+          // match the within-turn transcript gap instead.
+          'mt-1.5'
+        : 'mt-6';
 
   return (
     <div className={cn('group relative', spacing)}>
