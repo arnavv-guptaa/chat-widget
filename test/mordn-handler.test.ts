@@ -1,0 +1,73 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createMordnHandler } from '../src/server/stores/hosted/mordn-handler';
+
+const published = {
+  agent: 'agent-hosted',
+  revision: 'rev-1',
+  config: {
+    schemaVersion: 1 as const,
+    runtime: { model: 'gateway/model' },
+    client: { capabilitiesPrompt: 'Hosted client' },
+  },
+};
+
+function hostedFetch() {
+  return vi.fn(async () => new Response(JSON.stringify(published), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })) as unknown as typeof fetch;
+}
+
+async function bootstrap(handler: ReturnType<typeof createMordnHandler>) {
+  const response = await handler.GET(new Request('https://app.example/api/chat/bootstrap'));
+  expect(response.status).toBe(200);
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+describe('createMordnHandler bootstrap wiring', () => {
+  it('derives a stable apiKey-keyed HMAC storage scope while returning only client config', async () => {
+    const firstFetch = hostedFetch();
+    const first = createMordnHandler({
+      apiKey: 'server-secret-one',
+      getUserId: () => 'verified-user',
+      fetch: firstFetch,
+    });
+    const second = createMordnHandler({
+      apiKey: 'server-secret-two',
+      getUserId: () => 'verified-user',
+      fetch: hostedFetch(),
+    });
+
+    const firstBody = await bootstrap(first);
+    const repeatedBody = await bootstrap(first);
+    const secondBody = await bootstrap(second);
+
+    expect(firstBody.storageScope).toMatch(/^[a-f0-9]{36}$/);
+    expect(repeatedBody.storageScope).toBe(firstBody.storageScope);
+    expect(secondBody.storageScope).not.toBe(firstBody.storageScope);
+    expect(firstBody).toMatchObject({
+      schemaVersion: 1,
+      agent: 'agent-hosted',
+      revision: 'rev-1',
+      client: { capabilitiesPrompt: 'Hosted client' },
+    });
+    expect(JSON.stringify(firstBody)).not.toContain('gateway/model');
+    expect(firstFetch).toHaveBeenCalledWith(
+      'https://api.mordn.dev/v1/config',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer server-secret-one' }),
+      }),
+    );
+  });
+
+  it('allows an advanced handler to explicitly override storage scope resolution', async () => {
+    const handler = createMordnHandler({
+      apiKey: 'server-secret',
+      getUserId: () => 'verified-user',
+      fetch: hostedFetch(),
+      resolveStorageScope: (ctx, agent) => `${agent}:${ctx.userId}:custom`,
+    });
+
+    expect((await bootstrap(handler)).storageScope).toBe('agent-hosted:verified-user:custom');
+  });
+});

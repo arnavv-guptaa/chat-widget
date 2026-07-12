@@ -6,73 +6,58 @@
  * This component can be embedded in any React application.
  * It handles its own state, styling, and API communication.
  *
- * Requirements:
- * - API routes must be set up at /api/chat/*
- * - userId must be provided for user identification
- *
- * Usage:
- * ```tsx
- * import { ChatWidget } from '@/components/chat-widget';
- *
- * export default function Page() {
- *   return (
- *     <ChatWidget
- *       userId="user-123"
- *       theme={{ backgroundColor: '#171717', textColor: '#ededed', primaryColor: '#3b82f6' }}
- *       display={{ size: 'default', resizable: true }}
- *     />
- *   );
- * }
- * ```
+ * The mounted handler authenticates the browser and supplies published client
+ * configuration plus an opaque browser-storage scope through `/bootstrap`.
+ * Callers can render `<ChatWidget />` with no identity or agent props.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import ChatInterface from './components/interface';
-import { ChatWidgetConfig, ChatWidgetSize } from './types';
+import type {
+  ActionRenderer,
+  ChatContext,
+  FollowUpConfig,
+  InputPlugin,
+  StarterPrompt,
+  ToolRenderer,
+} from './types';
+import type { AgentBootstrap, AgentConfig } from './config';
+import { isAgentBootstrap, mergeAgentClientConfig } from './config';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
 import { contrastForegroundTriplet, hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
 
-export interface ChatWidgetProps extends ChatWidgetConfig {
-  /**
-   * CSS class name for custom styling
-   */
-  className?: string;
-
-  /**
-   * Agent ID — identifies which agent this widget talks to. Used to scope the
-   * browser cache to (agent, user) so the same browser never surfaces another
-   * agent's cached tabs/config, and (later) to load hosted per-agent config.
-   */
-  agentId?: string;
-
-  /**
-   * @deprecated Use `agentId`. Kept as an alias for one minor version.
-   */
-  widgetId?: string;
-
-  /**
-   * Base path the widget calls for chat / upload / history. Defaults to
-   * `/api/chat`. Override to mount the handler elsewhere (e.g. a dashboard
-   * preview at `/api/preview-chat/<agentId>`). The widget appends `/upload`
-   * and `/history` to this base.
-   */
+export interface ChatWidgetProps {
+  /** Full canonical config for caller overrides or an authenticated preview. */
+  config?: AgentConfig;
+  /** Handler mount. The widget calls `${apiBase}/bootstrap` on mount. */
   apiBase?: string;
-
-  /**
-   * Extra headers sent on every chat request. Used by the dashboard playground
-   * to pass an unsaved draft (model / system prompt) for an owner-authed
-   * preview. Not for normal embeds.
-   */
-  extraHeaders?: Record<string, string>;
+  /** Generic transport headers (for example a host's CSRF token). */
+  headers?: Record<string, string>;
+  requestCredentials?: RequestCredentials;
+  className?: string;
+  conversationId?: string;
+  initialMessages?: any[];
+  context?: ChatContext;
+  getStarterPrompts?: () => StarterPrompt[] | Promise<StarterPrompt[]>;
+  onClose?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onStateChange?: (open: boolean) => void;
+  headerActions?: ReactNode;
+  inputPlugins?: InputPlugin[];
+  toolRenderers?: Record<string, ToolRenderer>;
+  actionRenderers?: Record<string, ActionRenderer>;
+  followUps?: FollowUpConfig;
+  onFeedback?: (feedback: import('./types').FeedbackEvent) => void;
 }
 
 /**
  * Imperative handle exposed via a ref on `<ChatWidget>`. Lets the host app
  * drive the popup panel programmatically. Opening is gated by
- * `allowAutoReopen` (see ChatWidgetConfig) so a dismissed panel is never
+ * `config.client.allowAutoReopen` so a dismissed panel is never
  * re-surfaced without explicit opt-in; closing is always allowed. Only
  * meaningful in the `popup` layout (inline/page are always-open surfaces).
  */
@@ -88,41 +73,73 @@ export interface ChatWidgetHandle {
 }
 
 export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWidget({
-  userId,
-  agentId,
-  apiBase,
-  extraHeaders,
+  config: explicitConfig,
+  apiBase: apiBaseProp = '/api/chat',
+  headers,
   requestCredentials,
-  widgetId,
   conversationId,
   initialMessages,
   className,
-  model,
-  systemPrompt,
-  temperature,
-  theme,
-  features,
-  display,
-  starterPrompts,
   getStarterPrompts,
-  capabilitiesPrompt,
   context,
   onClose,
   headerActions,
   open,
   onOpenChange,
-  persistState,
-  allowAutoReopen,
   onStateChange,
   inputPlugins,
   toolRenderers,
   actionRenderers,
   followUps,
-  feedback,
   onFeedback,
 }: ChatWidgetProps, ref) {
-  // `agentId` is canonical; `widgetId` is the deprecated alias.
-  const effectiveAgentId = agentId ?? widgetId;
+  const apiBase = apiBaseProp.replace(/\/+$/, '');
+  const [bootstrap, setBootstrap] = useState<AgentBootstrap | null>(null);
+  const [bootstrapReady, setBootstrapReady] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const headersKey = JSON.stringify(headers ?? null);
+  const stableHeaders = useMemo(
+    () => headers,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- value-keyed on purpose
+    [headersKey],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setBootstrap(null);
+    setBootstrapError(null);
+    setBootstrapReady(false);
+    fetch(`${apiBase}/bootstrap`, {
+      method: 'GET',
+      headers: stableHeaders,
+      credentials: requestCredentials,
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`bootstrap failed (${response.status})`);
+        const value: unknown = await response.json();
+        if (!isAgentBootstrap(value)) throw new Error('bootstrap returned an invalid response');
+        return value;
+      })
+      .then((value) => setBootstrap(value))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setBootstrap(null);
+        setBootstrapError(
+          error instanceof Error ? error.message : 'bootstrap failed',
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBootstrapReady(true);
+      });
+    return () => controller.abort();
+  }, [apiBase, stableHeaders, requestCredentials, bootstrapAttempt]);
+
+  const client = mergeAgentClientConfig(bootstrap?.client, explicitConfig?.client);
+  const { greeting, theme, features, display, starterPrompts, capabilitiesPrompt, feedback } = client;
+  const persistState = client.persistState;
+  const allowAutoReopen = client.allowAutoReopen;
   const layout = display?.layout || 'popup';
   // Controlled mode: consumer provides `open` prop. We delegate state to
   // them and skip the built-in FAB so they can render their own trigger.
@@ -143,8 +160,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // collide. `null` when identity is incomplete → we never persist (no
   // shared/static fallback bucket; same cross-user-leak guard as the cache).
   const panelStateKey =
-    persistEnabled && userId && effectiveAgentId
-      ? `chat-${encodeURIComponent(effectiveAgentId)}|${encodeURIComponent(userId)}-panel-open`
+    persistEnabled && bootstrap?.storageScope
+      ? `chat-${encodeURIComponent(bootstrap.storageScope)}-panel-open`
       : null;
 
   // Open state is meaningful for popup layout only. Inline and page modes
@@ -169,11 +186,11 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       const stored = window.localStorage.getItem(panelStateKey);
       if (stored === 'open') setInternalIsOpen(true);
       else if (stored === 'closed') setInternalIsOpen(false);
-      // stored === null → keep the defaultOpen-derived initial value.
+      else setInternalIsOpen(display?.defaultOpen || false);
     } catch {
       /* localStorage unavailable (private mode / quota) — ignore. */
     }
-  }, [panelStateKey]);
+  }, [panelStateKey, display?.defaultOpen]);
 
   // Single entry point for changing open state: handles controlled vs
   // uncontrolled, persistence, the onStateChange callback, and the
@@ -474,26 +491,12 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     [resizable, applyPanelWidth]
   );
 
-  // Hosts idiomatically write `extraHeaders={{ 'X-Foo': bar }}` inline — a
-  // fresh object identity every render, which would churn the config memo
-  // below and cascade into the interface's memoised message list, defeating
-  // the targeted-streaming-render design. Key it by VALUE instead: headers
-  // are small JSON-safe string maps by contract.
-  const extraHeadersKey = JSON.stringify(extraHeaders ?? null);
-  const stableExtraHeaders = useMemo(
-    () => extraHeaders,
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- value-keyed on purpose
-    [extraHeadersKey]
-  );
-
-  const config = useMemo(() => ({
-    userId,
-    apiBase: apiBase ?? '/api/chat',
-    extraHeaders: stableExtraHeaders,
+  const interfaceConfig = useMemo(() => ({
+    apiBase,
+    headers: stableHeaders,
     requestCredentials,
-    model,
-    systemPrompt,
-    temperature,
+    requestConfig: explicitConfig,
+    greeting,
     theme,
     features,
     starterPrompts,
@@ -504,10 +507,11 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     inputPlugins,
     toolRenderers,
     actionRenderers,
-    followUps,
+    followUps: followUps ?? client.followUps,
     feedback,
+    streamingThrottleMs: client.streamingThrottleMs,
     onFeedback,
-  }), [userId, apiBase, stableExtraHeaders, requestCredentials, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
+  }), [apiBase, stableHeaders, requestCredentials, explicitConfig, greeting, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, client.followUps, feedback, client.streamingThrottleMs, onFeedback]);
 
   // Default launcher position respects iOS safe areas (home indicator /
   // rounded corners) — a fixed 24px bottom put the FAB under the home
@@ -541,12 +545,52 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   })();
   const themeClass = isDarkTheme ? 'chat-dark' : '';
 
+  // Do not initialise the conversation or any browser persistence until an
+  // authenticated, runtime-validated bootstrap has supplied its opaque scope.
+  if (!bootstrapReady) return null;
+
+  // Fail closed: a missing/invalid bootstrap must never fall through to a chat
+  // surface with unscoped persistence or request config. Keep the recovery state
+  // outside ChatInterface so no conversation/history requests can start.
+  if (bootstrapError || !bootstrap) {
+    const failureLayoutClass =
+      layout === 'page'
+        ? 'chat-widget-page'
+        : layout === 'inline'
+          ? 'chat-widget-inline'
+          : 'chat-widget-popup';
+    return (
+      <div
+        className={`chat-widget-container chat-widget-content ${failureLayoutClass} ${themeClass} ${className || ''}`}
+        style={customStyles as React.CSSProperties}
+      >
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex h-full min-h-48 flex-col items-center justify-center gap-3 p-6 text-center"
+        >
+          <p className="text-base font-semibold">Chat couldn&apos;t start</p>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            We couldn&apos;t securely initialize this chat. Check your connection and try again.
+          </p>
+          <button
+            type="button"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // INLINE layout: render the chat interface in place inside the parent. No
   // toggle button, no fixed positioning, no resize. Caller owns sizing via
   // parent CSS (e.g. wrap in a div with h-[600px] w-full).
   if (layout === 'inline') {
     return (
-      <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
+      <ChatStorageProvider storageScope={bootstrap?.storageScope}>
         <div
           ref={containerRef}
           className={`chat-widget-container chat-widget-inline chat-widget-content ${themeClass} ${className || ''}`}
@@ -556,7 +600,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
             <ChatInterface
               id={conversationId}
               initialMessages={initialMessages}
-              config={config}
+              config={interfaceConfig}
               onClose={onClose}
               headerActions={headerActions}
             />
@@ -571,7 +615,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // height: 100dvh and provides a dedicated chat route experience.
   if (layout === 'page') {
     return (
-      <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
+      <ChatStorageProvider storageScope={bootstrap?.storageScope}>
         <div
           ref={containerRef}
           className={`chat-widget-container chat-widget-page chat-widget-content ${themeClass} ${className || ''}`}
@@ -581,7 +625,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
             <ChatInterface
               id={conversationId}
               initialMessages={initialMessages}
-              config={config}
+              config={interfaceConfig}
               onClose={onClose}
               headerActions={headerActions}
             />
@@ -594,7 +638,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   // POPUP layout (default, backward compatible): floating side panel with
   // FAB toggle and slide-in animation.
   return (
-    <ChatStorageProvider userId={userId} agentId={effectiveAgentId}>
+    <ChatStorageProvider storageScope={bootstrap?.storageScope}>
       {showToggleButton && !isOpen && (
         // Wrap the launcher in a `.chat-widget-container` so its scoped Tailwind
         // utilities (fixed, rounded-full, p-4, bg-primary, …) and the --chat-*
@@ -659,7 +703,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
               <ChatInterface
                 id={conversationId}
                 initialMessages={initialMessages}
-                config={config}
+                config={interfaceConfig}
                 // popup also closes its own panel; consumer's onClose still
                 // fires for any cleanup they want (e.g. analytics).
                 onClose={() => {

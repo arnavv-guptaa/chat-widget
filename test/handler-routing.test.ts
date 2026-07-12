@@ -14,6 +14,9 @@ interface SetupOpts {
   ownershipError?: boolean;
   /** Provide a storage factory (default: none → uploads 503). */
   withStorage?: boolean;
+  withPublishedConfig?: boolean;
+  trustPreview?: boolean;
+  storageScope?: string;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -39,6 +42,21 @@ function setup(opts: SetupOpts = {}) {
       factoryUserIds.push(userId);
       return store;
     },
+    ...(opts.withPublishedConfig
+      ? {
+          getHostedConfig: async () => ({
+            agent: 'agent-public',
+            revision: 'rev-7',
+            config: {
+              schemaVersion: 1 as const,
+              runtime: { model: 'published/model', systemPrompt: 'Published' },
+              client: { capabilitiesPrompt: 'Ask me anything' },
+            },
+          }),
+        }
+      : {}),
+    ...(opts.trustPreview ? { resolvePreviewConfig: async (config: any) => config } : {}),
+    ...(opts.storageScope ? { resolveStorageScope: async () => opts.storageScope! } : {}),
     ...(opts.withStorage
       ? {
           storage: () => ({
@@ -76,9 +94,16 @@ describe('handler — IDOR / identity boundary', () => {
   it('binds the store to the SERVER-verified user, never a spoofed X-User-Id', async () => {
     const { handler, factoryUserIds } = setup({ userId: 'realuser', ownershipError: true });
     const res = await handler.POST(
-      jsonReq('/api/chat', 'POST', { id: 'c1', messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }] }),
+      req('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-id': 'attacker' },
+        body: JSON.stringify({
+          id: 'c1',
+          messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }],
+        }),
+      }),
     );
-    // The store is constructed with the verified id — the forged header is ignored.
+    // The store is constructed with the verified id — the forged legacy header is ignored.
     expect(factoryUserIds).toContain('realuser');
     expect(factoryUserIds).not.toContain('attacker');
     // A conversation owned by someone else is rejected — nothing is written.
@@ -106,6 +131,48 @@ describe('handler — dispatch routing', () => {
   it('405s a GET on the chat root (POST-only)', async () => {
     const { handler } = setup();
     expect((await handler.GET(req('/api/chat'))).status).toBe(405);
+  });
+
+  it('routes authenticated GET /bootstrap and returns only the client projection plus an opaque scope', async () => {
+    const { handler } = setup({ withPublishedConfig: true });
+    const res = await handler.GET(req('/api/chat/bootstrap'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      schemaVersion: 1,
+      agent: 'agent-public',
+      revision: 'rev-7',
+      client: { capabilitiesPrompt: 'Ask me anything' },
+    });
+    expect(body.storageScope).toMatch(/^[a-f0-9]{36}$/);
+    expect(JSON.stringify(body)).not.toContain('Published');
+    expect(res.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it('401s an unauthenticated bootstrap request', async () => {
+    const { handler } = setup({ userId: null });
+    expect((await handler.GET(req('/api/chat/bootstrap'))).status).toBe(401);
+  });
+
+  it('uses an explicitly provided stable storage-scope resolver', async () => {
+    const { handler } = setup({ storageScope: 'tenant-keyed-scope' });
+    const res = await handler.GET(req('/api/chat/bootstrap'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).storageScope).toBe('tenant-keyed-scope');
+  });
+
+  it('ignores even malformed request config when no preview resolver is installed', async () => {
+    const { handler } = setup({ ownershipError: true });
+    const res = await handler.POST(
+      jsonReq('/api/chat', 'POST', { id: 'c1', messages: [], config: { model: 'forged/request-model' } }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects malformed request config only when an explicit preview resolver is installed', async () => {
+    const { handler } = setup({ trustPreview: true });
+    const res = await handler.POST(jsonReq('/api/chat', 'POST', { id: 'c1', messages: [], config: { model: 'legacy' } }));
+    expect(res.status).toBe(400);
   });
 
   it('routes GET /history to the conversation list', async () => {

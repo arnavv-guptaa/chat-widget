@@ -123,8 +123,7 @@ const CHAT_AUTH_STUB = `/**
  *   • NEVER read the id from the request body, query string, or a header the
  *     browser controls (e.g. X-User-Id). Those are forgeable; trusting them
  *     lets any user read/write another user's conversations (IDOR).
- *   • The widget DOES send an X-User-Id header — ignore it for authorization.
- *     It is not, and must never be treated as, proof of identity.
+ *   • The widget intentionally has no client identity prop or identity header.
  *
  * This stub throws on purpose. Replace its body with your real session lookup
  * before going to production.
@@ -251,9 +250,9 @@ async function init() {
   console.log('  6. Mount the widget in your app:\n');
   console.log("     import { ChatWidget } from '@mordn/chat-widget';");
   console.log("     import '@mordn/chat-widget/styles.css';");
-  console.log('     <ChatWidget userId={/* your user id */} />\n');
-  console.log('Security: see SECURITY.md — userId is established on the server,');
-  console.log('never trusted from the client.\n');
+  console.log('     <ChatWidget />\n');
+  console.log('Security: identity is established by getChatUserId on the server;');
+  console.log('the widget has no userId or agentId props.\n');
 
   rl.close();
 }

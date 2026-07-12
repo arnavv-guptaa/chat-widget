@@ -2,6 +2,18 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.14.0 — 2026-07-12
+
+### Breaking
+- `<ChatWidget />` now bootstraps published client configuration and an opaque browser-storage scope from `/api/chat/bootstrap`; browser `userId`, `agentId`, `widgetId`, model, prompt, temperature, and flattened appearance props are removed.
+- Hosted configuration is one strict, versioned `AgentConfig` document with separate `runtime` and `client` projections. Legacy flat hosted responses are rejected.
+- Owner previews pass one complete validated `config` object; per-field draft headers are removed.
+
+### Added
+- `createMordnHandler({ apiKey, getUserId })` wires hosted configuration, persistence, attachments, feedback, knowledge, memory, and agent MCP tools while model execution remains on the developer's server.
+- Added the server-safe `@mordn/chat-widget/config` entry for the canonical schema, validators, and shared control-plane types.
+- Generic chat transport `headers` remain available for non-configuration metadata such as CSRF tokens.
+
 ## 0.13.0 — 2026-07-12
 
 ### Added
@@ -9,9 +21,6 @@ All notable changes to `@mordn/chat-widget` are documented here. The format foll
 - Follow-ups render as a **"Related" block** — a quiet label plus up to three stacked full-width rows attached under the completed reply, inside the transcript (replaces the horizontally scrolling pill row, which truncated suggestions and hid all but the first at widget widths).
 - **First-class GFM table rendering**: assistant tables render as a rounded card — header on the surface tone, horizontal hairlines only, row hover, `tabular-nums`, and a hover-reveal copy button that serializes the table to TSV (pastes as real cells into Excel/Sheets). Wide tables scroll horizontally inside the card instead of clipping. The widget-owned `table` override replaces Streamdown's wrapper, whose Tailwind classes the widget build never generated. Every system prompt also carries a rendering-surface note steering models to emit GFM pipe tables rather than box-drawing ASCII art inside code fences.
 - **Brand file-type icons** (ported from jarvis/Crunch): code-block pills, composer chips, and message attachments show real Python/TypeScript/React/Go/PDF/Excel/… glyphs with embedded brand colors, replacing lucide nearest-glyph stand-ins (a feather for Python). Three duplicate icon systems consolidated into `src/components/file-icons/`.
-
-### Fixed
-- Chat transport headers are resolved **per request**: hosts that change `extraHeaders` between renders (e.g. the dashboard playground's unsaved draft toggles) no longer send stale mount-time values.
 
 ## 0.12.0 — 2026-07-10
 

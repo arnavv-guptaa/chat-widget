@@ -22,6 +22,7 @@
  * whole backend. The handler dispatches on the trailing path segments:
  *
  *   POST   /api/chat                      → chat (stream)
+ *   GET    /api/chat/bootstrap            → authenticated client config + storage scope
  *   POST   /api/chat/upload               → attachment upload
  *   GET    /api/chat/history              → conversation list
  *   GET    /api/chat/history/:id          → one conversation + messages
@@ -68,9 +69,9 @@ import {
 } from './follow-ups';
 import {
   normalizeFollowUpSuggestions,
-  normalizeSerializedFollowUpConfig,
   resolveFollowUpCount,
 } from '../utils/follow-ups';
+import { isAgentConfig, type AgentConfig, type PublishedAgentConfig } from '../config';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ const MAX_CONTEXT_BYTES = 256 * 1024;
 // `subSegments` scans from the END for the last known head, so it matches
 // whether the incoming path is `…/feedback` or `…/v1/feedback` — the optional
 // leading `v1` (or any other mount prefix) is simply ignored. See handleFeedback.
-const KNOWN_SEGMENTS = new Set(['upload', 'history', 'memory', 'feedback']);
+const KNOWN_SEGMENTS = new Set(['bootstrap', 'upload', 'history', 'memory', 'feedback']);
 
 // Memory defaults.
 const DEFAULT_MEMORY_LIMIT = 6;
@@ -128,10 +129,10 @@ const DEFAULT_MEMORY_TIMEOUT_MS = 1500;
 
 // ── Small helpers ─────────────────────────────────────────────────────────
 
-function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
+function json(body: unknown, status = 200, responseHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    headers: { 'Content-Type': 'application/json', ...responseHeaders },
   });
 }
 
@@ -201,6 +202,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     storage: storageFactory,
     buildSystemPrompt,
     getHostedConfig,
+    resolvePreviewConfig,
+    resolveStorageScope,
     transformMessages,
     compression,
     onChatFinish,
@@ -278,6 +281,47 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return { userId, conversationId, request };
   }
 
+  async function loadPublishedConfig(ctx: ChatRequestContext): Promise<PublishedAgentConfig | null> {
+    if (!getHostedConfig) return null;
+    const published = await getHostedConfig(ctx);
+    if (!published) return null;
+    if (
+      typeof published.agent !== 'string' ||
+      published.agent.trim() === '' ||
+      typeof published.revision !== 'string' ||
+      published.revision.trim() === '' ||
+      !isAgentConfig(published.config)
+    ) {
+      throw new Error('[chat-widget] published agent config is malformed');
+    }
+    return published;
+  }
+
+  async function defaultStorageScope(ctx: ChatRequestContext, agent: string): Promise<string> {
+    const bytes = new TextEncoder().encode(`${agent}\u0000${ctx.userId}`);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest).slice(0, 18), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  // ── GET /bootstrap ──────────────────────────────────────────────────────
+  async function handleBootstrap(request: Request): Promise<Response> {
+    const ctx = await authenticate(request, '');
+    if (!ctx) return new Response('Unauthorized', { status: 401 });
+    const published = await loadPublishedConfig(ctx);
+    const agent = published?.agent ?? 'local';
+    const storageScope = await (resolveStorageScope ?? defaultStorageScope)(ctx, agent);
+    if (typeof storageScope !== 'string' || storageScope.trim() === '') {
+      return json({ error: 'Invalid storage scope' }, 500);
+    }
+    return jsonNoStore({
+      schemaVersion: 1,
+      agent,
+      revision: published?.revision ?? 'local',
+      client: published?.config.client ?? {},
+      storageScope,
+    });
+  }
+
   // ── POST /chat ─────────────────────────────────────────────────────────
   async function handleChat(request: Request): Promise<Response> {
     // Read the body under a HARD byte cap (real bytes, not Content-Length) so a
@@ -288,13 +332,27 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         ? json({ error: 'Request body too large' }, 413)
         : json({ error: 'Invalid JSON body' }, 400);
     }
-    const body = read.body as { messages?: UIMessage[]; id?: string; context?: unknown };
+    const body = read.body as { messages?: UIMessage[]; id?: string; context?: unknown; config?: unknown };
     const requestBodyBytes = read.bytes;
     const conversationId = typeof body.id === 'string' && body.id ? body.id : undefined;
     if (!conversationId) return json({ error: 'Missing conversation id' }, 400);
 
     const ctx = await authenticate(request, conversationId);
     if (!ctx) return new Response('Unauthorized', { status: 401 });
+
+    // Resolve the complete runtime config before persistence or resource
+    // allocation. Production ignores body.config; preview trust is explicit.
+    const published = await loadPublishedConfig(ctx);
+    let resolvedAgentConfig: AgentConfig | null = published?.config ?? null;
+    if (resolvePreviewConfig && body.config !== undefined) {
+      if (!isAgentConfig(body.config)) return json({ error: 'Invalid preview config' }, 400);
+      const preview = await resolvePreviewConfig(body.config, ctx);
+      if (preview !== null) {
+        if (!isAgentConfig(preview)) return json({ error: 'Preview resolver returned invalid config' }, 500);
+        resolvedAgentConfig = preview;
+      }
+    }
+    const runtime = resolvedAgentConfig?.runtime;
 
     // First authenticated chat request: run a one-time reverse-proxy / CDN
     // buffering diagnostic. A buffered SSE deployment "works locally, breaks in
@@ -359,44 +417,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
 
-    // Build tools (with their per-request resource). Retrieval tools (when
-    // configured) are merged in later, after namespaces are resolved.
-    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
-
-    // Fetch hosted config once (best-effort — a failure must never break the
-    // turn). The inner try/catch swallows BOTH a synchronous throw and an async
-    // rejection, honouring the "throwing falls through to code/defaults"
-    // contract for arbitrary consumers. Used only to fill model / system that
-    // code didn't provide.
-    const hosted = getHostedConfig
-      ? await (async () => {
-          try {
-            return await getHostedConfig(ctx);
-          } catch {
-            return null;
-          }
-        })()
-      : null;
-
-    // Model: code option > hosted > throw.
-    const model = await resolveModel(ctx, hosted?.model);
+    // Model: code option > resolved canonical runtime > throw.
+    const model = await resolveModel(ctx, runtime?.model);
     // String label of the model for persistence (the `model` column). A
     // LanguageModel is either a gateway string ("anthropic/claude-…") or a
     // provider object exposing `.modelId`.
     const modelLabel =
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
 
-    // Suggested follow-ups: explicit code config > published hosted config > off.
-    // Accept the normalized top-level field and the control plane's current
-    // appearance.followUps location so custom getHostedConfig implementations
-    // and unsaved playground previews work without a second normalization step.
-    const appearanceFollowUps =
-      hosted?.appearance && typeof hosted.appearance === 'object' && !Array.isArray(hosted.appearance)
-        ? (hosted.appearance as Record<string, unknown>).followUps
-        : undefined;
-    const followUpConfig = resolveFollowUps(
-      hosted?.followUps ?? normalizeSerializedFollowUpConfig(appearanceFollowUps),
-    );
+    // Suggested follow-ups: explicit code config > resolved canonical runtime > off.
+    const followUpConfig = resolveFollowUps(runtime?.followUps);
 
     // Max output tokens: code option > hosted (the model's real catalog limit,
     // via /v1/config) > undefined (provider default). Passing the model's true
@@ -405,14 +435,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const resolvedMaxOutputTokens =
       typeof maxOutputTokensOption === 'number' && maxOutputTokensOption > 0
         ? maxOutputTokensOption
-        : typeof hosted?.maxOutputTokens === 'number' && hosted.maxOutputTokens > 0
-          ? hosted.maxOutputTokens
+        : typeof runtime?.maxOutputTokens === 'number' && runtime.maxOutputTokens > 0
+          ? runtime.maxOutputTokens
           : undefined;
 
     // System prompt: code (buildSystemPrompt) > hosted > package default.
     const baseSystem = buildSystemPrompt
       ? await buildSystemPrompt(ctx)
-      : hosted?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+      : runtime?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
 
     // First-class per-turn context (#162). The client-supplied `context` is
     // UNTRUSTED; the server `getContext` is authoritative. Both paths are
@@ -501,9 +531,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let memoryAdapter: MemoryAdapter | null = null;
     let memorySystem = '';
     let memoryEnabled = false;
+    let memoryShouldExtract = false;
     let memoryOrgId: string | undefined;
+    const publishedMemory = runtime?.memory;
     if (memory) {
-      if (memory.isEnabledForUser) {
+      // The published agent config is the product-level switch. The optional
+      // host gate remains an additional consent/policy check; both must allow
+      // memory before any user data is read or written.
+      memoryEnabled = resolvedAgentConfig
+        ? (publishedMemory?.enabled ?? false)
+        : true;
+      if (memoryEnabled && memory.isEnabledForUser) {
         // Consent gate fails CLOSED: if the host's check throws, disable memory
         // for this turn rather than 500-ing the whole request.
         try {
@@ -515,8 +553,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           );
           memoryEnabled = false;
         }
-      } else {
-        memoryEnabled = true;
       }
       if (memoryEnabled) {
         memoryAdapter = memory.adapter(ctx.userId); // bound to the verified id
@@ -530,13 +566,15 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         } catch {
           memoryOrgId = undefined;
         }
-        if (memory.inject !== false) {
+        const shouldInject = publishedMemory?.inject ?? memory.inject !== false;
+        memoryShouldExtract = publishedMemory?.extract ?? memory.extract !== false;
+        if (shouldInject) {
           const q = latestUserText(incoming);
           const recalled = await withTimeout(
             memoryAdapter
               .retrieve({
                 query: q,
-                limit: memory.limit ?? DEFAULT_MEMORY_LIMIT,
+                limit: publishedMemory?.limit ?? memory.limit ?? DEFAULT_MEMORY_LIMIT,
                 minScore: memory.minScore ?? 0,
                 scopes: memory.scopes ?? ['user'],
                 conversationId,
@@ -562,7 +600,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // down, timeout, odd response) can't break the turn. Runs AFTER retrieval /
     // memory / context assembly, since those build system-prompt blocks and this
     // acts on the model-bound `modelMessages` payload.
-    const compressionConfig = resolveCompression(compression, hosted?.compression ?? null);
+    const compressionConfig = resolveCompression(compression, runtime?.compression ?? null);
     if (compressionConfig) {
       const outcome = await compressModelMessages(
         modelMessages,
@@ -587,6 +625,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       .filter(Boolean)
       .join('\n\n');
 
+    // Build host tools only after config/retrieval/memory/compression resolution,
+    // so an earlier failure cannot leak per-request resources before cleanup is armed.
+    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     const tools: ToolSet = { ...retrievalTools, ...(built.tools ?? {}) };
 
@@ -643,6 +684,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // The model's real output limit (from the catalog via /v1/config), so long
       // answers don't truncate at a low provider default. Omitted → provider default.
       ...(resolvedMaxOutputTokens ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
+      ...(typeof runtime?.temperature === 'number' ? { temperature: runtime.temperature } : {}),
       stopWhen: stopWhen ?? stepCountIs(DEFAULT_STEP_BUDGET),
       onFinish: async ({ text, usage, totalUsage, providerMetadata, finishReason, steps }) => {
         finalUsage = usage;
@@ -850,7 +892,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // extraction must never surface to a user who already has their answer.
         // Awaited before cleanup so serverless runtimes don't freeze it
         // mid-flight; on long-lived runtimes the cost is post-response anyway.
-        if (memoryAdapter && memoryEnabled && memory?.extract !== false && !isAborted) {
+        if (memoryAdapter && memoryEnabled && memoryShouldExtract && !isAborted) {
           try {
             await memoryAdapter.record({
               conversationId,
@@ -987,9 +1029,26 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const storage = resolveStorage(ctx.userId);
     if (!storage) return json({ error: 'File upload is not configured' }, 503);
 
+    const policy = resolveUploadPolicy(upload);
+    // Enforce the limit against actual request bytes before formData() buffers
+    // the multipart payload. Leave bounded room for multipart headers/fields.
+    const raw = await readBodyWithLimit(request, policy.maxBytes + 256 * 1024);
+    if (!raw.ok) {
+      return raw.reason === 'too_large'
+        ? json({ error: `File too large (max ${policy.maxBytes / 1024 / 1024} MB)` }, 413)
+        : json({ error: 'Invalid multipart body' }, 400);
+    }
     let form: FormData;
     try {
-      form = await request.formData();
+      const body = raw.body.buffer.slice(
+        raw.body.byteOffset,
+        raw.body.byteOffset + raw.body.byteLength,
+      ) as ArrayBuffer;
+      form = await new Request(request.url, {
+        method: 'POST',
+        headers: request.headers,
+        body,
+      }).formData();
     } catch {
       return json({ error: 'Invalid multipart body' }, 400);
     }
@@ -1001,7 +1060,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     if (!(file instanceof File)) return json({ error: 'No file provided' }, 400);
 
-    const policy = resolveUploadPolicy(upload);
     if (file.size === 0) return json({ error: 'Empty file' }, 400);
     if (file.size > policy.maxBytes) {
       return json({ error: `File too large (max ${policy.maxBytes / 1024 / 1024} MB)` }, 413);
@@ -1061,11 +1119,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   // ── POST /feedback ─────────────────────────────────────────────────────────
   // Records a thumbs up/down (optionally with a freeform reason) on an assistant
   // message. The widget POSTs `{ conversationId?, messageId, rating, reason? }`
-  // to `${apiBase}/v1/feedback` with the browser-controlled `X-User-Id` header;
-  // that header is NOT trusted — we resolve the VERIFIED user through the same
-  // `authenticate`/`getUserId` gate the chat and memory routes use, so a forged
-  // client id can never attribute feedback to another user (same IDOR defence as
-  // every other route). The client id in the body is telemetry, never authz.
+  // to `${apiBase}/v1/feedback`. We resolve the verified user through the same
+  // `authenticate`/`getUserId` gate the chat and memory routes use; no client
+  // identity field participates in attribution or authorization.
   //
   // Persistence goes through the `onFeedback` seam (mirrors how `store` / memory
   // `adapter` are injected): pass a function to record anywhere. Use the ready-
@@ -1174,12 +1230,12 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     }
     if (preflight) {
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      // Reflect whatever the browser asked to send (covers X-User-Id plus any
-      // host extraHeaders) rather than maintaining a hardcoded list.
+      // Reflect whatever generic transport headers the browser asked to send
+      // rather than maintaining a hardcoded list.
       const requested = request.headers.get('access-control-request-headers');
       response.headers.set(
         'Access-Control-Allow-Headers',
-        requested || 'Content-Type, X-User-Id',
+        requested || 'Content-Type',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -1187,8 +1243,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   }
 
   /**
-   * Preflight endpoint. The widget's X-User-Id header makes EVERY cross-origin
-   * call preflight, so a cross-origin embed is only usable when the route file
+   * Preflight endpoint. A cross-origin embed with non-simple headers is only
+   * usable when the route file
    * exports this (`export const { GET, POST, DELETE, OPTIONS } = …`). Without
    * a configured `cors` (or for a disallowed origin) it answers 204 with no
    * CORS headers — the browser then fails the request exactly as it does
@@ -1219,6 +1275,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       const [head, ...rest] = segments;
       if (!KNOWN_SEGMENTS.has(head)) return json({ error: 'Not found' }, 404);
 
+      if (head === 'bootstrap') {
+        if (method === 'GET') return await handleBootstrap(request);
+        return methodNotAllowed();
+      }
       if (head === 'upload') {
         if (method === 'POST') return await handleUpload(request);
         return methodNotAllowed();
@@ -1313,6 +1373,47 @@ function formatContextPreamble(context: Record<string, unknown>): string {
 // User-facing fallback when a stream error isn't mapped by `onError`. Logging of
 // the underlying error is handled at the call site, gated by `logErrors` (#163).
 const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the response.';
+
+async function readBodyWithLimit(
+  request: Request,
+  maxBytes: number,
+): Promise<
+  | { ok: true; body: Uint8Array }
+  | { ok: false; reason: 'too_large' | 'invalid' }
+> {
+  const declared = Number(request.headers.get('content-length') || '0');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, reason: 'too_large' };
+  }
+  if (!request.body) return { ok: false, reason: 'invalid' };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, reason: 'too_large' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, body };
+}
 
 /**
  * Read and JSON-parse a request body while enforcing a HARD byte cap against the
