@@ -2,6 +2,14 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.13.2 — 2026-07-15
+
+### Fixed
+- Restore the planning loader's animated text shimmer inside the layout-stable assistant slot. The 0.13.1 wrapper moved the shimmer under assistant markdown styling, whose higher-specificity solid `color` declaration defeated the transparent `background-clip: text` effect; the shimmer rule now explicitly wins in that context.
+
+### Internal
+- Add a CSS contract test that guards the nested assistant-message shimmer selector.
+
 ## 0.13.1 — 2026-07-14
 
 ### Fixed

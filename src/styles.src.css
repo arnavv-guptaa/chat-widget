@@ -796,7 +796,8 @@
    scope-css.js leaves @keyframes global; class rules are self-prefixed with
    .chat-widget-container so they stay scoped and win on specificity.
    ============================================ */
-.chat-widget-container .chat-text-shimmer {
+.chat-widget-container .chat-text-shimmer,
+.chat-widget-container .is-assistant .chat-message-content .chat-text-shimmer {
   position: relative;
   display: inline-block;
   --base-color: hsl(var(--chat-text-subtle));
