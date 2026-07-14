@@ -2,6 +2,11 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.13.1 — 2026-07-14
+
+### Fixed
+- The pre-response planning shimmer no longer shifts when the AI SDK inserts its empty assistant message before the first streamed part. The empty row is withheld until it has renderable content, and the planning state now occupies the same assistant-message geometry as the response that replaces it. Whitespace-only text also no longer dismisses the indicator early.
+
 ## 0.13.0 — 2026-07-12
 
 ### Added
