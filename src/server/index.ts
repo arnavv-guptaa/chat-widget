@@ -83,17 +83,3 @@ export type {
 // proxy issues that silently break SSE token streaming.
 export { streamHealthCheck } from './stream-health';
 export type { StreamHealthResult, StreamHealthCheckOptions } from './stream-health';
-
-// ── Headroom token compression (#—) ──────────────────────────────────────────
-// Opt-in model-message compression to fit more history under the token budget.
-export {
-  compressModelMessages,
-  resolveCompression,
-  normalizeCompression,
-} from './compression';
-export type {
-  CompressionConfig,
-  CompressionOption,
-  CompressionResult,
-  CompressionSkipReason,
-} from './compression';
