@@ -36,6 +36,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PaperclipIcon, PlusIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { normalizeFollowUpSuggestions, resolveFollowUpCount } from '../utils/follow-ups';
+import {
+  hasRenderableAssistantContent,
+  messagesForTranscript,
+} from '../utils/assistant-content';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
@@ -1158,35 +1162,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [config?.userId, config?.extraHeaders],
   );
 
-  // Memoized message list. Each message is a memoized <MessageItem>; the SDK
-  // reuses old message refs and clones only the streaming (last) one, so only
-  // the active bubble re-renders per tick. Assistant turns render through the
-  // transcript (in-order text / compact tool rows / thinking) inside MessageItem.
-  const renderedMessages = useMemo(
-    () =>
-      messages.map((m, i) => (
-        <MessageItem
-          key={m.id}
-          message={m}
-          isFirst={i === 0}
-          isLast={i === messages.length - 1}
-          prevRole={i > 0 ? messages[i - 1].role : undefined}
-          status={status}
-          toolRenderers={config?.toolRenderers}
-          actionRenderers={config?.actionRenderers}
-          onRegenerate={handleRegenerate}
-          onToolApproval={handleToolApproval}
-          feedbackEnabled={config?.feedback === true}
-          conversationId={activeTabId}
-          feedbackApiBase={config?.apiBase}
-          feedbackHeaders={feedbackHeaders}
-          feedbackCredentials={config?.requestCredentials}
-          onFeedback={config?.onFeedback}
-        />
-      )),
-    [messages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
-  );
-
   // Follow-up chips (#134): the handler appends a persistent data part after
   // the assistant's text settles. Prefer that one-toggle, server-safe path; keep
   // the original host generator/static list as a backwards-compatible fallback.
@@ -1330,19 +1305,48 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // calls and text both clear it the instant they render, so a legit tool-using
   // turn doesn't hang the loader.
   const lastMessage = messages.at(-1);
-  const lastAssistantHasContent =
-    lastMessage?.role === 'assistant' &&
-    (lastMessage.parts ?? []).some(
-      (p) =>
-        (p.type === 'text' && p.text.length > 0) ||
-        (p.type === 'reasoning' && p.text.length > 0) ||
-        p.type === 'source-url' ||
-        p.type === 'file' ||
-        p.type === 'dynamic-tool' ||
-        p.type.startsWith('tool-'),
-    );
+  const lastAssistantHasContent = hasRenderableAssistantContent(lastMessage);
   const showThinking =
     status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
+
+  // The AI SDK adds an empty assistant message before its first streamed part.
+  // Do not render that zero-height MessageItem while the planning indicator owns
+  // the slot: its assistant-after-user mt-4 would push the indicator down for one
+  // frame. The real assistant row takes over the same slot once content arrives.
+  const transcriptMessages = useMemo(
+    () => messagesForTranscript(messages, showThinking),
+    [messages, showThinking],
+  );
+
+  // Memoized message list. Each message is a memoized <MessageItem>; the SDK
+  // reuses old message refs and clones only the streaming (last) one, so only
+  // the active bubble re-renders per tick. Assistant turns render through the
+  // transcript (in-order text / compact tool rows / thinking) inside MessageItem.
+  const renderedMessages = useMemo(
+    () =>
+      transcriptMessages.map((m, i) => (
+        <MessageItem
+          key={m.id}
+          message={m}
+          isFirst={i === 0}
+          isLast={i === transcriptMessages.length - 1}
+          prevRole={i > 0 ? transcriptMessages[i - 1].role : undefined}
+          status={status}
+          toolRenderers={config?.toolRenderers}
+          actionRenderers={config?.actionRenderers}
+          onRegenerate={handleRegenerate}
+          onToolApproval={handleToolApproval}
+          feedbackEnabled={config?.feedback === true}
+          conversationId={activeTabId}
+          feedbackApiBase={config?.apiBase}
+          feedbackHeaders={feedbackHeaders}
+          feedbackCredentials={config?.requestCredentials}
+          onFeedback={config?.onFeedback}
+        />
+      )),
+    [transcriptMessages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
+  );
+
   // Seed the planning verb from the last USER message id: it exists from the
   // moment of submit and doesn't change when the assistant message arrives,
   // so the verb never flips mid-gap.
@@ -1686,13 +1690,18 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             )}
             {showThinking && (
               // The ONLY pre-content indicator: a shimmering planning verb
-              // ("One moment", "Working on it", …) with no spinner. Seeded by
-              // the last user message id so the verb stays stable across the
-              // whole submitted → streaming-with-no-content gap.
-              <div className="mt-6 flex items-center px-2 py-1">
-                <TextShimmer as="span" className="text-[13px] font-medium leading-5">
-                  {planningVerb}
-                </TextShimmer>
+              // ("One moment", "Working on it", …) with no spinner. It uses the
+              // same assistant row + mt-4 geometry as the response that replaces
+              // it, so the submitted → empty-assistant → first-content transition
+              // never changes its vertical or horizontal anchor.
+              <div className="mt-4">
+                <Message from="assistant">
+                  <MessageContent>
+                    <TextShimmer as="span" className="text-[13px] font-medium leading-relaxed">
+                      {planningVerb}
+                    </TextShimmer>
+                  </MessageContent>
+                </Message>
               </div>
             )}
           </ConversationContent>
