@@ -2,6 +2,14 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.14.0 — 2026-07-15
+
+### Breaking
+- **Removed Headroom token compression completely.** `createChatHandler({ compression })`, `HostedAgentConfig.compression`, the `Compression*` types/helpers, the Headroom HTTP client, server exports, CLI scaffold, environment placeholders, and documentation are gone. Existing JavaScript configs carrying an extra `compression` key are harmlessly ignored, but TypeScript consumers must remove that option before upgrading.
+
+### Changed
+- Model-bound messages now flow directly from the existing bounded history, retrieval, memory, and `transformMessages` pipeline into `streamText`; there is no external compression call or message-content rewrite on the hot path.
+
 ## 0.13.2 — 2026-07-15
 
 ### Fixed

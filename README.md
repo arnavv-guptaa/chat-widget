@@ -367,7 +367,6 @@ disable uploads.
 | `buildTools(ctx)` | no | `async (ctx) => ({ tools, cleanup? })`. `cleanup` is called exactly once per turn (finish/error/abort) — use it to close per-request resources like an MCP client. |
 | `buildSystemPrompt(ctx)` | no | Returns the system prompt; receives the request context to personalise. |
 | `transformMessages(msgs, ctx)` | no | Last-chance rewrite of model messages (e.g. image part handling). |
-| `compression` | no | Toggle Headroom token compression — `true` or a `CompressionConfig`. Shrinks large tool outputs / context before the model call; **off by default**. Needs a running [Headroom](https://github.com/headroomlabs-ai/headroom) endpoint (`HEADROOM_BASE_URL`). Falls through to uncompressed on any error. See [Token compression](#token-compression-headroom). |
 | `onChatFinish(info)` | no | Post-persist hook for telemetry/usage. |
 | `onError(err)` | no | Map a stream error to the user-facing string. |
 | `stopWhen` | no | AI SDK stop condition for tool-call loops (default: bounded step count). |
@@ -377,91 +376,6 @@ disable uploads.
 The widget exposes only these seams. Ownership checks, idempotent persistence,
 history pagination, attachment re-signing, and socket teardown are owned by the
 handler and are not configurable — getting them wrong is a bug, not a setting.
-
----
-
-## Token compression (Headroom)
-
-Long sessions, big tool outputs, and RAG context burn tokens fast. The widget
-can compress the model-bound payload with
-[Headroom](https://github.com/headroomlabs-ai/headroom) — a local-first
-compression layer (60–95% fewer tokens on tool-heavy workloads) — without
-changing how you write tools or prompts.
-
-It is **off by default** and **safe by design**: compression runs as the very
-last step before the model call, and if the Headroom endpoint is unset,
-unreachable, slow, or returns anything unexpected, the turn proceeds
-**uncompressed**. It can never break a chat.
-
-### Turn it on
-
-1. Run a Headroom service and note its URL (local dev default is
-   `http://localhost:8787`):
-
-   ```bash
-   pip install "headroom-ai[all]"
-   headroom proxy --port 8787
-   ```
-
-2. Point the widget at it and flip the toggle:
-
-   ```env
-   # .env.local
-   HEADROOM_BASE_URL="http://localhost:8787"
-   # HEADROOM_API_KEY="..."   # only if your Headroom deployment requires auth
-   ```
-
-   ```ts
-   createChatHandler({
-     getUserId: getChatUserId,
-     model: anthropic('claude-sonnet-4-5'),
-     store: createDrizzleChatStore(),
-     compression: true, // ← that's it
-   });
-   ```
-
-Tool outputs (JSON), code, and prose are each routed to the right Headroom
-compressor. Only opaque text payloads are rewritten — tool calls, tool-call
-ids, tool names, image/file parts, and message ordering are preserved exactly.
-
-### Configure it
-
-Pass a `CompressionConfig` instead of `true` for full control:
-
-```ts
-compression: {
-  enabled: true,
-  baseUrl: process.env.HEADROOM_BASE_URL, // default: env, then http://localhost:8787
-  apiKey: process.env.HEADROOM_API_KEY,   // default: env HEADROOM_API_KEY
-  timeoutMs: 5000,    // hot-path budget; on timeout we pass through (default 5000)
-  minChars: 2000,     // skip the round-trip below this combined size (default 2000)
-  tokenBudget: 60000, // optional: compact to fit a hard token budget
-  onResult: (r) => {  // optional: observe savings per turn
-    if (r.compressed) {
-      console.log(`[headroom] saved ${r.tokensSaved} tokens (${Math.round((1 - r.compressionRatio) * 100)}%)`);
-    }
-  },
-},
-```
-
-**Toggle from the dashboard.** `compression` follows the same
-**code > hosted > off** precedence as `model` and the system prompt, so when you
-use `getHostedConfig`, returning `{ compression: true }` from your control plane
-turns it on for an agent with no redeploy. A value set in code always wins.
-
-**Bring your own compressor.** Pass `compression.compress` — any
-`(messages, ctx) => ModelMessage[]` — to use the
-[`headroom-ai`](https://www.npmjs.com/package/headroom-ai) SDK directly, or a
-different engine entirely:
-
-```ts
-import { compress } from 'headroom-ai';
-
-compression: {
-  enabled: true,
-  compress: async (messages) => (await compress(messages)).messages,
-},
-```
 
 ---
 

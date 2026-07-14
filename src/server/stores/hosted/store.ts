@@ -314,10 +314,6 @@ export function createHostedConfig(options: HostedOptions) {
         greeting: raw.greeting ?? null,
         appearance,
         maxOutputTokens: raw.maxOutputTokens ?? null,
-        // Dashboard-pushed Headroom compression toggle. Consulted by the handler
-        // as `hosted?.compression` (code > hosted > off); it must survive the
-        // fetcher's normalisation or the dashboard switch is silently dead.
-        compression: raw.compression ?? null,
         // The control plane currently stores this under appearance.followUps;
         // also accept a future top-level field so the client survives that API
         // normalization without another release.

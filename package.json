@@ -1,6 +1,6 @@
 {
   "name": "@mordn/chat-widget",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "description": "A customizable AI chat widget for React applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
