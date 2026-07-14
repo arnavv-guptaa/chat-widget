@@ -1693,7 +1693,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               // ("One moment", "Working on it", …) with no spinner. It uses the
               // same assistant row + mt-4 geometry as the response that replaces
               // it, so the submitted → empty-assistant → first-content transition
-              // never changes its vertical or horizontal anchor.
+              // never changes its vertical or horizontal anchor. The shimmer's
+              // transparent text color is protected by its scoped CSS selector.
               <div className="mt-4">
                 <Message from="assistant">
                   <MessageContent>
