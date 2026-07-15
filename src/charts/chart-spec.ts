@@ -2,21 +2,22 @@
  * ChartSpec — the declarative, JSON-serializable chart description the widget
  * renders inline in assistant transcripts.
  *
- * Design goals (see the Charts PRD, doc cmrm9rilj0gkd07ad17fe2wvb):
- *   - Minimal enough that a model can emit it reliably. A tiny owned schema the
- *     model nails every time beats a rich grammar (Vega-Lite) that fails 30%
- *     of renders.
- *   - Strict enough to enforce honesty: required title, finite numbers, bounded
- *     point count, no fields that let the model override the renderer's
- *     honesty-preserving defaults (e.g. a bar y-axis must start at 0).
- *   - Lenient on unknown fields (a model adding a future field must not break
- *     an older widget — the validator strips them rather than rejecting).
+ * v2 widens v1 to a broad, high-quality chart vocabulary while preserving the
+ * trust boundary (PRD §3): minimal enough for a model to emit reliably, strict
+ * on honesty (finite numbers, required title, bounded points, closed type
+ * enum), lenient on unknown fields (forward-compat).
  *
- * Provenance: `source` is present when the chart is rendered from a tool's real
- * output (Seam B). It is absent for model-emitted fences (Seam A), in which case
- * the renderer shows "Model-generated" — the critical trust affordance that
- * tells the user the picture was drawn from the model's own numbers, not
- * measured by a system.
+ * Multi-series: `series` accepts either a single ChartSeries (v1 shape, still
+ * supported verbatim) or an array. The renderer normalizes to an array
+ * internally; a single-series chart needs no array wrapping. Charts that are
+ * inherently single-series (pie/donut/sparkline) accept a single `series`.
+ *
+ * Honesty overrides the model CANNOT set (enforced by the renderer, not the
+ * schema, because they're rendering decisions): bar/area y-axis always starts
+ * at 0; no dual y-axes (out of scope); pie/donut refused if parts don't sum to
+ * ~100% of a stated whole; ordinal single-hue ramp for ranked data, distinct
+ * categorical hues only when multiple named series exist. Deliberately absent
+ * from the schema so a model can't sneak in a `yMin: 990`.
  *
  * No new runtime deps. zod is already a peer dependency of @mordn/chat-widget
  * (^3.25 || ^4). The schema is written against zod's stable API so both majors
@@ -25,55 +26,161 @@
 import { z } from 'zod';
 
 /** Schema version. Bumped only on a breaking change to this shape. */
-export const CHART_SPEC_SCHEMA_VERSION = 1 as const;
+export const CHART_SPEC_SCHEMA_VERSION = 2 as const;
 
-/**
- * A single labelled numeric point. `label` is the x-axis/category label;
- * `value` is the measured quantity. `value` MUST be a finite number — NaN /
- * Infinity are rejected (a chart of NaN is a lie).
- */
+/** The chart kinds the renderer supports. Closed — an unknown type is a validation error. */
+export const CHART_TYPES = [
+  'bar',
+  'horizontal-bar',
+  'line',
+  'area',
+  'multi-line',
+  'stacked-bar',
+  'grouped-bar',
+  'pie',
+  'donut',
+  'scatter',
+  'sparkline',
+] as const;
+export type ChartType = (typeof CHART_TYPES)[number];
+
+/** A single labelled numeric point. `value` MUST be finite (a chart of NaN is a lie). */
 const ChartPoint = z.object({
   label: z.string().min(1),
   value: z.number().finite(),
 });
 
 /**
- * One data series. v1 supports a single series per chart; multi-series (with a
- * legend + per-series color ramp) is a v1.1 addition that extends this shape
- * with `series: ChartSeries[]` + a `legend` affordance, not a replacement.
+ * One data series. For categorical charts (bar/line/area) `points` is the
+ * measured values. For scatter, `points` carries (x = value, y = label-as-number)
+ * — see the scatter renderer for the convention. `color` is a host/model hint
+ * the renderer MAY honor, but the honesty ramp wins by default; it's mainly for
+ * semantically meaningful colors (e.g. "this series is the SLA breach line").
  */
-const ChartSeries = z.object({
+const ChartColor = z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional();
+export const ChartSeriesSchema = z.object({
   name: z.string().min(1).optional(),
-  points: z.array(ChartPoint).min(1).max(200),
+  points: z.array(ChartPoint).min(1).max(500),
+  /** Optional semantic color (hex). Renderer honors it when set; otherwise the theme ramp. */
+  color: ChartColor,
+});
+export type ChartSeries = z.infer<typeof ChartSeriesSchema>;
+
+/** A single-series spec (v1-compatible) OR multi-series. */
+const SeriesField = z.union([ChartSeriesSchema, z.array(ChartSeriesSchema).min(1).max(12)]);
+
+/** Pie/donut-specific honesty: a whole the slices must sum to (~within tolerance). */
+const WholeField = z
+  .object({
+    /** The total the slices should sum to. Default 100 (percentages). */
+    total: z.number().finite().positive().default(100),
+    /** Allowed deviation from `total` before the pie is refused (fraction of total). Default 0.02 (2%). */
+    tolerance: z.number().finite().min(0).max(0.1).default(0.02),
+  })
+  .optional();
+
+/** Scatter point: (x, y) pair. `label` is the hover/legend text. */
+const ScatterPoint = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  label: z.string().min(1).optional(),
+  color: ChartColor,
 });
 
-/**
- * The full chart spec. `type` is closed to the chart kinds the renderer
- * supports in this version; an unknown type is a validation error (the renderer
- * shows its error card rather than guessing how to draw something it can't).
- *
- * Honesty overrides the model CANNOT set (enforced by the renderer, not the
- * schema, because they're rendering decisions not data):
- *   - bar y-axis always starts at 0
- *   - no dual y-axes (out of scope entirely)
- *   - line y-axis never truncates the visible range below 10% of the span
- *   - ordinal single-hue color ramp (not a categorical rainbow)
- * These are deliberately absent from the schema so a model can't sneak in a
- * `yMin: 990` that would produce the #1 misleading chart.
- */
-export const ChartSpecSchema = z.object({
-  schemaVersion: z.literal(CHART_SPEC_SCHEMA_VERSION),
-  type: z.enum(['bar', 'line']),
-  title: z.string().min(1),
-  subtitle: z.string().optional(),
-  xLabel: z.string().optional(),
-  yLabel: z.string().optional(),
-  series: ChartSeries,
-  /** Provenance. Absent => "Model-generated". Present => "Source: <source>". */
-  source: z.string().min(1).optional(),
-});
+/** Stacked/grouped honesty: every series shares the same set of category labels. */
+const CategoricalSeriesField = z
+  .array(ChartSeriesSchema)
+  .min(1)
+  .max(12)
+  .superRefine((serieses, ctx) => {
+    if (serieses.length < 2) return;
+    const base = new Set(serieses[0].points.map((p) => p.label));
+    serieses.slice(1).forEach((s, i) => {
+      const labels = new Set(s.points.map((p) => p.label));
+      for (const l of base) {
+        if (!labels.has(l)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [i, 'points'],
+            message: `stacked/grouped series must share category labels; series ${i + 1} is missing "${l}"`,
+          });
+        }
+      }
+    });
+  });
+
+export const ChartSpecSchema = z
+  .object({
+    schemaVersion: z.literal(CHART_SPEC_SCHEMA_VERSION),
+    type: z.enum(CHART_TYPES),
+    title: z.string().min(1),
+    subtitle: z.string().optional(),
+    xLabel: z.string().optional(),
+    yLabel: z.string().optional(),
+    /** Provenance. Absent => "Model-generated". Present => "Source: <source>". */
+    source: z.string().min(1).optional(),
+    /** Show the legend (multi-series only). Default true when >1 series. */
+    legend: z.boolean().optional(),
+    /** Show value labels on bars/points. Default false (clutter). */
+    valueLabels: z.boolean().optional(),
+    // series: type-dependent. Pie/donut/sparkline => single ChartSeries.
+    //        stacked-bar/grouped-bar => array with shared labels (enforced).
+    //        everything else => single or array.
+    series: SeriesField,
+    /** Pie/donut only: the whole the slices must sum to. */
+    whole: WholeField,
+    /** Scatter only (replaces `series`). */
+    scatter: z.array(ScatterPoint).min(1).max(500).optional(),
+  })
+  .passthrough() // lenient: strip-and-ignore unknown future fields on the validated output
+  .superRefine((spec, ctx) => {
+    // Type-specific field requirements + honesty guards.
+    if (spec.type === 'scatter') {
+      if (!spec.scatter || spec.scatter.length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scatter'], message: 'scatter charts require a `scatter` array' });
+      }
+    } else if (spec.type === 'pie' || spec.type === 'donut') {
+      // Pie/donut: a single series; the whole is checked at render time against
+      // the actual slice sum (the renderer refuses + shows the error card if the
+      // slices don't sum within tolerance of `whole.total`).
+      if (Array.isArray(spec.series)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['series'], message: `${spec.type} charts take a single series, not an array` });
+      }
+    } else if (spec.type === 'stacked-bar' || spec.type === 'grouped-bar') {
+      // These REQUIRE an array (the schema's SeriesField union would also accept
+      // a single object, so enforce the array here). The shared-labels guard
+      // lives on CategoricalSeriesField — but SeriesField doesn't carry it, so
+      // we re-validate here.
+      if (!Array.isArray(spec.series)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['series'], message: `${spec.type} charts require a series array (2+ series)` });
+      } else {
+        const s = spec.series;
+        if (s.length < 2) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['series'], message: `${spec.type} charts need at least 2 series` });
+        }
+        const base = new Set(s[0].points.map((p) => p.label));
+        s.slice(1).forEach((ser, i) => {
+          const labels = new Set(ser.points.map((p) => p.label));
+          for (const l of base) {
+            if (!labels.has(l)) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['series', i, 'points'], message: `${spec.type} series must share category labels; series ${i + 2} is missing "${l}"` });
+            }
+          }
+        });
+      }
+    }
+  });
 
 export type ChartSpec = z.infer<typeof ChartSpecSchema>;
+
+/**
+ * Normalize a spec's `series` field to an array of ChartSeries, regardless of
+ * whether the model passed a single object or an array. Single-series charts
+ * (pie/donut/sparkline) still get a 1-element array; callers index [0].
+ */
+export function asSeriesArray(spec: ChartSpec): ChartSeries[] {
+  return Array.isArray(spec.series) ? spec.series : [spec.series];
+}
 
 /** The fence languages that trigger the chart renderer (Seam A). */
 export const CHART_FENCE_LANGUAGES = ['mordn-chart', 'chart'] as const;
@@ -86,19 +193,6 @@ export function isChartFenceLanguage(language: string | undefined): boolean {
   return (CHART_FENCE_LANGUAGES as readonly string[]).includes(lower);
 }
 
-/**
- * Parse + validate a fence body (or any JSON string) as a ChartSpec.
- *
- * Returns a discriminated result so callers (the fence hook, host code, docs
- * previews) can branch without try/catch. On failure `error` is a short,
- * user-displayable message (the renderer shows it in the error card); the full
- * zod issue list is available on the `issues` field for debugging/logs.
- *
- * Lenient on unknown fields: `.passthrough()` would keep them; we instead use
- * the default zod object behaviour (strip unknown keys) so the validated
- * `ChartSpec` is exactly the known shape, but a model adding a future field
- * does not cause a rejection.
- */
 export type ChartSpecParseResult =
   | { ok: true; spec: ChartSpec }
   | { ok: false; error: string; issues: string[] };
@@ -114,26 +208,15 @@ export function parseChartSpec(text: string): ChartSpecParseResult {
       issues: ['The fence body could not be parsed as JSON.'],
     };
   }
-
   const result = ChartSpecSchema.safeParse(json);
   if (result.success) {
     return { ok: true, spec: result.data };
   }
-  const issues = result.error.issues.map(
-    (i) => `${i.path.join('.') || '(root)'}: ${i.message}`,
-  );
-  return {
-    ok: false,
-    error: 'Chart data did not match the expected shape.',
-    issues,
-  };
+  const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
+  return { ok: false, error: 'Chart data did not match the expected shape.', issues };
 }
 
-/**
- * Validate an already-parsed object as a ChartSpec (for hosts building a spec
- * programmatically, e.g. via `chartToolRenderer`). Throws on invalid input so
- * programming errors surface immediately rather than rendering an error card.
- */
+/** Validate an already-parsed object (for hosts building a spec programmatically). Throws on invalid. */
 export function validateChartSpec(input: unknown): ChartSpec {
   return ChartSpecSchema.parse(input);
 }
