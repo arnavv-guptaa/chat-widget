@@ -34,6 +34,7 @@ import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
 import type { FollowUpMessage } from '../types';
+import type { AgentConfig, PublishedAgentConfig } from '../config';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -60,8 +61,7 @@ export interface ChatRequestContext {
  * resolves the VERIFIED user, and calls `onFeedback` with this event.
  *
  * `userId` is the server-verified id (the same value the store/memory are bound
- * to) — NOT the browser-controlled `X-User-Id` header the widget sends, which is
- * forgeable and used only as telemetry. Trust `userId`.
+ * to), never a browser-controlled header or body field. Trust `userId`.
  */
 export interface FeedbackEvent {
   /** Server-verified user id. Never client-supplied. Safe to attribute on. */
@@ -79,33 +79,8 @@ export interface FeedbackEvent {
   reason?: string;
 }
 
-/**
- * Per-agent declarative config returned by a hosted control plane. All fields
- * optional — only what the dashboard has set is present; the rest falls through
- * to code/defaults. `model` is a gateway model string (e.g. "anthropic/…").
- */
-export interface HostedAgentConfig {
-  model?: string | null;
-  systemPrompt?: string | null;
-  greeting?: string | null;
-  appearance?: Record<string, unknown> | null;
-  /**
-   * Max output tokens for the agent's model, resolved from the gateway catalog
-   * by the control plane (chat-api's /v1/config). Passed to streamText so long
-   * answers use the model's real limit instead of truncating at a low provider
-   * default. Consulted only when code passes no `maxOutputTokens`
-   * (code > hosted > provider default).
-   */
-  maxOutputTokens?: number | null;
-
-  /**
-   * Server-generated follow-up suggestions resolved from the published agent
-   * config. `true` uses the handler's configured model and defaults; an object
-   * can disable the feature or tune the chip count. Code-level `followUps`
-   * always wins over this hosted value.
-   */
-  followUps?: boolean | Pick<ServerFollowUpConfig, 'enabled' | 'max' | 'timeoutMs'> | null;
-}
+/** Canonical hosted control-plane record. */
+export type HostedAgentConfig = PublishedAgentConfig;
 
 /**
  * What `buildTools` returns. The `cleanup` callback is the critical piece the
@@ -273,7 +248,7 @@ export interface MemoryConfig {
  * (a small structured second call using the same resolved model), or an object
  * to tune/override it. Off by default.
  *
- * Unlike the client `ChatWidgetConfig.followUps.generate` escape hatch, this
+ * Unlike the client `ChatWidgetProps.followUps.generate` escape hatch, this
  * never exposes provider credentials in the browser and works for React and the
  * script-tag embed through the same response stream.
  */
@@ -316,8 +291,8 @@ export interface CreateChatHandlerOptions {
 
   /**
    * The model to stream from. Either a fixed `LanguageModel` or a function of
-   * the request context (for per-user/per-org model selection). Defaults to a
-   * sensible current model when omitted.
+   * the request context (for per-user/per-org model selection). When omitted,
+   * `runtime.model` from canonical hosted config is required.
    */
   model?: LanguageModel | ((ctx: ChatRequestContext) => LanguageModel | Promise<LanguageModel>);
 
@@ -368,8 +343,8 @@ export interface CreateChatHandlerOptions {
   // ── HOOKS (loop runs without them) ───────────────────────────────────────
 
   /**
-   * Fetch per-agent declarative config (model / systemPrompt / greeting /
-   * appearance) from a hosted control plane (mordn's GET /v1/config). This is
+   * Fetch a published canonical `{ agent, revision, config }` record from a
+   * hosted control plane (mordn's GET /v1/config). This is
    * how dashboard-managed config reaches the loop WITHOUT a redeploy.
    *
    * Precedence is always **code > hosted > package default**: any `model` /
@@ -383,6 +358,28 @@ export interface CreateChatHandlerOptions {
   getHostedConfig?: (
     ctx: ChatRequestContext,
   ) => Promise<HostedAgentConfig | null> | HostedAgentConfig | null;
+
+  /**
+   * Explicit server-side preview trust boundary. The handler first validates the
+   * request's complete `AgentConfig` envelope, then calls this resolver. Return a
+   * config to replace (not merge with) the published config for this request, or
+   * null to ignore the request config. Omit in production.
+   */
+  resolvePreviewConfig?: (
+    config: AgentConfig,
+    ctx: ChatRequestContext,
+  ) => AgentConfig | null | Promise<AgentConfig | null>;
+
+  /**
+   * Resolve the stable, opaque browser-storage scope returned by `/bootstrap`.
+   * The generic handler defaults to a deterministic SHA-256 projection of the
+   * published agent and verified user. Secret-bearing façades should override
+   * this with a keyed derivation; `createMordnHandler` does so with its apiKey.
+   */
+  resolveStorageScope?: (
+    ctx: ChatRequestContext,
+    agent: string,
+  ) => string | Promise<string>;
 
   /**
    * Produce the system prompt for this request. Receives the context so it
@@ -418,8 +415,8 @@ export interface CreateChatHandlerOptions {
   /**
    * Persist a message-feedback submission (thumbs up/down on an assistant
    * message). The widget's feedback UI POSTs to `${apiBase}/v1/feedback`; the
-   * handler validates the body, resolves the VERIFIED user (never the client's
-   * `X-User-Id` header), and calls this with the resulting {@link FeedbackEvent}
+   * handler validates the body, resolves the VERIFIED user through `getUserId`,
+   * and calls this with the resulting {@link FeedbackEvent}
    * plus the request context.
    *
    * This is the single wiring point for feedback, mirroring `store` / memory
@@ -509,10 +506,9 @@ export interface CreateChatHandlerOptions {
   /**
    * Opt-in CORS for cross-origin embeds — the script-tag embed (or any
    * widget) calling this handler from ANOTHER origin, e.g. the widget on
-   * docs.example.com with `apiBase` pointing at app.example.com. The widget
-   * sends `X-User-Id` (a custom header), so every cross-origin request
-   * triggers a preflight; without this option the handler never answers it
-   * and every cross-origin embed fails silently in the console.
+   * docs.example.com with `apiBase` pointing at app.example.com. Custom generic
+   * transport headers may trigger a preflight; without this option the handler
+   * never answers it and the browser blocks the cross-origin request.
    *
    * Off by default on purpose: same-origin apps need nothing, and reflecting
    * arbitrary origins unasked would be a security hole. `allowOrigins` are

@@ -29,13 +29,13 @@ import type {
 } from '../../knowledge/types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
-const DEFAULT_BASE_URL = 'https://api.mordn.dev';
+const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
 export interface HostedKnowledgeOptions {
   /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */
   apiKey: string;
-  /** The agent whose KB to query. Scoped server-side together with the tenant. */
-  agentId: string;
+  /** Optional agent assertion; the standard hosted key already selects the agent. */
+  agentId?: string;
   /** API base URL. Defaults to the hosted service; override for self-host/local. */
   baseUrl?: string;
   /** Optional fetch override (testing). */
@@ -61,7 +61,7 @@ class HostedKnowledgeRetriever implements Retriever {
 
   constructor(
     private readonly apiKey: string,
-    private readonly agentId: string,
+    private readonly agentId: string | undefined,
     baseUrl: string,
     fetchImpl: typeof fetch,
     private readonly namespaces: ReadonlyArray<Namespace>,
@@ -79,7 +79,7 @@ class HostedKnowledgeRetriever implements Retriever {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        agentId: this.agentId,
+        ...(this.agentId ? { agentId: this.agentId } : {}),
         query: input,
         topK: opts.topK,
         minScore: opts.minScore,
@@ -102,7 +102,6 @@ export function createHostedKnowledgeRetriever(
   options: HostedKnowledgeOptions,
 ): RetrieverFactory {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an apiKey');
-  if (!options.agentId) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an agentId');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (namespaces) =>

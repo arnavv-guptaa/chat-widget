@@ -8,8 +8,8 @@ must do to uphold it.
 
 - **You establish identity on the server.** You implement `getChatUserId(req)`
   to return the user id from your *verified* server session.
-- **The widget's `X-User-Id` header is not an auth boundary.** The client sends
-  it; the server ignores it for authorization. Never trust it.
+- **The widget exposes no client identity prop or identity header.** Never add
+  one as an authentication shortcut; browser-controlled identity is forgeable.
 - **The package enforces the rest.** Conversation ownership, per-user data
   scoping, private attachments, and signed URLs are handled inside the package
   and are not your responsibility to wire up correctly.

@@ -1,108 +1,53 @@
 # @mordn/chat-widget
 
-A customizable, **secure-by-default** AI chat widget for React/Next.js apps,
-with conversation persistence and attachments handled for you.
+A secure-by-default AI chat widget for React/Next.js with one canonical,
+JSON-serializable agent configuration and an authenticated bootstrap flow.
 
-The widget owns the hard, dangerous-to-get-wrong backend plumbing — conversation
-ownership, idempotent persistence, history, private attachments, streaming —
-behind one mounted handler. You supply the three things that are genuinely
-yours: **who the user is** (auth), **which model**, and **which tools**.
+## Hosted quick start
 
-> ## ⚠️ Security: you establish identity on the server
->
-> The widget sends an `X-User-Id` header, but **it is not an authentication
-> boundary** — the browser controls it. You must implement `getChatUserId(req)`
-> to return the user id from your **verified server session** (Clerk, NextAuth,
-> Supabase Auth, …). The scaffold's stub **throws until you do this**, so a
-> fresh install is never silently insecure.
->
-> Trusting a client-supplied id is the IDOR bug that lets one user read another
-> user's chats. The package is designed so this is *unrepresentable* once you
-> wire up `getChatUserId`. **Read [SECURITY.md](./SECURITY.md).**
-
-## Quick Start
+Install the widget and its required AI SDK peers (no Tailwind setup is needed):
 
 ```bash
-# 1. Install
-npm install @mordn/chat-widget @ai-sdk/react drizzle-kit
-
-# 2. Run the setup wizard
-npx @mordn/chat-widget
+npm install @mordn/chat-widget ai @ai-sdk/react
 ```
 
-The wizard creates exactly four files:
+Add server-only credentials to `.env.local`:
 
-- `app/api/chat/[[...chat]]/route.ts` — one catch-all that mounts the whole backend
-- `lib/chat-auth.ts` — the `getChatUserId` stub **you implement** (the security boundary)
-- `drizzle.config.ts` — points at the package's chat schema
-- `.env.example`
+```env
+MORDN_CHAT_KEY="..."       # published config + hosted persistence
+AI_GATEWAY_API_KEY="..."  # executes runtime.model gateway strings locally
+```
 
-## Requirements
+`createMordnHandler` resolves the published config and uses hosted
+conversation/attachment storage, but **model execution remains in your route
+process**. The route therefore needs its own model credential. If you do not use
+the AI SDK gateway, install a provider package (for example
+`@ai-sdk/anthropic`), set that provider's server-only key (for example
+`ANTHROPIC_API_KEY`), and pass the provider model as the code-level `model`
+option. Never expose any of these keys with `NEXT_PUBLIC_`.
 
-Peer dependencies (you provide these in your app):
-
-- **Next.js** 14, 15, or 16 (App Router)
-- **React** 18 or 19
-- **`ai`** v5 or v6 (Vercel AI SDK)
-- **`@ai-sdk/react`** v3 — the AI SDK's React bindings the widget renders with
-  (install it alongside `ai`)
-- **`drizzle-orm`** ^0.44 and **`postgres`** ^3.4 — only if you use the default
-  Drizzle store (skip if you bring your own `ChatStore`)
-- A **PostgreSQL** database (Supabase recommended) — for the default store
-- An AI provider package for your model, e.g. **`@ai-sdk/anthropic`**
-
-Styling ships pre-scoped in `@mordn/chat-widget/styles.css` — you do **not**
-need Tailwind in your app to use the widget.
-
-## Setup
-
-### 1. Environment Variables
-
-Copy `.env.example` to `.env.local` and fill in your credentials (see the file
-for the full list — `DATABASE_URL`, and the Supabase keys if you keep uploads).
-
-### 2. Implement the auth boundary
-
-Open `lib/chat-auth.ts` and replace the throwing stub with your real session
-lookup:
+Mount one authenticated catch-all route. Browser identity and agent identifiers
+are not widget props:
 
 ```ts
-// Clerk example
+// app/api/chat/[[...chat]]/route.ts
+import { createMordnHandler } from '@mordn/chat-widget/server';
 import { auth } from '@clerk/nextjs/server';
 
-export async function getChatUserId() {
-  const { userId } = await auth();   // from the verified session — never a header
-  return userId;
-}
-```
-
-### 3. Database Setup
-
-```bash
-npx drizzle-kit push   # creates chat_conversations + chat_messages
-```
-
-### 4. Configure your model and tools
-
-Everything is configured in the single `route.ts` the wizard created — model,
-system prompt, store, storage, and tools:
-
-```ts
-export const { GET, POST, DELETE } = createChatHandler({
-  getUserId: getChatUserId,
-  model: anthropic('claude-sonnet-4-5'),
-  store: createDrizzleChatStore(),       // or bring your own ChatStore
-  storage: createSupabaseStorage(),      // or bring your own StorageAdapter
-  // buildTools: async (ctx) => ({ tools: { /* ... */ }, cleanup: async () => {} }),
+const handler = createMordnHandler({
+  apiKey: process.env.MORDN_CHAT_KEY!,
+  getUserId: async () => (await auth()).userId,
+  // Advanced createChatHandler options stay flat:
+  // buildTools, retrieval, memory, CORS, hooks, etc.
+  // buildTools MERGES with the agent's hosted MCP tools (code wins on a name
+  // clash); passing it does not disable dashboard-connected integrations.
 });
+
+export const { GET, POST, DELETE, OPTIONS } = handler;
 ```
 
-**Bring your own database / storage:** pass a custom `store` / `storage` that
-implement the `ChatStore` / `StorageAdapter` interfaces from
-`@mordn/chat-widget/server`. The hosted defaults and your own implementations
-are interchangeable — same handler, same security.
-
-## Mount the widget (client)
+The client requires no `userId`, `agentId`, `widgetId`, model, prompt, or
+configuration headers:
 
 ```tsx
 'use client';
@@ -110,27 +55,94 @@ are interchangeable — same handler, same security.
 import { ChatWidget } from '@mordn/chat-widget';
 import '@mordn/chat-widget/styles.css';
 
-export default function Assistant({ userId }: { userId: string }) {
-  return (
-    <ChatWidget
-      userId={userId}                 // your app's user id (for the client)
-      // Theming = exactly three colors (or omit for the stock palette).
-      // Presets available: import { THEME_PRESETS } from '@mordn/chat-widget'
-      theme={{ backgroundColor: '#ffffff', textColor: '#262626', primaryColor: '#171717' }}
-      features={{ fileUpload: true }} // needs `storage` configured on the handler
-      display={{ layout: 'popup', size: 'default', resizable: true }}
-      starterPrompts={[
-        { title: 'What can you help me with?' },
-        { title: 'How do I get started?' },
-      ]}
-    />
-  );
+export default function Assistant() {
+  return <ChatWidget />; // apiBase defaults to /api/chat
 }
 ```
 
-> The widget sends `userId` as an `X-User-Id` header for convenience, but the
-> **server ignores it for authorization** — your `getChatUserId` is the only
-> source of identity. See the security note above.
+The stylesheet is prebuilt and scoped to `.chat-widget-container`; consuming
+apps do not need Tailwind. Keep the CSS import in a client entry/layout that is
+included on every page where the widget can mount.
+
+`getUserId` is the authorization boundary: derive it from a verified server
+session (Clerk, Auth.js, Supabase Auth, etc.) and return `null` for an
+unauthenticated request. Never read identity from a request header, query, or
+body field.
+
+On mount the widget calls `GET /api/chat/bootstrap`. The handler authenticates
+with `getUserId`, loads the published canonical config, and returns only
+`{ protocolVersion, agent, revision, client, storageScope }`. `protocolVersion`
+tracks the bootstrap envelope itself and is independent of the config document's
+`schemaVersion`. `storageScope` is an opaque server-derived value (a digest of
+the server-resolved agent + verified user — never the API key, so key rotation
+does not change it) used for browser chat and panel persistence.
+
+## Canonical `AgentConfig`
+
+The same versioned object is used by the control plane, handler, and preview
+transport. It contains data only: no React nodes, functions, credentials, or
+infrastructure endpoint URLs. Provider credentials and endpoints stay in
+server-only handler options and environment variables.
+
+```ts
+import type { AgentConfig } from '@mordn/chat-widget';
+
+const config: AgentConfig = {
+  schemaVersion: 1,
+  runtime: {
+    model: 'anthropic/claude-sonnet-4-5',
+    systemPrompt: 'Answer clearly and cite sources.',
+    temperature: 0.3,
+    maxOutputTokens: 8192,
+    followUps: { enabled: true, max: 3 },
+    memory: { enabled: true, inject: true, extract: true, limit: 6 },
+  },
+  client: {
+    greeting: 'How can I help?',
+    theme: {
+      backgroundColor: '#ffffff',
+      textColor: '#262626',
+      primaryColor: '#171717',
+    },
+    features: { fileUpload: true },
+    display: { layout: 'popup', size: 'default', resizable: true },
+    starterPrompts: [{ title: 'What can you help me with?' }],
+  },
+};
+```
+
+A caller may pass `config` to override published **client** fields locally and
+to send a complete draft with chat requests from an owner-authenticated preview:
+
+```tsx
+<ChatWidget apiBase="/api/owner/preview-chat" config={config} />
+```
+
+Production handlers ignore request config. A preview route must opt in with a
+server-side resolver; the handler validates the full schema-v1 config before the
+resolver runs, and an accepted config replaces the published config as one unit:
+
+```ts
+createChatHandler({
+  getUserId,
+  store,
+  storage,
+  getHostedConfig,
+  resolvePreviewConfig: async (candidate, ctx) => {
+    await requireAgentOwner(ctx.userId);
+    return candidate;
+  },
+});
+```
+
+There are no per-field model/prompt/temperature headers. Use the optional
+`headers` prop only for genuine generic transport metadata such as CSRF tokens.
+
+## Bring your own infrastructure
+
+Use `createChatHandler` directly with a `store`, optional `storage`, and either a
+code model or canonical `getHostedConfig`. The same handler exposes chat,
+bootstrap, upload, history, memory, and feedback subroutes.
 
 ## Suggested follow-ups
 
@@ -181,7 +193,7 @@ all for the button case. All three routes are equivalent to calling the
 widget never hijacks a host page's keybindings unless you opt in.
 
 ```tsx
-<ChatWidget userId={userId} display={{ keyboardShortcut: 'mod+i' }} />
+<ChatWidget config={{ schemaVersion: 1, runtime: { model: 'preview/only' }, client: { display: { keyboardShortcut: 'mod+i' } } }} />
 ```
 
 **2. Data-attribute buttons** — add `data-mordn-chat-open` (or `-toggle` /
@@ -208,116 +220,51 @@ keys, and multi-instance behaviour.
 
 ## Script-tag embed (any site)
 
-No React and no bundler? Docs sites built with MkDocs, Sphinx, Hugo, Jekyll,
-VitePress, Docusaurus, or plain HTML can embed the widget with a single script
-tag. The `dist/embed.global.js` bundle is self-contained — **React and the whole
-widget are compiled in**, so the host page needs nothing installed.
-
-You still run your own chat handler (see [Setup](#setup)); the embed is just a
-framework-free way to mount the client against it.
-
-### Declarative (one tag, no JavaScript)
+The standalone bundle uses the same bootstrap architecture. The only declarative
+shortcuts are transport/mount settings; identity and agent selection remain
+server-side.
 
 ```html
 <script
   src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
   data-api-base="https://your-app.com/api/chat"
-  data-agent-id="docs-bot"
 ></script>
 ```
 
-The widget mounts itself once the page is ready. Available shortcut attributes,
-each mapping to the same config key you'd pass in React: `data-user-id`,
-`data-agent-id`, `data-api-base`, `data-model`, `data-target` (a CSS selector to
-mount into), and `data-css-url`. For any field not covered by a shortcut, pass a
-full JSON config in `data-config`:
-
-```html
-<script
-  src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
-  data-config='{"apiBase":"https://your-app.com/api/chat","theme":{"backgroundColor":"#171717","textColor":"#ededed","primaryColor":"#fafafa"},"display":{"layout":"popup"},"starterPrompts":[{"title":"How do I get started?"}]}'
-></script>
-```
-
-Precedence: `data-config` is the base and individual `data-*` shortcuts overlay
-it, so you can share one JSON blob and override a single field per page.
-
-### Imperative (`window.MordnChat`)
-
-Omit the data attributes and drive it yourself. `init` accepts the same config
-object as the React `<ChatWidget>` props and returns a handle:
+Or initialise imperatively with the same public props:
 
 ```html
 <script src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"></script>
 <script>
   const chat = MordnChat.init({
     apiBase: 'https://your-app.com/api/chat',
-    agentId: 'docs-bot',
-    theme: { backgroundColor: '#ffffff', textColor: '#262626', primaryColor: '#171717' },
-    display: { layout: 'popup', size: 'default' },
   });
-
-  // Drive it programmatically:
-  chat.open();
-  chat.close();
-  chat.toggle();
-  chat.destroy(); // unmount and remove the container
-
-  // The same methods are also available on the global directly:
-  MordnChat.open();
 </script>
 ```
 
-`init` is idempotent — calling it again tears down the previous mount first, so
-it's safe to re-init after a client-side route change on a docs SPA.
+For owner previews, `data-config` may contain the full `MordnChatConfig`, whose
+`config` field is a canonical schema-v1 `AgentConfig`. Production handlers ignore
+that request config unless `resolvePreviewConfig` is installed.
 
-### Anonymous visitors
-
-Docs readers usually aren't logged in, so `userId` is optional here. When you
-omit it, the embed generates a persistent `anon-…` id and stores it in
-`localStorage` so a visitor's conversation history survives reloads (scoped per
-`agentId`, so two agents on one origin keep separate anonymous identities). As
-with the React path, this id is a client-side scoping key only — **your
-`getChatUserId` on the server remains the identity boundary** (see the security
-note above).
-
-### Cross-origin embeds (CORS)
-
-The examples above point `data-api-base` at **another origin** — the widget on
-`docs.example.com` calling `your-app.com`. Because the widget sends an
-`X-User-Id` header, *every* cross-origin request triggers a CORS preflight, so
-the handler must be told to answer it. Two steps:
+For cross-origin embeds, explicitly allow the embedding origin and export the
+`OPTIONS` handler:
 
 ```ts
-// app/api/chat/[[...chat]]/route.ts — note the added OPTIONS export
-export const { GET, POST, DELETE, OPTIONS } = createChatHandler({
-  getUserId: getChatUserId,
-  // Exact origins that may embed this handler ('*' allows any):
-  cors: { allowOrigins: ['https://docs.example.com'] },
-  // …store, storage, model as usual
+const handler = createMordnHandler({
+  apiKey: process.env.MORDN_CHAT_KEY!,
+  getUserId,
+  cors: {
+    allowOrigins: ['https://docs.example.com'],
+    allowCredentials: true, // only when getUserId authenticates with cookies
+  },
 });
+export const { GET, POST, DELETE, OPTIONS } = handler;
 ```
 
-That's all for anonymous/docs traffic. If your `getUserId` reads a **session
-cookie** and you want it to work cross-origin, both ends must opt into
-credentials — set `allowCredentials: true` in the handler's `cors` and
-`requestCredentials: 'include'` on the widget (via `data-config` or React
-props). Same-origin apps need none of this: without `cors`, behavior is
-unchanged.
-
-### Bundle size and CSP
-
-- The bundle includes React, ReactDOM, and the widget (estimated ~250–400 KB
-  gzipped). You do **not** need React on the host page. Code highlighting
-  (shiki) is not bundled — it lazy-loads from a CDN only if a response contains
-  a code block, and falls back to plain text if that load is blocked.
-- The widget's CSS is injected once into a `<style data-mordn-chat>` tag, so a
-  strict Content-Security-Policy needs `style-src 'unsafe-inline'` (or serve the
-  stylesheet yourself and set `data-css-url` / `cssUrl` to link it, which uses
-  the CDN/self-hosted fallback path instead). The styles are pre-scoped to
-  `.chat-widget-container`, so they never leak into the host page.
-
----
+Set `requestCredentials: 'include'` on `ChatWidget` only for cross-origin cookie
+authentication. Same-origin mounts need no CORS option. Generic `headers` remain
+available for real transport metadata and may trigger a preflight; they are not
+a config or identity transport.
 
 ## Bring your own database / storage
 
@@ -361,8 +308,8 @@ disable uploads.
 | Option | Required | Description |
 |--------|----------|-------------|
 | `getUserId(req)` | **yes** | Return the user id from your verified server session, or `null` (→ 401). The security boundary. |
-| `model` | yes | A `LanguageModel`, or `(ctx) => LanguageModel` for per-user selection. |
-| `store` | no* | A `ChatStoreFactory`. Use `createDrizzleChatStore()` or your own. *Required until a hosted default ships.* |
+| `model` | no* | A `LanguageModel`, or `(ctx) => LanguageModel`. *Required only when canonical hosted config does not supply `runtime.model`.* |
+| `store` | yes* | A `ChatStoreFactory` for direct `createChatHandler` use. *`createMordnHandler` supplies the hosted store.* |
 | `storage` | no | A `StorageAdapterFactory` (e.g. `createSupabaseStorage()`). Omit to disable uploads. |
 | `buildTools(ctx)` | no | `async (ctx) => ({ tools, cleanup? })`. `cleanup` is called exactly once per turn (finish/error/abort) — use it to close per-request resources like an MCP client. |
 | `buildSystemPrompt(ctx)` | no | Returns the system prompt; receives the request context to personalise. |
@@ -490,12 +437,12 @@ You can also run the suite programmatically with `runEvals` from
 
 ```ts
 // Client component + styles
-import { ChatWidget } from '@mordn/chat-widget';
+import { ChatWidget, type AgentConfig } from '@mordn/chat-widget';
 import '@mordn/chat-widget/styles.css';
 
 // Server handler + the pluggable contracts (server-only)
 import {
-  createChatHandler,
+  createChatHandler, createMordnHandler,
   type ChatStore, type ChatStoreFactory,
   type StorageAdapter, type StorageAdapterFactory,
   ConversationOwnershipError,

@@ -38,7 +38,7 @@ describe('isBlockedHostname', () => {
   });
   it('allows normal public hostnames', () => {
     expect(isBlockedHostname('example.com')).toBe(false);
-    expect(isBlockedHostname('api.mordn.dev')).toBe(false);
+    expect(isBlockedHostname('api.mordn.com')).toBe(false);
   });
 });
 

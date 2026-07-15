@@ -1,6 +1,6 @@
 {
   "name": "@mordn/chat-widget",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "A customizable AI chat widget for React applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -15,6 +15,11 @@
       "require": "./dist/index.js"
     },
     "./styles.css": "./dist/styles.css",
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "import": "./dist/config/index.mjs",
+      "require": "./dist/config/index.js"
+    },
     "./actions": {
       "types": "./dist/actions/index.d.ts",
       "import": "./dist/actions/index.mjs",
