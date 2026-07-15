@@ -4,8 +4,8 @@
  * Posts a thumbs up/down (optionally with a freeform reason) to the hosted
  * backend so product teams can measure answer quality. It reuses the SAME
  * transport the widget already uses for chat: the caller passes the widget's
- * `apiBase` and the exact headers `DefaultChatTransport` sends (`X-User-Id`
- * plus any host `extraHeaders`), and this posts to `${base}/v1/feedback` — the
+ * `apiBase` and any generic transport headers `DefaultChatTransport` sends,
+ * and this posts to `${base}/v1/feedback` — the
  * same `/v1` hosted-API convention as `/v1/conversations`, `/v1/uploads`, etc.
  * The Next.js handler mounted at `apiBase` forwards it to the hosted service
  * with the server-side `Authorization: Bearer <apiKey>` + `X-Chat-User`
@@ -18,8 +18,8 @@
  * truth and always fires regardless of this call's outcome.
  *
  * Degrades cleanly with no network: when the widget is NOT in hosted mode —
- * i.e. `base` is empty/whitespace (headless render, BYO backend that opts out,
- * or an unauthenticated widget with no `userId`) — the network call is skipped
+ * i.e. `base` is empty/whitespace (headless render or BYO backend that opts out)
+ * — the network call is skipped
  * entirely and the caller relies solely on `onFeedback`. This keeps
  * server-rendered / offline usage side-effect-free.
  */
@@ -45,9 +45,8 @@ export interface FeedbackSubmission {
  *
  * @param base    The widget's `apiBase` (e.g. `/api/chat`). Falsy/blank → skip
  *                the network call (headless / BYO / unauthenticated).
- * @param headers The same headers the chat transport sends — typically
- *                `{ 'X-User-Id': userId, ...extraHeaders }`. `Content-Type` is
- *                added here so callers don't have to.
+ * @param headers Generic headers shared with the chat transport. `Content-Type`
+ *                is added here so callers don't have to.
  * @param body    The feedback submission.
  * @returns A promise that ALWAYS resolves (never rejects). `true` if the POST
  *          was attempted and the server accepted it (2xx); `false` if the call
@@ -76,7 +75,7 @@ export async function submitFeedback(
         'Content-Type': 'application/json',
       },
       // Same credentials mode as every other widget request (cross-origin
-      // cookie-auth deployments; see ChatWidgetConfig.requestCredentials).
+      // cookie-auth deployments; see ChatWidgetProps.requestCredentials).
       credentials,
       body: JSON.stringify({
         conversationId: body.conversationId,

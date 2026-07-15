@@ -27,7 +27,7 @@ import type {
   StoredMessage,
 } from '../../types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
-import { normalizeSerializedFollowUpConfig } from '../../../utils/follow-ups';
+import { isAgentConfig } from '../../../config';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
@@ -259,9 +259,10 @@ export function createHostedStorage(options: HostedOptions) {
  * `createChatHandler({ getHostedConfig: createHostedConfig({ apiKey }) })`.
  *
  * The agent is resolved server-side from the apiKey, so this returns THIS key's
- * agent config. Results are cached in-process per apiKey for a short TTL so it
- * isn't refetched every turn. Returns null on any failure → the handler falls
- * through to code/defaults (a control-plane hiccup never breaks a turn).
+ * agent config. Results are cached in-process per user for a short TTL so it
+ * isn't refetched every turn. Fails CLOSED: a failed request or malformed
+ * published document throws, so the handler surfaces an explicit error instead
+ * of silently running a default agent (canonical-config contract).
  */
 export function createHostedConfig(options: HostedOptions) {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedConfig requires an apiKey');
@@ -275,7 +276,7 @@ export function createHostedConfig(options: HostedOptions) {
   // Key per userId instead. Evicted lazily on read; if the map somehow grows
   // past a sane bound (many distinct users hitting an un-recycled process),
   // clear it rather than let it grow unbounded — simplest possible cap.
-  const cache = new Map<string, { value: HostedAgentConfig | null; at: number }>();
+  const cache = new Map<string, { value: HostedAgentConfig; at: number }>();
   const MAX_CACHE_ENTRIES = 200;
 
   return async (ctx: ChatRequestContext): Promise<HostedAgentConfig | null> => {
@@ -287,52 +288,28 @@ export function createHostedConfig(options: HostedOptions) {
       cache.delete(key);
     }
 
-    try {
-      const res = await fetchImpl(`${baseUrl}/v1/config`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${apiKey}`, 'X-Chat-User': ctx.userId },
-      });
-      if (!res.ok) {
-        cache.set(key, { value: null, at: now });
-        return null;
-      }
-      // A 200 with an empty/HTML body (proxy, WAF, maintenance page) must not
-      // throw and 500 the whole turn — fall through to the same soft-fail null.
-      const raw = (await res.json().catch(() => null)) as HostedAgentConfig | null;
-      if (!raw) {
-        cache.set(key, { value: null, at: now });
-        return null;
-      }
-      const appearance = raw.appearance ?? null;
-      const appearanceBlob =
-        appearance && typeof appearance === 'object' && !Array.isArray(appearance)
-          ? (appearance as Record<string, unknown>)
-          : undefined;
-      // Presentational string fields ride the appearance blob rather than
-      // earning a column (same call as followUps). Read the top-level field
-      // first so the client survives a future API normalization that promotes
-      // one out of the blob, without another release.
-      const blobString = (top: unknown, key: string): string | null => {
-        const v = top ?? appearanceBlob?.[key];
-        return typeof v === 'string' ? v : null;
-      };
-      const value: HostedAgentConfig = {
-        model: raw.model ?? null,
-        systemPrompt: raw.systemPrompt ?? null,
-        greeting: raw.greeting ?? null,
-        subGreeting: blobString(raw.subGreeting, 'subGreeting'),
-        assistantName: blobString(raw.assistantName, 'assistantName'),
-        appearance,
-        maxOutputTokens: raw.maxOutputTokens ?? null,
-        followUps: normalizeSerializedFollowUpConfig(raw.followUps ?? appearanceBlob?.followUps),
-      };
-      if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
-      cache.set(key, { value, at: now });
-      return value;
-    } catch {
-      cache.set(key, { value: null, at: now });
-      return null;
+    const res = await fetchImpl(`${baseUrl}/v1/config`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}`, 'X-Chat-User': ctx.userId },
+    });
+    if (!res.ok) {
+      throw new Error(`[chat-widget] hosted config request failed (${res.status})`);
     }
+    const raw = (await res.json().catch(() => null)) as HostedAgentConfig | null;
+    if (
+      !raw ||
+      typeof raw.agent !== 'string' ||
+      raw.agent.trim() === '' ||
+      typeof raw.revision !== 'string' ||
+      raw.revision.trim() === '' ||
+      !isAgentConfig(raw.config)
+    ) {
+      throw new Error('[chat-widget] hosted config response is malformed');
+    }
+    const value: HostedAgentConfig = raw;
+    if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
+    cache.set(key, { value, at: now });
+    return value;
   };
 }
 
