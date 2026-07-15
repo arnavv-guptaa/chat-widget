@@ -95,6 +95,13 @@ const RENDERING_SYSTEM = [
   'Formatting: replies render as GitHub-Flavored Markdown.',
   'Present tabular data as GFM pipe tables (`| Col | Col |` with a `| --- |` separator row).',
   'Never draw tables as ASCII or box-drawing art, and never put a table inside a code fence — fences are for code only.',
+  // Charts steer (PRD §7): one paragraph, same mechanism as the table steer.
+  // The model gets a hint + a shape, not a schema dump — keeping the prompt
+  // small. The fence language `mordn-chart` is distinctive enough that a normal
+  // `json` fence won't trigger the chart renderer. The widget validates the
+  // body and renders an error card on any mismatch, so an invalid spec never
+  // ships a misleading partial chart.
+  'When your answer would benefit from a chart, emit a fenced `mordn-chart` block whose body is a JSON object: { "schemaVersion": 1, "type": "bar"|"line", "title": string, "xLabel"?: string, "yLabel"?: string, "series": { "name"?: string, "points": [{ "label": string, "value": number }] }, "source"?: string }. Use a bar chart to compare discrete categories and a line chart for a sequence over an ordered axis. Always start numeric axes at zero for bar charts. Only chart data you are confident is accurate; if you are unsure of the numbers, say so in prose instead. Keep charts to at most 20 points.',
 ].join(' ');
 
 // Hard cap on the raw chat request body. Enforced against the ACTUAL bytes read
