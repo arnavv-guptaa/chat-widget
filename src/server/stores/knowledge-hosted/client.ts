@@ -29,7 +29,7 @@ import type {
 } from '../../knowledge/types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
-const DEFAULT_BASE_URL = 'https://api.mordn.dev';
+const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
 export interface HostedKnowledgeOptions {
   /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */

@@ -2,6 +2,11 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.14.1 — Unreleased
+
+### Fixed
+- **Corrected the hosted API default base URL from `https://api.mordn.dev` to `https://api.mordn.com`.** `api.mordn.dev` is not a Mordn domain and does not serve the hosted API; every hosted client (`createHostedChatStore`, `createHostedStorage`, `createHostedConfig`, `createHostedFeedback`, knowledge, memory) that relied on the default was pointed at a dead host. Consumers passing an explicit `baseUrl` were unaffected.
+
 ## 0.14.0 — 2026-07-15
 
 ### Breaking

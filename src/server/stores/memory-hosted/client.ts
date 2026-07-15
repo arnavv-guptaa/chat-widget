@@ -28,7 +28,7 @@ import type {
 } from '../../memory/types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 
-const DEFAULT_BASE_URL = 'https://api.mordn.dev';
+const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
 function normalise(raw: Record<string, unknown>): Memory {
   return {
