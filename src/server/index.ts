@@ -31,7 +31,21 @@ export type {
 } from './storage-adapter';
 
 export { createChatHandler } from './handler';
+export {
+  createMordnHandler,
+  type CreateMordnHandlerOptions,
+  type MordnAdvancedOptions,
+} from './stores/hosted/mordn-handler';
 export { createLlmSummarizer, type LlmSummarizerOptions } from './summarize';
+export type {
+  AgentConfig,
+  AgentRuntimeConfig,
+  AgentClientConfig,
+  PublishedAgentConfig,
+  AgentBootstrap,
+  SerializableMemoryConfig,
+} from '../config';
+export { isAgentBootstrap, isAgentConfig } from '../config';
 export type {
   CreateChatHandlerOptions,
   ChatRequestContext,
