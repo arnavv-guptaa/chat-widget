@@ -40,7 +40,7 @@ export type CreateMordnHandlerOptions = HostedOptions &
 export function createMordnHandler(options: CreateMordnHandlerOptions) {
   const { apiKey, baseUrl, fetch: fetchOption, timeoutMs, getUserId, ...advancedOptions } = options;
   const hosted = { apiKey, baseUrl, fetch: fetchOption, timeoutMs };
-  const hostedBaseUrl = (baseUrl ?? 'https://api.mordn.dev').replace(/\/$/, '');
+  const hostedBaseUrl = (baseUrl ?? 'https://api.mordn.com').replace(/\/$/, '');
   const doFetch = withFetchTimeout(
     fetchOption ?? globalThis.fetch,
     timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS,
