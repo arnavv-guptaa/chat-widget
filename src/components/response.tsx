@@ -10,10 +10,15 @@ import { CollapsibleCode } from "./collapsible-code";
 import { MarkdownTable } from "./markdown-table";
 import { CitationRef, CitationSourcesProvider, type CitationSource } from "./citation-markers";
 import { remarkCitations } from "../utils/citation-tokens";
+import { ChartCode } from "../charts/chart-code";
+import { isChartFenceLanguage } from "../charts/chart-spec";
 
 // Override Streamdown's element rendering with our own components:
-//   - `code`     → CollapsibleCode: fenced code renders open by default with a
-//     ~10-line cap (#232); inline code passes through.
+//   - `code`     → chart fences (`mordn-chart` / `chart`) render the ChartCode
+//     chart renderer (the model emits a JSON ChartSpec in the fence and the
+//     widget draws an inline chart — Seam A of the charts feature); all other
+//     fenced code renders open by default with a ~10-line cap (#232) via
+//     CollapsibleCode; inline code passes through.
 //   - `table`    → MarkdownTable: replaces Streamdown's wrapper (whose Tailwind
 //     classes/control buttons our CSS build never generates) with our own
 //     rounded, scrollable, copyable card.
@@ -21,8 +26,16 @@ import { remarkCitations } from "../utils/citation-tokens";
 //     (split into `citeRef` nodes by `remarkCitations` below) render as
 //     superscript chips resolved by preserved source IDs (#138), instead of the literal
 //     "[ref: 4, ref: 6]" text the raw tokens would otherwise show.
+function codeRenderer(props: { inline?: boolean; className?: string; children?: React.ReactNode; node?: unknown }) {
+  const language = /language-([\w-]+)/.exec(props.className ?? '')?.[1];
+  if (!props.inline && isChartFenceLanguage(language)) {
+    return <ChartCode {...props} />;
+  }
+  return <CollapsibleCode {...props} />;
+}
+
 const STREAMDOWN_COMPONENTS = {
-  code: CollapsibleCode,
+  code: codeRenderer,
   table: MarkdownTable,
   citeRef: CitationRef,
 };
