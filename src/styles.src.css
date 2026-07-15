@@ -1154,6 +1154,17 @@
 .chat-widget-container .chat-chart-toggle:hover { color: hsl(var(--chat-text)); border-color: hsl(var(--chat-text-muted)); background: hsl(var(--chat-hover-bg)); }
 .chat-widget-container .chat-chart-toggle:focus-visible { outline: 2px solid hsl(var(--chat-primary)); outline-offset: 1px; }
 
+/* Icon sizing — OWNED here, not via Tailwind's size-* utility (which the scoped
+   CSS build does not reliably generate for a consumer's tarball overlay, leaving
+   lucide icons at their 24px default = "massive" in these tiny buttons). CSS
+   width/height beats the SVG presentation attributes lucide sets, so this wins. */
+.chat-widget-container .chat-chart-toggle svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  stroke-width: 2;
+}
+
 .chat-widget-container .chat-chart-table { border-top: 1px solid hsl(var(--chat-border)); padding: 0.5rem 0.875rem 0.75rem; overflow-x: auto; }
 .chat-widget-container .chat-chart-table table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
 .chat-widget-container .chat-chart-table th, .chat-widget-container .chat-chart-table td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid hsl(var(--chat-border)); }
@@ -1170,3 +1181,4 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.6875rem; color: hsl(var(--chat-text-muted));
   white-space: pre-wrap; word-break: break-word; max-height: 12rem; overflow-y: auto;
 }
+
