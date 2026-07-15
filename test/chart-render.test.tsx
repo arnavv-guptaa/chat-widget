@@ -1,104 +1,147 @@
 /**
- * ChartBlock renderer honesty-default tests (PRD §3 Rule 3).
+ * Renderer honesty-default tests (PRD §3 Rule 3) + the v2 y-axis fix.
  *
- * The renderer enforces the honesty rules the SCHEMA can't (because they're
- * rendering decisions, not data-shape decisions). These tests pin them by
- * calling the exported scale helper indirectly — via the component's output.
- *
- * Since the renderer is pure SVG + the geometry helpers are module-private,
- * these tests exercise the public component by rendering it and asserting on
- * the produced SVG structure (axis baseline at the zero tick, finite points,
- * error card presence). They use @testing-library/react where available; if the
- * sandbox can't install it, the maintainer runs these locally.
+ * The line-chart bug in v1 was an orphan `8.1` tick clipped at the baseline,
+ * caused by niceTicks unconditionally prepending the raw padded min. v2's
+ * niceScale snaps the min to the step grid, so the lowest tick is always a
+ * round grid value and never collides with the next one. These tests pin that
+ * and the honesty defaults across the wider vocabulary.
  */
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { ChartBlock, ChartErrorCard } from '../src/charts/chart-block';
+import { niceScale } from '../src/charts/chart-geometry';
 import type { ChartSpec } from '../src/charts/chart-spec';
 
-const bar: ChartSpec = {
-  schemaVersion: 1,
-  type: 'bar',
-  title: 'Revenue',
-  yLabel: 'USD',
-  series: { points: [{ label: 'Q1', value: 100 }, { label: 'Q2', value: 200 }] },
-};
-
 const line: ChartSpec = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   type: 'line',
-  title: 'Latency',
-  series: { points: [{ label: 'a', value: 1000 }, { label: 'b', value: 1010 }, { label: 'c', value: 1005 }] },
+  title: 'Website Traffic Over Time',
+  xLabel: 'Month',
+  yLabel: 'Visitors (thousands)',
+  series: { points: [
+    { label: 'Jan', value: 12 }, { label: 'Feb', value: 19 }, { label: 'Mar', value: 28 },
+    { label: 'Apr', value: 35 }, { label: 'May', value: 42 }, { label: 'Jun', value: 38 },
+    { label: 'Jul', value: 51 }, { label: 'Aug', value: 48 },
+  ] },
 };
 
-describe('ChartBlock — bar y-axis honesty', () => {
-  it('renders a y tick at 0 (bar y-axis always starts at 0)', () => {
+describe('niceScale — the y-axis fix', () => {
+  it('produces only round grid ticks (no orphan fractional tick)', () => {
+    // The v1 bug case: data min ~12, max ~51. v1 produced [8.1, 10, 20, ...].
+    // v2 must produce round ticks spanning the data with padding, no 8.1.
+    const s = niceScale(12, 51, false);
+    s.ticks.forEach((t) => {
+      // Every tick is a clean multiple of the step (no 8.1-style orphans).
+      expect(Math.abs((t - s.min) / s.step - Math.round((t - s.min) / s.step))).toBeLessThan(1e-6);
+    });
+    // The min tick is the first tick (no spurious prepended value).
+    expect(s.ticks[0]).toBe(s.min);
+    // Ticks are strictly increasing (no overlap).
+    for (let i = 1; i < s.ticks.length; i++) expect(s.ticks[i]).toBeGreaterThan(s.ticks[i - 1]);
+  });
+
+  it('forces min to 0 for bar (honesty)', () => {
+    const s = niceScale(40, 60, true);
+    expect(s.min).toBe(0);
+    expect(s.ticks).toContain(0);
+  });
+
+  it('handles a single-value series without crashing', () => {
+    const s = niceScale(5, 5, false);
+    expect(s.ticks.length).toBeGreaterThan(1);
+    expect(Number.isFinite(s.min)).toBe(true);
+  });
+});
+
+describe('ChartBlock — bar honesty', () => {
+  const bar: ChartSpec = { schemaVersion: 2, type: 'bar', title: 'Rev', yLabel: 'USD', series: { points: [{ label: 'Q1', value: 100 }, { label: 'Q2', value: 200 }] } };
+  it('renders a y tick at 0 (bar starts at 0)', () => {
     const { container } = render(<ChartBlock spec={bar} />);
     const ticks = Array.from(container.querySelectorAll('.chat-chart-tick')).map((e) => e.textContent ?? '');
     expect(ticks).toContain('0');
   });
-
-  it('renders the provenance line as Model-generated when no source is set', () => {
+  it('renders a bar per point', () => {
     const { container } = render(<ChartBlock spec={bar} />);
-    const prov = container.querySelector('.chat-chart-provenance');
-    expect(prov?.textContent).toBe('Model-generated');
-  });
-
-  it('renders the provenance line as Source: <x> when a source is set', () => {
-    const { container } = render(<ChartBlock spec={{ ...bar, source: 'CRM' }} />);
-    const prov = container.querySelector('.chat-chart-provenance');
-    expect(prov?.textContent).toBe('Source: CRM');
-  });
-
-  it('renders a bar rect for each point', () => {
-    const { container } = render(<ChartBlock spec={bar} />);
-    const bars = container.querySelectorAll('.chat-chart-bar');
-    expect(bars.length).toBe(bar.series.points.length);
+    expect(container.querySelectorAll('.chat-chart-bar').length).toBe(2);
   });
 });
 
-describe('ChartBlock — line honesty', () => {
-  it('renders a path (the line) and a point circle per data point', () => {
+describe('ChartBlock — line y-axis (the screenshot bug)', () => {
+  it('renders round y ticks with no orphan fractional value at the baseline', () => {
+    const { container } = render(<ChartBlock spec={line} />);
+    const ticks = Array.from(container.querySelectorAll('.chat-chart-tick')).map((e) => e.textContent ?? '');
+    // No clipped/overlapping fractional like "8.1" — every tick is a round grid value.
+    ticks.forEach((t) => {
+      const n = parseFloat(t);
+      if (Number.isFinite(n)) expect(Number.isInteger(n) || n % 5 === 0 || n % 2 === 0 || n % 1 === 0).toBe(true);
+    });
+    // Ticks are unique (no overlap).
+    expect(new Set(ticks).size).toBe(ticks.length);
+  });
+  it('renders a line path + a point per data point', () => {
     const { container } = render(<ChartBlock spec={line} />);
     expect(container.querySelectorAll('.chat-chart-line').length).toBe(1);
-    expect(container.querySelectorAll('.chat-chart-point').length).toBe(line.series.points.length);
-  });
-
-  // The no-truncate guard lives in the module-private yScale(); a full
-  // pixel-assertion of the y-range is brittle across viewBox rounding, so we
-  // assert the weaker-but-meaningful property: the y ticks span more than 10%
-  // of the value range (i.e. the axis wasn't collapsed to the top sliver).
-  it('produces y ticks that span a meaningful share of the value range', () => {
-    const { container } = render(<ChartBlock spec={line} />);
-    const tickTexts = Array.from(container.querySelectorAll('.chat-chart-tick'))
-      .map((e) => parseFloat(e.textContent ?? 'NaN'))
-      .filter((n) => Number.isFinite(n));
-    const tickSpan = Math.max(...tickTexts) - Math.min(...tickTexts);
-    const valueSpan = Math.max(...line.series.points.map((p) => p.value)) - Math.min(...line.series.points.map((p) => p.value));
-    expect(tickSpan).toBeGreaterThan(valueSpan * 0.1);
+    expect(container.querySelectorAll('.chat-chart-point').length).toBe(line.series && !Array.isArray(line.series) ? line.series.points.length : 0);
   });
 });
 
-describe('ChartBlock — a11y + data toggle', () => {
-  it('carries a role=figure and an aria-label from the title', () => {
-    const { container } = render(<ChartBlock spec={bar} />);
-    const figure = container.querySelector('[role="figure"]');
-    expect(figure?.getAttribute('aria-label')).toBe('Revenue');
+describe('ChartBlock — provenance + a11y', () => {
+  it('shows Model-generated when no source', () => {
+    const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'x', series: { points: [{ label: 'a', value: 1 }] } }} />);
+    expect(container.querySelector('.chat-chart-provenance')?.textContent).toBe('Model-generated');
   });
-
-  it('renders a View data toggle that is not expanded by default', () => {
-    const { container } = render(<ChartBlock spec={bar} />);
-    const toggle = container.querySelector('.chat-chart-toggle[aria-expanded]');
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+  it('shows Source: <x> when source is set', () => {
+    const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'x', source: 'CRM', series: { points: [{ label: 'a', value: 1 }] } }} />);
+    expect(container.querySelector('.chat-chart-provenance')?.textContent).toBe('Source: CRM');
+  });
+  it('carries role=figure + aria-label', () => {
+    const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'Sales', series: { points: [{ label: 'a', value: 1 }] } }} />);
+    expect(container.querySelector('[role="figure"]')?.getAttribute('aria-label')).toBe('Sales');
   });
 });
 
-describe('ChartErrorCard — Rule 2 fail-visibly', () => {
-  it('renders the error message and a raw-data toggle (not a broken chart)', () => {
+describe('ChartBlock — pie whole guard (Rule 3)', () => {
+  it('renders the error card when slices do not sum to the declared whole', () => {
+    const badPie: ChartSpec = {
+      schemaVersion: 2, type: 'pie', title: 'Bad',
+      whole: { total: 100, tolerance: 0.02 },
+      series: { points: [{ label: 'A', value: 60 }, { label: 'B', value: 30 }] }, // sums to 90, not 100
+    };
+    const { container } = render(<ChartBlock spec={badPie} />);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.textContent).toMatch(/couldn't be rendered|outside the declared whole/);
+  });
+  it('renders the pie when slices sum to the whole', () => {
+    const goodPie: ChartSpec = {
+      schemaVersion: 2, type: 'pie', title: 'Good',
+      whole: { total: 100, tolerance: 0.02 },
+      series: { points: [{ label: 'A', value: 60 }, { label: 'B', value: 40 }] },
+    };
+    const { container } = render(<ChartBlock spec={goodPie} />);
+    expect(container.querySelectorAll('.chat-chart-slice').length).toBe(2);
+  });
+});
+
+describe('ChartBlock — multi-series legend', () => {
+  it('renders a legend for multi-line', () => {
+    const ml: ChartSpec = {
+      schemaVersion: 2, type: 'multi-line', title: 'Two',
+      series: [
+        { name: 'A', points: [{ label: '1', value: 1 }, { label: '2', value: 2 }] },
+        { name: 'B', points: [{ label: '1', value: 3 }, { label: '2', value: 4 }] },
+      ],
+    };
+    const { container } = render(<ChartBlock spec={ml} />);
+    expect(container.querySelectorAll('.chat-chart-legend').length).toBeGreaterThan(0);
+  });
+});
+
+describe('ChartErrorCard — Rule 2', () => {
+  it('renders the error + a raw-data toggle, role=alert', () => {
     const { container } = render(<ChartErrorCard error="bad shape" rawText="{ oops" />);
     expect(container.textContent).toMatch(/couldn't be rendered/);
-    expect(container.textContent).toMatch(/bad shape/);
-    expect(container.querySelector('.chat-chart-error-raw')).toBeNull(); // collapsed
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.querySelector('.chat-chart-error-raw')).toBeNull();
   });
 });

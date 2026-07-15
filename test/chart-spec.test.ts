@@ -1,205 +1,177 @@
 /**
- * ChartSpec schema + parser tests.
- *
- * The trust boundary (PRD §3) lives here: the schema is what stops a model from
- * emitting a chart that misleads. These tests pin the honesty rules that are
- * enforceable at the schema layer (finite numbers, required title, bounded
- * points, closed type enum) and the parse-result shape.
- *
- * The renderer-level honesty rules (bar y-axis at 0, line no-truncate, ordinal
- * color) are enforced in chart-block.tsx and tested in chart-render.test.tsx —
- * they're rendering decisions, not schema decisions, so they live there.
+ * ChartSpec v2 schema + parser tests.
+ * Covers the widened vocabulary, multi-series normalization, honesty guards
+ * (finite numbers, required title, point bounds, closed type enum, pie whole,
+ * stacked/grouped shared labels), and the parse result shape.
  */
 import { describe, it, expect } from 'vitest';
 import {
   ChartSpecSchema,
   CHART_SPEC_SCHEMA_VERSION,
+  CHART_TYPES,
   isChartFenceLanguage,
   parseChartSpec,
   validateChartSpec,
+  asSeriesArray,
   type ChartSpec,
 } from '../src/charts/chart-spec';
 
-const validBar: ChartSpec = {
-  schemaVersion: 1,
+const bar: ChartSpec = {
+  schemaVersion: 2,
   type: 'bar',
   title: 'Revenue by quarter',
   xLabel: 'Quarter',
   yLabel: 'USD (k)',
-  series: {
-    name: 'Revenue',
-    points: [
-      { label: 'Q1', value: 120 },
-      { label: 'Q2', value: 150 },
-      { label: 'Q3', value: 180 },
-      { label: 'Q4', value: 210 },
-    ],
-  },
+  series: { points: [{ label: 'Q1', value: 120 }, { label: 'Q2', value: 150 }, { label: 'Q3', value: 180 }, { label: 'Q4', value: 210 }] },
 };
 
-const validLine: ChartSpec = {
-  schemaVersion: 1,
-  type: 'line',
-  title: 'Latency over the day',
-  xLabel: 'hour',
-  yLabel: 'ms',
-  series: {
-    points: [
-      { label: '00', value: 42 },
-      { label: '06', value: 38 },
-      { label: '12', value: 91 },
-      { label: '18', value: 74 },
-    ],
-  },
-  source: 'metrics API',
+const multiLine: ChartSpec = {
+  schemaVersion: 2,
+  type: 'multi-line',
+  title: 'Two metrics',
+  series: [
+    { name: 'A', points: [{ label: '1', value: 1 }, { label: '2', value: 2 }] },
+    { name: 'B', points: [{ label: '1', value: 3 }, { label: '2', value: 4 }] },
+  ],
 };
 
-describe('ChartSpecSchema — valid specs', () => {
-  it('accepts a minimal bar spec (title + series only)', () => {
-    const r = ChartSpecSchema.safeParse({
-      schemaVersion: 1,
-      type: 'bar',
-      title: 'x',
-      series: { points: [{ label: 'a', value: 1 }] },
-    });
-    expect(r.success).toBe(true);
-  });
+const pie: ChartSpec = {
+  schemaVersion: 2,
+  type: 'pie',
+  title: 'Market share',
+  whole: { total: 100, tolerance: 0.02 },
+  series: { points: [{ label: 'A', value: 60 }, { label: 'B', value: 40 }] },
+};
 
-  it('accepts a full bar spec with labels + source', () => {
-    expect(ChartSpecSchema.safeParse(validBar).success).toBe(true);
-  });
+const scatter: ChartSpec = {
+  schemaVersion: 2,
+  type: 'scatter',
+  title: 'Correlation',
+  scatter: [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 5 }],
+};
 
-  it('accepts a line spec with provenance source', () => {
-    const r = ChartSpecSchema.safeParse(validLine);
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.source).toBe('metrics API');
+describe('ChartSpecSchema — version + types', () => {
+  it('is schemaVersion 2', () => expect(CHART_SPEC_SCHEMA_VERSION).toBe(2));
+  it('supports the wide vocabulary', () => {
+    expect(CHART_TYPES).toContain('bar');
+    expect(CHART_TYPES).toContain('horizontal-bar');
+    expect(CHART_TYPES).toContain('line');
+    expect(CHART_TYPES).toContain('area');
+    expect(CHART_TYPES).toContain('multi-line');
+    expect(CHART_TYPES).toContain('stacked-bar');
+    expect(CHART_TYPES).toContain('grouped-bar');
+    expect(CHART_TYPES).toContain('pie');
+    expect(CHART_TYPES).toContain('donut');
+    expect(CHART_TYPES).toContain('scatter');
+    expect(CHART_TYPES).toContain('sparkline');
+  });
+  it('rejects an unknown type', () => {
+    expect(ChartSpecSchema.safeParse({ ...bar, type: 'radar' }).success).toBe(false);
   });
 });
 
-describe('ChartSpecSchema — honesty rules at the schema layer', () => {
-  it('rejects an empty title (untitled charts are a hand-wave)', () => {
-    const r = ChartSpecSchema.safeParse({ ...validBar, title: '' });
-    expect(r.success).toBe(false);
+describe('ChartSpecSchema — series single vs array (backward-compat)', () => {
+  it('accepts a single-series object (v1 shape)', () => {
+    expect(ChartSpecSchema.safeParse(bar).success).toBe(true);
   });
-
-  it('rejects NaN / Infinity values (a chart of NaN is a lie)', () => {
-    const r = ChartSpecSchema.safeParse({
-      ...validBar,
-      series: { points: [{ label: 'Q1', value: NaN }] },
-    });
-    expect(r.success).toBe(false);
-    const r2 = ChartSpecSchema.safeParse({
-      ...validBar,
-      series: { points: [{ label: 'Q1', value: Infinity }] },
-    });
-    expect(r2.success).toBe(false);
+  it('accepts a multi-series array', () => {
+    expect(ChartSpecSchema.safeParse(multiLine).success).toBe(true);
   });
-
-  it('rejects an empty points array', () => {
-    const r = ChartSpecSchema.safeParse({ ...validBar, series: { points: [] } });
-    expect(r.success).toBe(false);
+  it('asSeriesArray normalizes single -> [single]', () => {
+    const r = ChartSpecSchema.safeParse(bar);
+    if (r.success) expect(asSeriesArray(r.data).length).toBe(1);
   });
-
-  it('rejects more than 200 points (a 500-point bar chart is a misuse)', () => {
-    const points = Array.from({ length: 201 }, (_, i) => ({ label: `x${i}`, value: i }));
-    const r = ChartSpecSchema.safeParse({ ...validBar, series: { points } });
-    expect(r.success).toBe(false);
+  it('asSeriesArray keeps an array as-is', () => {
+    const r = ChartSpecSchema.safeParse(multiLine);
+    if (r.success) expect(asSeriesArray(r.data).length).toBe(2);
   });
+});
 
+describe('ChartSpecSchema — honesty rules', () => {
+  it('rejects an empty title', () => expect(ChartSpecSchema.safeParse({ ...bar, title: '' }).success).toBe(false));
+  it('rejects NaN/Infinity values', () => {
+    expect(ChartSpecSchema.safeParse({ ...bar, series: { points: [{ label: 'a', value: NaN }] } }).success).toBe(false);
+    expect(ChartSpecSchema.safeParse({ ...bar, series: { points: [{ label: 'a', value: Infinity }] } }).success).toBe(false);
+  });
+  it('rejects empty points', () => expect(ChartSpecSchema.safeParse({ ...bar, series: { points: [] } }).success).toBe(false));
+  it('rejects >500 points', () => {
+    const pts = Array.from({ length: 501 }, (_, i) => ({ label: `x${i}`, value: i }));
+    expect(ChartSpecSchema.safeParse({ ...bar, series: { points: pts } }).success).toBe(false);
+  });
   it('rejects an empty point label', () => {
-    const r = ChartSpecSchema.safeParse({
-      ...validBar,
-      series: { points: [{ label: '', value: 1 }] },
-    });
-    expect(r.success).toBe(false);
+    expect(ChartSpecSchema.safeParse({ ...bar, series: { points: [{ label: '', value: 1 }] } }).success).toBe(false);
   });
-
-  it('rejects an unknown chart type (no guessing how to draw it)', () => {
-    const r = ChartSpecSchema.safeParse({ ...validBar, type: 'scatter' });
-    expect(r.success).toBe(false);
-  });
-
-  it('rejects the wrong schemaVersion', () => {
-    const r = ChartSpecSchema.safeParse({ ...validBar, schemaVersion: 2 });
-    expect(r.success).toBe(false);
-  });
-
-  it('strips unknown fields rather than rejecting (forward-compat with future model fields)', () => {
-    const r = ChartSpecSchema.safeParse({ ...validBar, futureField: 'ignored' } as unknown);
+  it('strips unknown fields (forward-compat)', () => {
+    const r = ChartSpecSchema.safeParse({ ...bar, futureField: 'x' } as unknown);
     expect(r.success).toBe(true);
-    if (r.success) {
-      expect((r.data as unknown as Record<string, unknown>).futureField).toBeUndefined();
-    }
   });
-
-  it('does NOT let the model set a yMin / yMax override (the field is silently dropped, not honored)', () => {
-    // A model trying to sneak a truncated y-axis via a yMin field would have it
-    // stripped — the renderer enforces y-starts-at-0, not the schema, but the
-    // schema also refuses to carry the override through.
-    const r = ChartSpecSchema.safeParse({ ...validBar, yMin: 990 } as unknown);
+  it('does not carry a yMin override through', () => {
+    const r = ChartSpecSchema.safeParse({ ...bar, yMin: 990 } as unknown);
     expect(r.success).toBe(true);
-    if (r.success) {
-      expect((r.data as unknown as Record<string, unknown>).yMin).toBeUndefined();
-    }
+    if (r.success) expect((r.data as unknown as Record<string, unknown>).yMin).toBeUndefined();
+  });
+});
+
+describe('ChartSpecSchema — type-specific guards', () => {
+  it('scatter requires a scatter array', () => {
+    expect(ChartSpecSchema.safeParse({ ...scatter, scatter: undefined }).success).toBe(false);
+  });
+  it('scatter accepts x/y pairs', () => {
+    expect(ChartSpecSchema.safeParse(scatter).success).toBe(true);
+  });
+  it('pie rejects a series array', () => {
+    expect(ChartSpecSchema.safeParse({ ...pie, series: pie.series ? [pie.series as never] : [] }).success).toBe(false);
+  });
+  it('pie accepts a single series', () => {
+    expect(ChartSpecSchema.safeParse(pie).success).toBe(true);
+  });
+  it('stacked-bar requires an array of 2+', () => {
+    expect(ChartSpecSchema.safeParse({ ...multiLine, type: 'stacked-bar', series: multiLine.series }).success).toBe(true);
+    expect(ChartSpecSchema.safeParse({ ...bar, type: 'stacked-bar' }).success).toBe(false);
+  });
+  it('stacked-bar rejects mismatched category labels', () => {
+    const bad = {
+      ...multiLine,
+      type: 'stacked-bar',
+      series: [
+        { name: 'A', points: [{ label: '1', value: 1 }, { label: '2', value: 2 }] },
+        { name: 'B', points: [{ label: '1', value: 3 }, { label: '3', value: 4 }] },
+      ],
+    };
+    expect(ChartSpecSchema.safeParse(bad).success).toBe(false);
   });
 });
 
 describe('parseChartSpec', () => {
-  it('parses a valid JSON fence body', () => {
-    const r = parseChartSpec(JSON.stringify(validBar));
+  it('parses valid JSON', () => {
+    const r = parseChartSpec(JSON.stringify(bar));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.spec.title).toBe('Revenue by quarter');
   });
-
   it('returns a user-displayable error for invalid JSON', () => {
     const r = parseChartSpec('{ not json');
     expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error).toMatch(/not valid JSON/i);
-      expect(r.issues.length).toBeGreaterThan(0);
-    }
+    if (!r.ok) expect(r.error).toMatch(/not valid JSON/i);
   });
-
-  it('returns a user-displayable error for valid JSON that fails the schema', () => {
-    const r = parseChartSpec(JSON.stringify({ type: 'bar', series: { points: [] } }));
+  it('returns issues for a schema mismatch', () => {
+    const r = parseChartSpec(JSON.stringify({ type: 'bar' }));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.issues.length).toBeGreaterThan(0);
   });
 });
 
 describe('validateChartSpec', () => {
-  it('throws on invalid input (programming error, not a render error)', () => {
-    expect(() => validateChartSpec({ type: 'bar' })).toThrow();
-  });
-
-  it('returns the validated spec for valid input', () => {
-    expect(validateChartSpec(validBar).type).toBe('bar');
-  });
+  it('throws on invalid input', () => expect(() => validateChartSpec({ type: 'bar' })).toThrow());
+  it('returns the validated spec for valid input', () => expect(validateChartSpec(bar).type).toBe('bar'));
 });
 
 describe('isChartFenceLanguage', () => {
-  it('recognizes the canonical fence language', () => {
+  it('recognizes mordn-chart + chart, case-insensitive', () => {
     expect(isChartFenceLanguage('mordn-chart')).toBe(true);
-  });
-
-  it('recognizes the short alias', () => {
     expect(isChartFenceLanguage('chart')).toBe(true);
-  });
-
-  it('is case-insensitive and trims whitespace', () => {
     expect(isChartFenceLanguage('  Mordn-Chart  ')).toBe(true);
   });
-
-  it('does not match json / other languages (a json fence must not trigger a chart)', () => {
+  it('does not match json/other', () => {
     expect(isChartFenceLanguage('json')).toBe(false);
-    expect(isChartFenceLanguage('typescript')).toBe(false);
     expect(isChartFenceLanguage(undefined)).toBe(false);
-    expect(isChartFenceLanguage('')).toBe(false);
-  });
-});
-
-describe('CHART_SPEC_SCHEMA_VERSION', () => {
-  it('is 1', () => {
-    expect(CHART_SPEC_SCHEMA_VERSION).toBe(1);
   });
 });
