@@ -64,7 +64,7 @@ describe('createMordnHandler bootstrap wiring', () => {
     });
     expect(JSON.stringify(firstBody)).not.toContain('gateway/model');
     expect(firstFetch).toHaveBeenCalledWith(
-      'https://api.mordn.dev/v1/config',
+      'https://api.mordn.com/v1/config',
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer server-secret-one' }),
       }),

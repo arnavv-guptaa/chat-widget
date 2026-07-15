@@ -29,7 +29,7 @@ import type {
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 import { isAgentConfig } from '../../../config';
 
-const DEFAULT_BASE_URL = 'https://api.mordn.dev';
+const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
 export interface HostedOptions {
   /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */
@@ -333,7 +333,7 @@ export interface HostedFeedbackOptions extends HostedOptions {
  * `createHostedChatStore` / `createHostedMemory`. It forwards the verified
  * feedback event to chat-api `POST /v1/feedback` using the EXACT plumbing the
  * hosted store/memory clients use: `Authorization: Bearer <apiKey>` +
- * `X-Chat-User: <verified userId>`, base URL `https://api.mordn.dev` (override
+ * `X-Chat-User: <verified userId>`, base URL `https://api.mordn.com` (override
  * via `baseUrl`), JSON body. The `apiKey` authenticates the tenant; the userId
  * the handler resolved server-side rides in `X-Chat-User` — the browser never
  * holds the secret and never asserts the identity.
