@@ -681,8 +681,8 @@
 
 /* ============================================
    TOOL APPROVAL BUTTONS (human-in-the-loop)
-   Shown when a needsApproval tool pauses. Approve = filled primary; Deny =
-   subtle outline. Themed via --chat-* so they work light/dark.
+   Shown when a needsApproval tool pauses. Approve = filled primary; Deny = subtle
+   outline. Themed via --chat-* so they work light/dark.
    ============================================ */
 .chat-widget-container .chat-tool-approve {
   background-color: hsl(var(--chat-primary));
@@ -705,9 +705,11 @@
 
 /* ============================================
    COLLAPSIBLE CODE BLOCK
-   A compact, collapsed-by-default pill for fenced code in assistant messages
-   (language · N lines · copy) that expands inline on click. Replaces the inline
-   code wall. See components/collapsible-code.tsx.
+   A compact renderer for fenced code in assistant messages: OPEN BY DEFAULT
+   with a ~10-line preview (header: language · N lines · copy; body shows the
+   first lines, scrolls for the rest). The chevron collapses to header-only.
+   Replaces the earlier collapsed-by-default pill. See
+   components/collapsible-code.tsx.
    ============================================ */
 .chat-widget-container .chat-code-collapsible {
   border: 1px solid hsl(var(--chat-border));
@@ -769,13 +771,22 @@
   color: hsl(var(--chat-text));
 }
 /* The expanded code body — its own scroll region, no extra box (the collapsible
-   container is the box). */
+   container is the box). Capped to ~10 lines so an 80-line file no longer dumps
+   a wall into the chat: the first lines read inline (open by default) and the
+   rest scroll. The max-height is computed from the body's own line-height +
+   font-size + vertical padding so it stays in lockstep with the typography —
+   10 lines × 1.55 lh × 0.8125rem + the 0.75rem top/bottom padding. */
 .chat-widget-container .chat-code-body {
   margin: 0;
   padding: 0.75rem 0.85rem;
   border-top: 1px solid hsl(var(--chat-border));
   background-color: hsl(var(--chat-surface));
   overflow-x: auto;
+  overflow-y: auto;
+  /* ~10 lines: 10 × (0.8125rem × 1.55) + 2 × 0.75rem padding ≈ 20rem. Rounded
+     to a clean rem value; close enough that it shows roughly ten lines and
+     scrolls for the rest. Tuned alongside the font-size/line-height above. */
+  max-height: 20rem;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
   line-height: 1.55;

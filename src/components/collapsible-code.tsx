@@ -1,24 +1,38 @@
 "use client";
 
 /**
- * CollapsibleCode — a compact, collapsed-by-default renderer for fenced code
- * blocks in assistant messages. Instead of dumping an 80-line wall into the chat,
- * it shows a one-line pill:
+ * CollapsibleCode — a compact renderer for fenced code blocks in assistant
+ * messages. OPEN BY DEFAULT with a ~10-line preview: the first lines are
+ * visible inline (no click needed to read the code), and anything beyond the
+ * cap scrolls inside the body. The header pill (language · N lines · copy)
+ * stays, and the chevron collapses the body back to header-only when the user
+ * wants it out of the way.
  *
- *     ▸ {} python · 24 lines        [copy]
+ *     ▾ {} python · 24 lines        [copy]
+ *     ┌─────────────────────────────┐
+ *     │  line 1                     │
+ *     │  line 2                     │  ← first ~10 lines visible
+ *     │  …                          │  ← scroll for the rest
+ *     └─────────────────────────────┘
  *
- * Click to expand the code inline; click again to collapse. Inline code
- * (single-backtick) is left untouched — only multi-line fenced blocks collapse.
+ * Inline code (single-backtick) is left untouched — only multi-line fenced
+ * blocks render through here.
  *
  * Wired in via Streamdown's `components={{ code: ... }}` override (response.tsx).
  * react-markdown calls the `code` override for BOTH inline and fenced code, so we
  * detect fenced blocks by the `language-*` className (and/or a newline) and pass
  * everything else straight through.
  *
- * Syntax highlighting (Shiki) is a progressive enhancement layered on the
- * EXPANDED body only — the collapsed pill stays zero-cost, and the raw
- * `<pre><code>` always renders while (and if ever) highlighting is unavailable.
- * See utils/highlight.ts and the CollapsibleCodeBlock notes below.
+ * Syntax highlighting (Shiki) is a progressive enhancement layered on the body
+ * only — the raw `<pre><code>` always renders while (and if ever) highlighting
+ * is unavailable. See utils/highlight.ts and the CollapsibleCodeBlock notes
+ * below.
+ *
+ * Design history: an earlier revision was collapsed-by-default (header pill
+ * only, body hidden until click). That hid content the reader almost always
+ * wants to see and forced an extra click on every block. Open-by-default with a
+ * max-height cap is the right call — the cap is what prevents the 80-line wall
+ * that collapse-by-default was a workaround for.
  */
 
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -65,7 +79,8 @@ export function CollapsibleCode({ className, children, inline, ...props }: CodeP
   const language = langMatch?.[1] ?? "";
   const isFenced = Boolean(language) || raw.includes("\n");
 
-  // Inline code (`foo`) — render as-is; only fenced multi-line blocks collapse.
+  // Inline code (`foo`) — render as-is; only fenced multi-line blocks use the
+  // collapsible renderer.
   if (inline || !isFenced) {
     return (
       <code className={className} {...props}>
@@ -86,7 +101,11 @@ export function CollapsibleCode({ className, children, inline, ...props }: CodeP
 const HIGHLIGHT_DEBOUNCE_MS = 150;
 
 function CollapsibleCodeBlock({ code, language }: { code: string; language: string }) {
-  const [open, setOpen] = useState(false);
+  // OPEN BY DEFAULT — the code is visible inline without a click. The body is
+  // capped to ~10 lines (see .chat-code-body in styles.src.css) and scrolls for
+  // the rest, so a long file no longer dumps an 80-line wall into the chat. The
+  // chevron still collapses to header-only if the user wants it out of the way.
+  const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const lineCount = code.split("\n").length;
@@ -98,14 +117,13 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
   // string resolving after a later one) and from a collapse-then-reopen.
   const genRef = useRef(0);
 
-  // Highlight the EXPANDED body only — the collapsed pill stays free. Debounced
-  // so streaming code is highlighted once it settles, not on every chunk. Any
-  // failure (import blocked, unknown lang, oversized) yields null → we keep
-  // rendering the plain <pre><code> below.
+  // Highlight the body only when open. Debounced so streaming code is
+  // highlighted once it settles, not on every chunk. Any failure (import
+  // blocked, unknown lang, oversized) yields null → we keep rendering the plain
+  // <pre><code> below. When collapsed, drop highlighted markup so a later reopen
+  // re-highlights the (possibly grown) code afresh.
   useEffect(() => {
     if (!open) {
-      // Collapsed: drop any highlighted markup so a later reopen re-highlights
-      // the (possibly grown) code afresh, and the collapsed state holds nothing.
       setHighlighted(null);
       return;
     }
@@ -164,9 +182,10 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
           // Shiki's <pre class="shiki"> markup. Safe to inject: Shiki escapes all
           // token text as it builds the HTML (tokens are <span>s with
           // text-escaped content), so nothing from `code` can inject markup. The
-          // wrapper carries the chat-code-body chrome (padding/border/surface);
-          // styles.src.css resets .shiki's own background so the widget surface
-          // shows through and the token colours come from --shiki-light/-dark.
+          // wrapper carries the chat-code-body chrome (padding/border/surface +
+          // the ~10-line max-height cap); styles.src.css resets .shiki's own
+          // background so the widget surface shows through and the token colours
+          // come from --shiki-light/-dark.
           <div
             className="chat-code-body"
             dangerouslySetInnerHTML={{ __html: highlighted }}
