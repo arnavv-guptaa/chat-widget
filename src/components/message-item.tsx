@@ -1,7 +1,7 @@
 import { Fragment, memo, useMemo } from 'react';
 import type { UIMessage, ChatStatus } from 'ai';
 import { cn } from '../utils/cn';
-import { Message, MessageContent, MessageMetadata } from './message';
+import { Message, MessageContent } from './message';
 import { Response } from './response';
 import { Source, Sources, SourcesContent, SourcesTrigger } from './sources';
 import type { CitationSource } from './citation-markers';
@@ -116,22 +116,6 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
 
   return (
     <div className={cn('group relative', spacing)}>
-      {message.role === 'assistant' && sourceParts.length > 0 && (
-        <Sources>
-          <SourcesTrigger count={sourceParts.length} />
-          <SourcesContent>
-            {sourceParts.map((part, i) => (
-              <Source
-                key={`${message.id}-source-${i}`}
-                href={part.url}
-                title={sourceTitle(part)}
-                index={i}
-              />
-            ))}
-          </SourcesContent>
-        </Sources>
-      )}
-
       {fileParts.length > 0 && (
         <div className={cn('flex mb-1', message.role === 'user' ? 'justify-end' : 'justify-start')}>
           <MessageAttachments attachments={attachments} />
@@ -151,8 +135,27 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
               onToolApproval={onToolApproval}
               sources={citationSources}
             />
+            {/* Sources bibliography footer (#138). Sits BELOW the answer — the
+               inline citation chips link the prose to these sources, so the list
+               is a reference footer, not a top-of-message callout. Collapsed by
+               default; the count is the quiet affordance. Suppressed while
+               streaming so a half-arrived source list doesn't flash. Replaces
+               the old "Grounded in N sources" metadata line (the footer's count
+               carries that signal now, more usefully). */}
             {!isStreamingThisMessage && sourceParts.length > 0 && (
-              <MessageMetadata items={[`Grounded in ${sourceParts.length} source${sourceParts.length === 1 ? '' : 's'}`]} />
+              <Sources className="mt-2">
+                <SourcesTrigger count={sourceParts.length} />
+                <SourcesContent>
+                  {sourceParts.map((part, i) => (
+                    <Source
+                      key={`${message.id}-source-${i}`}
+                      href={part.url}
+                      title={sourceTitle(part)}
+                      index={i}
+                    />
+                  ))}
+                </SourcesContent>
+              </Sources>
             )}
           </>
         ) : (
