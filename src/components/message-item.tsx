@@ -4,6 +4,7 @@ import { cn } from '../utils/cn';
 import { Message, MessageContent, MessageMetadata } from './message';
 import { Response } from './response';
 import { Source, Sources, SourcesContent, SourcesTrigger } from './sources';
+import type { CitationSource } from './citation-markers';
 import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
@@ -60,6 +61,14 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
   const sourceParts = useMemo(
     () => (message.parts?.filter((part) => part.type === 'source-url') ?? []) as SourceUrlPart[],
     [message.parts],
+  );
+  // The same source-url parts, cast to the CitationSource shape the inline
+  // citation chips consume. sourceParts IS the Sources-card list (same array,
+  // same order), so chip N and card row N point at the same URL by construction.
+  // Memoized on sourceParts so the identity is stable unless the parts change.
+  const citationSources = useMemo(
+    () => sourceParts as unknown as CitationSource[],
+    [sourceParts],
   );
   const fileParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'file') ?? [],
@@ -140,6 +149,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
               toolRenderers={toolRenderers}
               actionRenderers={actionRenderers}
               onToolApproval={onToolApproval}
+              sources={citationSources}
             />
             {!isStreamingThisMessage && sourceParts.length > 0 && (
               <MessageMetadata items={[`Grounded in ${sourceParts.length} source${sourceParts.length === 1 ? '' : 's'}`]} />

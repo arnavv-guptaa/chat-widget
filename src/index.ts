@@ -52,6 +52,16 @@ export type { MessageProps, MessageContentProps, MessageMetadataProps, MessageAv
 export { Sources, SourcesTrigger, SourcesContent, Source } from './components/sources';
 export type { SourcesProps, SourcesTriggerProps, SourcesContentProps, SourceProps } from './components/sources';
 
+// Inline citation markers (#138) — render the model's `[ref: N]` / `[N]` tokens
+// as superscript chips linked to the Sources list. `remarkCitations` is the
+// remark plugin; `CitationRef` is the component override (already wired into the
+// built-in `Response`, exported for custom renderers); `parseRefs`/`splitCitations`
+// are the pure parsers for testing or custom rendering pipelines.
+export { CitationRef, CitationSourcesProvider } from './components/citation-markers';
+export type { CitationSource } from './components/citation-markers';
+export { remarkCitations, parseRefs, splitCitations } from './utils/citation-tokens';
+export type { ParsedRef, CitationSegment } from './utils/citation-tokens';
+
 // Action result card (#166) — structured, false-completion-proof tool results
 export { ActionResultCard } from './components/action-result-card';
 export type { ActionResultCardProps } from './components/action-result-card';

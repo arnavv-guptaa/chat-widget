@@ -13,6 +13,7 @@ import {
 import { toToolPart, type ToolPart, type TurnState } from './types';
 import type { ActionRenderer, ToolRenderer } from '../../types';
 import { ActionResultCard } from '../action-result-card';
+import type { CitationSource } from '../citation-markers';
 
 /**
  * Renders one assistant turn as a clean, in-order flow — text, reasoning, and
@@ -30,6 +31,12 @@ interface AgentTurnTranscriptProps {
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
+  /**
+   * The message's source-url parts, in Sources-card order. Threaded down to
+   * `Response` so the inline `[ref: N]` citation chips can link to the Nth
+   * source (#138). Optional — when absent, chips render muted (no broken href).
+   */
+  sources?: CitationSource[];
 }
 
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
@@ -47,6 +54,7 @@ function AgentTurnTranscriptImpl({
   toolRenderers,
   actionRenderers,
   onToolApproval,
+  sources,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
 
@@ -88,7 +96,9 @@ function AgentTurnTranscriptImpl({
             <Fragment key={item.id}>
               <Message from="assistant">
                 <MessageContent>
-                  <Response isStreaming={isTextStreaming}>{item.text}</Response>
+                  <Response isStreaming={isTextStreaming} sources={sources}>
+                    {item.text}
+                  </Response>
                 </MessageContent>
               </Message>
             </Fragment>
