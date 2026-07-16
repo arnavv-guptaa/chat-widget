@@ -3,6 +3,7 @@
 import { cn } from "../utils/cn";
 import { type ComponentProps, memo, useMemo } from "react";
 import { Streamdown, defaultRemarkPlugins } from "streamdown";
+import type { Pluggable } from "unified";
 import { useCodeBlockAutoScroll } from "../hooks/use-code-scroll";
 import { useSmoothText } from "../hooks/use-smooth-text";
 import { CollapsibleCode } from "./collapsible-code";
@@ -30,8 +31,12 @@ const STREAMDOWN_COMPONENTS = {
 // runs before the CJK/math/GFM transforms. It only touches mdast `text` nodes
 // (stable across the later plugins), so the order is safe; prepending keeps it
 // out of the way of plugins that rewrite text. `defaultRemarkPlugins` is
-// Streamdown's own chain — we spread it so we don't clobber it.
-const REMARK_PLUGINS = [remarkCitations, ...defaultRemarkPlugins];
+// Streamdown's own chain, keyed by name ({ gfm, codeMeta }) rather than an
+// array — take its values so we extend the chain instead of clobbering it.
+const REMARK_PLUGINS: Pluggable[] = [
+  remarkCitations,
+  ...Object.values(defaultRemarkPlugins),
+];
 
 type ResponseProps = ComponentProps<typeof Streamdown> & {
   isStreaming?: boolean;
@@ -64,10 +69,9 @@ export const Response = memo(
     const components = { ...STREAMDOWN_COMPONENTS, ...(callerComponents ?? {}) };
     // If the caller supplied their own remark plugins, prepend ours then theirs
     // (citation-splitting first so caller plugins see the split tree); otherwise
-    // use our default chain. Cast: Streamdown's PluggableList isn't exported as a
-    // type we can name cleanly here, and the array shape is what we control.
-    const remarkPlugins = callerRemarkPlugins
-      ? [remarkCitations, ...(callerRemarkPlugins as unknown[])]
+    // use our default chain.
+    const remarkPlugins: Pluggable[] = callerRemarkPlugins
+      ? [remarkCitations, ...callerRemarkPlugins]
       : REMARK_PLUGINS;
 
     // Stable context value: `sources` identity is owned by the parent

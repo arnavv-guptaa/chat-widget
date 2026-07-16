@@ -186,7 +186,9 @@ describe('remarkCitations — mdast transform', () => {
     run(tree);
     const strong = (tree.children[0] as any).children[0];
     expect(strong.type).toBe('strong');
-    expect(strong.children.map((c: any) => c.type)).toEqual(['text', 'citeRef', 'text']);
+    // No trailing text node: the citation ends the string, and splitCitations
+    // only emits trailing text when there is some (`last < text.length`).
+    expect(strong.children.map((c: any) => c.type)).toEqual(['text', 'citeRef']);
     expect(strong.children[1].data?.hProperties?.['data-ref-n']).toBe('5');
   });
 });
