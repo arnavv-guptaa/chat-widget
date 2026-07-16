@@ -361,6 +361,49 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // configured) are merged in later, after namespaces are resolved.
     const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
 
+    // ── Teardown guard: wired the instant the per-request resource exists ──
+    // `buildTools` may allocate a resource that needs cleanup (an MCP socket,
+    // a DB transaction, a temp scope). The single guarded teardown below MUST
+    // be registered before any subsequent awaited call that can throw, so a
+    // setup-time failure (resolveModel / buildSystemPrompt / getContext /
+    // retrieval / memory / streamText construction) still tears the resource
+    // down instead of leaking it through the dispatch catch → 500 path.
+    //
+    // `streamTimer` / `streamAbort` are declared with `let` further down and
+    // captured by closure; they are `undefined` until the optional stream-
+    // timeout block sets them, so the `if (streamTimer)` guard below is a no-op
+    // until then. `cleanedUp` makes this idempotent across every completion
+    // path (setup-throw / on-error / on-finish / client-abort).
+    let streamAbort: AbortController | undefined;
+    let streamTimer: ReturnType<typeof setTimeout> | undefined;
+    let cleanedUp = false;
+    const runCleanup = async (reason: string) => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (streamTimer) clearTimeout(streamTimer);
+      if (built.cleanup) {
+        try {
+          await built.cleanup();
+        } catch (err) {
+          console.error(`[chat-widget] tool cleanup failed (${reason}):`, err);
+        }
+      }
+    };
+    // Client-abort during setup (e.g. the user hits Stop before the first
+    // token) must still release the tool resource — register the listener now.
+    request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
+
+    // From here through `streamText(...)` construction, several awaited calls
+    // can throw (resolveModel when no model is configured, buildSystemPrompt,
+    // getContext, retrieval/memory resolution, streamText itself). The stream
+    // lifecycle handlers (onError/onFinish) only own cleanup once `result`
+    // exists; a throw before that point would propagate to `dispatch`'s catch
+    // and return a 500 WITHOUT releasing `built.cleanup()` — leaking the
+    // per-request tool resource (MCP socket / DB tx / temp scope) on every
+    // setup failure. Wrap the whole setup region so a throw here runs the
+    // teardown guard before becoming a 500. `runCleanup` is idempotent, so the
+    // later stream-lifecycle calls are unaffected if setup succeeded.
+    try {
     // Fetch hosted config once (best-effort — a failure must never break the
     // turn). The inner try/catch swallows BOTH a synchronous throw and an async
     // rejection, honouring the "throwing falls through to code/defaults"
@@ -567,32 +610,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // abort the stream after that budget (and on client-abort) so a hung/stalled
     // upstream can't hold the connection + resources open indefinitely. OFF by
     // default → no abortSignal is passed to streamText below and the stream
-    // lifecycle is exactly as before.
-    let streamAbort: AbortController | undefined;
-    let streamTimer: ReturnType<typeof setTimeout> | undefined;
+    // lifecycle is exactly as before. `streamAbort` / `streamTimer` are declared
+    // alongside `runCleanup` above (the teardown guard must exist before any
+    // setup-time throw); this block only assigns them when the option is on.
     if (streamTimeoutMs && streamTimeoutMs > 0) {
       streamAbort = new AbortController();
       request.signal.addEventListener('abort', () => streamAbort!.abort());
       streamTimer = setTimeout(() => streamAbort!.abort(), streamTimeoutMs);
     }
-
-    // Single, guarded teardown of the tools' per-request resource AND the stream
-    // timer. Fires exactly once across all completion paths (finish / error /
-    // abort).
-    let cleanedUp = false;
-    const runCleanup = async (reason: string) => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      if (streamTimer) clearTimeout(streamTimer);
-      if (built.cleanup) {
-        try {
-          await built.cleanup();
-        } catch (err) {
-          console.error(`[chat-widget] tool cleanup failed (${reason}):`, err);
-        }
-      }
-    };
-    request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
 
     // streamText's own onFinish is the only place usage + providerMetadata are
     // available (the UI-stream onFinish below exposes neither). Capture them
@@ -705,6 +730,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       },
     });
+    } catch (setupErr) {
+      // A setup-time failure (model/system/retrieval/memory/streamText
+      // construction) must still release the per-request tool resource before
+      // the error becomes a 500 in `dispatch`. The stream lifecycle handlers
+      // never ran (no `result`), so this is the only teardown path. Await so
+      // serverless runtimes don't freeze the cleanup mid-flight, then rethrow
+      // — the caller maps it to a 500 exactly as before, just without the leak.
+      await runCleanup('setup-error');
+      throw setupErr;
+    }
 
     let mappedStreamError: string | undefined;
     const mapStreamError = (err: unknown): string => {
