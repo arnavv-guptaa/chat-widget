@@ -369,7 +369,15 @@
 /* Nested lists get the conventional second-level marker. */
 .chat-widget-container .is-assistant .chat-message-content ul ul { list-style-type: circle; }
 .chat-widget-container .is-assistant .chat-message-content li { margin: 0.2em 0; }
-.chat-widget-container .is-assistant .chat-message-content li::marker { color: hsl(var(--chat-text-subtle)); }
+/* List markers (bullets/numbers) sit with the BODY, not below it. Previously
+   these used --chat-text-subtle (the 0.42 placeholder/disabled stop), which in
+   dark theme rendered the numbers as a dark, low-contrast shade dimmer than the
+   surrounding body text — they read as a disabled/fifth shade, the source of
+   the "too many text shades / inconsistent" feedback. --chat-text-muted (0.75,
+   the secondary-text stop used by blockquote + the sources footer) is the right
+   home: clearly a marker (a step dimmer than body), still readable, part of the
+   prose family rather than the placeholder/disabled family. */
+.chat-widget-container .is-assistant .chat-message-content li::marker { color: hsl(var(--chat-text-muted)); }
 
 /* Links — clear, underline-on-hover. */
 .chat-widget-container .is-assistant .chat-message-content a {
