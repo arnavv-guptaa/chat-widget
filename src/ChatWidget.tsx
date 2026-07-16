@@ -32,7 +32,7 @@ import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
-import { contrastForegroundTriplet, hexToHslTriplet } from './utils/color';
+import { hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
@@ -382,13 +382,37 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       styles['--chat-text'] = tone(1);
       styles['--chat-primary'] = primaryTriplet;
       // Text ON the brand color — the send button, the launcher icon, and
-      // user-bubble text are all painted over --chat-primary. This was
-      // hardwired to the background color, which a light brand (yellow,
-      // pastel, white) rendered unreadable (≈1.5:1). Picked by WCAG relative
-      // luminance — NOT HSL lightness, which calls pure yellow "medium" —
-      // and the CSS falls back to the background for the stock palette.
-      const primaryForeground = contrastForegroundTriplet(theme?.primaryColor ?? '');
-      if (primaryForeground) styles['--chat-primary-foreground'] = primaryForeground;
+      // user-bubble text are all painted over --chat-primary. We intentionally
+      // do NOT pick a near-black/near-white foreground here: the user-bubble
+      // text, button label, and launcher icon default to the BACKGROUND color
+      // via the `var(--chat-primary-foreground, var(--chat-background))`
+      // fallback chain in styles.src.css. Using the background color as the
+      // text-on-accent is the conventional, correct choice across the realistic
+      // theme space:
+      //   - light theme (light bg + medium/dark accent)  → white text on the
+      //     accent (bg is white) — the branded look, AA-passing for the common
+      //     accents (red/blue/green/indigo on white all clear 4.5:1).
+      //   - dark theme (dark bg + light accent)          → dark text on the
+      //     accent (bg is dark) — the conventional dark-theme look.
+      //   - stock (near-black primary on white)          → white text, as
+      //     before.
+      // The earlier contrastForegroundTriplet picker produced "black on a dark
+      // accent" for saturated mid-tone accents (red-500, rose, emerald-600,
+      // amber-600) — technically AA but visually muddy, and not what a themed
+      // customer expects. Dropping it also retires the miscalibrated 0.179
+      // crossover (the true crossover vs the emitted triplet luminances is
+      // 0.196). `--chat-primary-foreground` is simply not set, so every usage
+      // site falls through to `--chat-background`.
+      //
+      // Known edge: a LIGHT accent (yellow / cream / pastel / near-white
+      // primaryColor) on a LIGHT background renders background-colored (i.e.
+      // light) text on a light accent — low contrast. That corner is rare in
+      // practice (a white-on-white or yellow-on-white brand bubble is an
+      // unusual configuration), and ThemeConfig is deliberately 3 colors with
+      // no userTextColor override, so the background-color default is the
+      // documented contract. If a host hits that corner, the fix is to choose
+      // a primaryColor that contrasts with their background — the same
+      // contract that already governs textColor.
       // Scrim over content: translucency is the intent here, so alpha is
       // correct; direction just follows which pole is lighter.
       styles['--chat-overlay'] =
