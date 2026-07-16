@@ -1503,10 +1503,18 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 backgroundColor: 'hsl(var(--chat-background))',
                 border: `1px solid ${'hsl(var(--chat-border))'}`
               }}>
-                {/* Search Header */}
+                {/* Search Header — same background as the popover container and
+                    the results list below, so the popover reads as ONE continuous
+                    surface (no gray seam between the search row and the results).
+                    The `border-b` alone separates the search row from the list;
+                    the search INPUT keeps its inset --chat-surface fill so the
+                    field still reads as a distinct control inside the row.
+                    Previously this used `var(--chat-overlay)` (a faint gray tint)
+                    over the popover's --chat-background, which produced a visible
+                    horizontal seam against the white results area. */}
                 <div className="p-2.5 border-b" style={{
                   borderColor: 'hsl(var(--chat-border))',
-                  backgroundColor: 'var(--chat-overlay)'
+                  backgroundColor: 'hsl(var(--chat-background))'
                 }}>
                   <div className="relative">
                     <input
