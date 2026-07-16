@@ -4,19 +4,14 @@
  * default, so switching a consumer from BYO to hosted is a one-line change:
  *
  *   retrieval: {
- *     store: createHostedKnowledgeRetriever({ apiKey: process.env.MORDN_CHAT_KEY, agentId }),
- *     resolveNamespaces: () => [],   // hosted scopes by tenant+agentId server-side
+ *     store: createHostedKnowledgeRetriever({ apiKey: process.env.MORDN_CHAT_KEY }),
+ *     resolveNamespaces: () => [],
  *   }
  *
- * Identity: the `apiKey` authenticates the TENANT; the server derives the tenant
- * from it and scopes every query by tenant_id + agentId. This client never
- * decides authorization — it only carries identity and the agentId.
- *
- * Namespacing note: the hosted API scopes by (tenant, agentId), so the local
- * `Namespace[]` fence is not the wire mechanism. We pass the agentId (fixed at
- * construction) and forward any resolved namespaces as a hint in the body for
- * servers that support sub-agent partitions; the security boundary is the tenant
- * key + server-side agentId scoping.
+ * Identity: the `apiKey` is an agent key (mck_live_… / mck_test_…), issued
+ * per-agent from the dashboard. The server resolves both the tenant AND the
+ * agent from this single credential — there is no separate agentId to
+ * provide. Every query is automatically scoped to this agent's knowledge base.
  */
 
 import 'server-only';
@@ -32,10 +27,10 @@ import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
 export interface HostedKnowledgeOptions {
-  /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */
+  /** Agent API key (mck_live_… / mck_test_…), issued per-agent from the
+   *  dashboard. Required. The server resolves the tenant and agent from this
+   *  key — no agentId is needed or accepted. Never sent to the client. */
   apiKey: string;
-  /** The agent whose KB to query. Scoped server-side together with the tenant. */
-  agentId: string;
   /** API base URL. Defaults to the hosted service; override for self-host/local. */
   baseUrl?: string;
   /** Optional fetch override (testing). */
@@ -61,7 +56,6 @@ class HostedKnowledgeRetriever implements Retriever {
 
   constructor(
     private readonly apiKey: string,
-    private readonly agentId: string,
     baseUrl: string,
     fetchImpl: typeof fetch,
     private readonly namespaces: ReadonlyArray<Namespace>,
@@ -79,11 +73,11 @@ class HostedKnowledgeRetriever implements Retriever {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        agentId: this.agentId,
         query: input,
         topK: opts.topK,
         minScore: opts.minScore,
-        // Forward resolved namespaces as a hint; server enforces tenant+agent.
+        // Forward resolved namespaces as a hint; the server enforces the
+        // tenant + agent scope from the API key.
         namespaces: this.namespaces.length ? [...this.namespaces] : undefined,
       }),
     });
@@ -96,15 +90,23 @@ class HostedKnowledgeRetriever implements Retriever {
 
 /**
  * Create a `RetrieverFactory` backed by the hosted @mordn/chat-api service.
- * Pass to `createChatHandler({ retrieval: { store: createHostedKnowledgeRetriever({ apiKey, agentId }) } })`.
+ *
+ *   createChatHandler({
+ *     retrieval: {
+ *       store: createHostedKnowledgeRetriever({ apiKey: process.env.MORDN_CHAT_KEY }),
+ *       resolveNamespaces: () => [],
+ *     },
+ *   })
+ *
+ * The API key is an agent key — the server resolves the tenant and agent from
+ * it and scopes every query to that agent's knowledge base automatically.
  */
 export function createHostedKnowledgeRetriever(
   options: HostedKnowledgeOptions,
 ): RetrieverFactory {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an apiKey');
-  if (!options.agentId) throw new Error('[chat-widget] createHostedKnowledgeRetriever requires an agentId');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
   return (namespaces) =>
-    new HostedKnowledgeRetriever(options.apiKey, options.agentId, baseUrl, fetchImpl, namespaces);
+    new HostedKnowledgeRetriever(options.apiKey, baseUrl, fetchImpl, namespaces);
 }
