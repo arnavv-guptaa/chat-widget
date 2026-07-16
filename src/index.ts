@@ -123,4 +123,28 @@ export {
   ToolOutput,
 } from './components/tool';
 
+// Charts — first-class, trusted in-transcript chart rendering (PRD doc
+// cmrm9rilj0gkd07ad17fe2wvb). `ChartBlock` renders a validated ChartSpec as a
+// zero-dep, theme-tokened SVG; `parseChartSpec`/`validateChartSpec` validate a
+// model's fenced JSON; `chartToolRenderer` is the one-line Seam B helper for
+// rendering a chart from a tool's real output (the more-trusted path).
+export {
+  ChartBlock,
+  ChartErrorCard,
+  ChartBlockOrError,
+  type ChartBlockProps,
+  type ChartErrorCardProps,
+  ChartSpecSchema,
+  CHART_SPEC_SCHEMA_VERSION,
+  CHART_FENCE_LANGUAGES,
+  isChartFenceLanguage,
+  parseChartSpec,
+  validateChartSpec,
+  type ChartSpec,
+  type ChartFenceLanguage,
+  type ChartSpecParseResult,
+  chartToolRenderer,
+  ChartCode,
+} from './charts';
+
 export * from './theme-presets';

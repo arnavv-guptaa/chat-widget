@@ -7,6 +7,8 @@ import { useCodeBlockAutoScroll } from "../hooks/use-code-scroll";
 import { useSmoothText } from "../hooks/use-smooth-text";
 import { CollapsibleCode } from "./collapsible-code";
 import { MarkdownTable } from "./markdown-table";
+import { ChartCode } from "../charts/chart-code";
+import { isChartFenceLanguage } from "../charts/chart-spec";
 
 // Override Streamdown's code rendering with our collapsed-by-default block, so a
 // long code file shows as a one-line pill (language · N lines · copy) the user
@@ -14,7 +16,22 @@ import { MarkdownTable } from "./markdown-table";
 // `table` replaces Streamdown's wrapper (whose Tailwind classes and control
 // buttons the widget's CSS build never generates) with our own rounded,
 // scrollable, copyable card — see markdown-table.tsx.
-const STREAMDOWN_COMPONENTS = { code: CollapsibleCode, table: MarkdownTable };
+//
+// `code` (fenced blocks only): when the fence language is a chart language
+// (`mordn-chart` / `chart`), render the ChartCode chart renderer instead of the
+// collapsed code pill — the model emits a JSON ChartSpec in the fence and the
+// widget draws an inline chart (Seam A of the charts feature, PRD doc
+// cmrm9rilj0gkd07ad17fe2wvb). Non-chart fences keep CollapsibleCode. Inline code
+// passes through untouched in both cases.
+function codeRenderer(props: { inline?: boolean; className?: string; children?: React.ReactNode; node?: unknown }) {
+  const language = /language-([\w-]+)/.exec(props.className ?? '')?.[1];
+  if (!props.inline && isChartFenceLanguage(language)) {
+    return <ChartCode {...props} />;
+  }
+  return <CollapsibleCode {...props} />;
+}
+
+const STREAMDOWN_COMPONENTS = { code: codeRenderer, table: MarkdownTable };
 
 type ResponseProps = ComponentProps<typeof Streamdown> & {
   isStreaming?: boolean;
