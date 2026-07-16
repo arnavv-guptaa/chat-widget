@@ -7,14 +7,22 @@ import {
 } from "../ui/collapsible";
 import { cn } from "../utils/cn";
 import { safeUrl } from "../utils/url-safety";
-import { BookIcon, ChevronDownIcon, ExternalLinkIcon, FileTextIcon } from "lucide-react";
+import { ChevronDownIcon, ExternalLinkIcon, FileTextIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
 export type SourcesProps = ComponentProps<"div">;
 
+/**
+ * Sources bibliography footer (#138). Lives BELOW the assistant answer, not
+ * above it: the inline citation chips link the prose to these sources, so the
+ * list is a reference footer, not a top-of-message callout. Collapsed by
+ * default; the trigger is a quiet text link (see SourcesTrigger). The container
+ * is a plain block (no border/surface of its own) so it reads as part of the
+ * message footer, not a floating card.
+ */
 export const Sources = ({ className, ...props }: SourcesProps) => (
   <Collapsible
-    className={cn("not-prose mb-3 text-xs", className)}
+    className={cn("not-prose text-xs", className)}
     {...props}
   />
 );
@@ -23,6 +31,13 @@ export type SourcesTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   count: number;
 };
 
+/**
+ * The bibliography footer affordance: a quiet, left-aligned text link, not a
+ * bordered pill. Reads as "N sources ↓" — muted at rest, full text on hover,
+ * chevron rotates on open. No box/surface so it sits naturally under the answer
+ * instead of floating above it as a callout. The expanded bibliography (the
+ * numbered Source rows) appears below on click.
+ */
 export const SourcesTrigger = ({
   className,
   count,
@@ -31,20 +46,18 @@ export const SourcesTrigger = ({
 }: SourcesTriggerProps) => (
   <CollapsibleTrigger
     className={cn(
-      "group/source-trigger inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-      "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.72)] text-[hsl(var(--chat-text-muted))]",
-      "hover:bg-[hsl(var(--chat-hover-bg)/0.58)] hover:text-[hsl(var(--chat-text))]",
-      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]",
+      "group/source-trigger inline-flex items-center gap-1 text-[11px] font-medium transition-colors",
+      "text-[hsl(var(--chat-text-subtle))] hover:text-[hsl(var(--chat-text))]",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)] rounded-sm",
       className
     )}
     {...props}
   >
     {children ?? (
       <>
-        <BookIcon className="size-3.5" aria-hidden="true" />
         <span>{count} source{count === 1 ? "" : "s"}</span>
         <ChevronDownIcon
-          className="size-3.5 transition-transform group-data-[state=open]/source-trigger:rotate-180"
+          className="size-3 transition-transform group-data-[state=open]/source-trigger:rotate-180"
           aria-hidden="true"
         />
       </>

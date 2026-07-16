@@ -800,6 +800,68 @@
 }
 
 /* ============================================
+   INLINE CITATION CHIPS (#138)
+   The model emits `[ref: N]` / `[N]` citation markers inline in assistant prose.
+   `remarkCitations` (utils/citation-tokens.ts) splits them into `citeRef` mdast
+   nodes and the `CitationRef` component override (components/citation-markers.tsx)
+   renders each as a superscript chip linking to the Nth source-url part — the
+   SAME list the Sources card (below the answer) renders — so chip N ==
+   Sources-card row N. Out-of-range / unsourced refs render muted and non-linking
+   (graceful, never a broken href). See components/citation-markers.tsx.
+   ============================================ */
+.chat-widget-container .chat-cite-ref {
+  font-size: 0.7em;
+  font-weight: 600;
+  line-height: 1;
+  /* Raise the chip just above the baseline so it reads as a superscript without
+     a vertical-align that throws off the line box on wrapped prose. */
+  vertical-align: super;
+  /* Tighten the chip to the glyph — no wrap, no overflow. */
+  white-space: nowrap;
+  /* Slight isolation so a chip never collides with the preceding word. */
+  margin-left: 0.1em;
+  /* Use the token ramp, not magic values — matches the Sources card chips. */
+  color: hsl(var(--chat-text-muted));
+  -webkit-user-select: none;
+  user-select: none;
+}
+.chat-widget-container .chat-cite-ref-muted {
+  color: hsl(var(--chat-text-subtle));
+  text-decoration: none;
+  cursor: default;
+}
+.chat-widget-container a.chat-cite-ref-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.05em;
+  padding: 0 0.28em;
+  border-radius: 0.3rem;
+  text-decoration: none;
+  color: hsl(var(--chat-text-muted));
+  background-color: hsl(var(--chat-surface));
+  border: 1px solid hsl(var(--chat-border));
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+.chat-widget-container a.chat-cite-ref-link:hover {
+  color: hsl(var(--chat-text));
+  background-color: hsl(var(--chat-hover-bg));
+  border-color: hsl(var(--chat-text)/0.22);
+}
+.chat-widget-container a.chat-cite-ref-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--chat-text)/0.22);
+}
+/* Respect reduced motion — the hover transition is tiny, but honor the
+   preference anyway for consistency with the rest of the widget. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-widget-container a.chat-cite-ref-link {
+    transition: none;
+  }
+}
+
+/* ============================================
    ASSISTANT ACTIVITY — TEXT SHIMMER + CARET + STATUS DOT
    A quiet "still working" language: a highlight sweep on the active label, a
    blinking caret on streaming reasoning, and a small pulsing status dot. Pure
@@ -987,7 +1049,7 @@
 /* ============================================
    POPUP WIDGET LAYOUT
    Uses CSS custom properties for sizing
-   Note: Uses combined selector (no space) since classes are on same element
+   Note: Uses combined selector (no space) since classes are same element
    ============================================ */
 
 .chat-widget-container.chat-widget-popup {
