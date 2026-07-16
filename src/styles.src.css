@@ -705,8 +705,10 @@
 
 /* ============================================
    COLLAPSIBLE CODE BLOCK
-   A compact, collapsed-by-default pill for fenced code in assistant messages
-   (language · N lines · copy) that expands inline on click. Replaces the inline
+   A header pill (language · N lines · copy) above an open, ~10-line-capped code
+   body for fenced code in assistant messages. Default-open (#232): the body
+   renders expanded and scrolls past ~10 lines; the header toggle collapses it
+   back to the pill when the user wants it out of the way. Replaces the inline
    code wall. See components/collapsible-code.tsx.
    ============================================ */
 .chat-widget-container .chat-code-collapsible {
@@ -769,13 +771,22 @@
   color: hsl(var(--chat-text));
 }
 /* The expanded code body — its own scroll region, no extra box (the collapsible
-   container is the box). */
+   container is the box). Default-OPEN (#232): blocks render expanded, but the
+   body is capped at ~10 lines so a long file scrolls inside its own region
+   instead of flooding the transcript. max-height is in em (relative to the
+   body's own 0.8125rem font) so the cap tracks the font: 10 lines × 1.55
+   line-height = 15.5em of text, +0.5em headroom for the 0.75rem vertical
+   padding under border-box. Short blocks (≤ ~10 lines) hit their natural height
+   and never show a vertical scrollbar; longer blocks scroll vertically while
+   horizontal scroll is preserved for long lines. */
 .chat-widget-container .chat-code-body {
   margin: 0;
   padding: 0.75rem 0.85rem;
   border-top: 1px solid hsl(var(--chat-border));
   background-color: hsl(var(--chat-surface));
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 16em;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
   line-height: 1.55;

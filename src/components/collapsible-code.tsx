@@ -1,19 +1,22 @@
 "use client";
 
 /**
- * CollapsibleCode — a compact, collapsed-by-default renderer for fenced code
- * blocks in assistant messages. Instead of dumping an 80-line wall into the chat,
- * it shows a one-line pill:
- *
- *     ▸ {} python · 24 lines        [copy]
- *
- * Click to expand the code inline; click again to collapse. Inline code
- * (single-backtick) is left untouched — only multi-line fenced blocks collapse.
+ * CollapsibleCode — a compact renderer for fenced code blocks in assistant
+ * messages. Instead of dumping an 80-line wall into the chat, it shows the code
+ * in an OPEN body capped at a ~10-line max-height (scroll beyond that), with a
+ * header pill (language · N lines · copy) the user can collapse to fold the
+ * block away entirely. Inline code (single-backtick) is left untouched — only
+ * multi-line fenced blocks get the chrome.
  *
  * Wired in via Streamdown's `components={{ code: ... }}` override (response.tsx).
  * react-markdown calls the `code` override for BOTH inline and fenced code, so we
  * detect fenced blocks by the `language-*` className (and/or a newline) and pass
  * everything else straight through.
+ *
+ * Default-open is intentional (#232): code is the primary content of a coding
+ * assistant's answer, so hiding it behind a click inverts the value. The
+ * ~10-line cap (set on `.chat-code-body` in styles.src.css) keeps the original
+ * anti-wall goal without hiding the first screen of code.
  *
  * Syntax highlighting (Shiki) is a progressive enhancement layered on the
  * EXPANDED body only — the collapsed pill stays zero-cost, and the raw
@@ -86,7 +89,12 @@ export function CollapsibleCode({ className, children, inline, ...props }: CodeP
 const HIGHLIGHT_DEBOUNCE_MS = 150;
 
 function CollapsibleCodeBlock({ code, language }: { code: string; language: string }) {
-  const [open, setOpen] = useState(false);
+  // Default OPEN (#232): code is the primary content of an answer, so it renders
+  // expanded immediately. The header toggle still lets a user collapse a block
+  // back to the pill when they want it out of the way. The body itself is capped
+  // at ~10 lines via `.chat-code-body`'s max-height in styles.src.css, so a long
+  // block scrolls inside its own region instead of flooding the transcript.
+  const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const lineCount = code.split("\n").length;
@@ -164,9 +172,10 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
           // Shiki's <pre class="shiki"> markup. Safe to inject: Shiki escapes all
           // token text as it builds the HTML (tokens are <span>s with
           // text-escaped content), so nothing from `code` can inject markup. The
-          // wrapper carries the chat-code-body chrome (padding/border/surface);
-          // styles.src.css resets .shiki's own background so the widget surface
-          // shows through and the token colours come from --shiki-light/-dark.
+          // wrapper carries the chat-code-body chrome (padding/border/surface +
+          // the ~10-line max-height cap); styles.src.css resets .shiki's own
+          // background so the widget surface shows through and the token colours
+          // come from --shiki-light/-dark.
           <div
             className="chat-code-body"
             dangerouslySetInnerHTML={{ __html: highlighted }}
