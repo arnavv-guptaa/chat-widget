@@ -287,7 +287,18 @@
   color: hsl(var(--chat-primary-foreground, var(--chat-background)));
 }
 
-.chat-widget-container .is-assistant .chat-message-content * {
+/* Default assistant-prose descendants to --chat-text, but at ZERO specificity
+   via :where() so this acts as a pure inheritance default, NOT a blanket
+   override. Any element with its own `color` rule — Shiki tokens (.shiki span),
+   citation chips (.chat-cite-ref), links, inline code, table cells — wins
+   without needing !important. Previously this was a bare
+   `.is-assistant .chat-message-content *` at specificity (0,3,0), which
+   clobbered Shiki's light-theme tokens (forcing flat --chat-text, killing
+   syntax highlighting in light theme) AND the citation chips' muted colors.
+   The dark Shiki rule survived only because it carried !important; the light
+   rule did not, so it lost the specificity war (the actual root cause of the
+   "code blocks don't work in light theme" bug). :where() retires the war. */
+.chat-widget-container :where(.is-assistant) .chat-message-content * {
   color: hsl(var(--chat-text));
 }
 
@@ -643,14 +654,19 @@
    ============================================ */
 .chat-widget-container .shiki,
 .chat-widget-container .shiki span {
+  /* Light-theme tokens: the --shiki-light value is stamped inline on each span
+     by Shiki (defaultColor:false + themes:{light,dark}); this rule resolves it.
+     No !important needed now that the assistant-text reset above uses :where()
+     (zero specificity) — this rule's (0,2,1) wins cleanly. The dark rule below
+     keeps !important to override this one inside .chat-dark. */
   color: var(--shiki-light);
   background-color: transparent !important;
 }
 
-/* Dark background: re-point colour to the `--shiki-dark` value Shiki stamped inline.
-   `!important` is required here — Shiki's inline `color: var(--shiki-light)`
-   would otherwise out-specify a plain stylesheet rule. Background stays
-   transparent (inherited from the rule above). */
+/* Dark background: re-point colour to the `--shiki-dark` value Shiki stamped
+   inline. !important is required to override the light rule above (same
+   specificity (0,2,1); the dark rule must win inside .chat-dark). Background
+   stays transparent (inherited from the rule above). */
 .chat-widget-container.chat-dark .shiki,
 .chat-widget-container.chat-dark .shiki span {
   color: var(--shiki-dark) !important;
