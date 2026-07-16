@@ -95,12 +95,10 @@ export function PromptInputAttachment({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border",
-        // Images keep the square thumbnail. Other files use a wider
-        // pill-shaped chip showing icon + filename — without it,
-        // non-image attachments rendered as identical paperclip
-        // squares with no way to tell them apart.
-        isImage ? "h-14 w-14" : "h-14 max-w-[200px]",
+        "group relative rounded-[11px] border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-surface))]",
+        // Images keep the square thumbnail. Other files use a compact chip
+        // showing a token-driven type tile + filename.
+        isImage ? "h-14 w-14" : "h-12 max-w-[240px]",
         className,
       )}
       key={data.id}
@@ -119,7 +117,7 @@ export function PromptInputAttachment({
       )}
       <Button
         aria-label="Remove attachment"
-        className="-right-1 -top-1 absolute h-4 w-4 rounded-full opacity-0 group-hover:opacity-100 p-0 [&_svg]:h-2 [&_svg]:w-2"
+        className="-right-1 -top-1 absolute size-5 rounded-full p-0 opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100 [&_svg]:size-2.5"
         onClick={() => attachments.remove(data.id)}
         size="icon"
         type="button"
@@ -134,13 +132,15 @@ export function PromptInputAttachment({
 function NonImageChip({ data }: { data: FileUIPart & { id: string } }) {
   const { Icon, label } = describeFile(data);
   return (
-    <div className="flex size-full items-center gap-2 px-2.5">
-      <Icon className="size-5 flex-shrink-0 text-muted-foreground" />
+    <div className="flex size-full items-center gap-2.5 px-2.5">
+      <span className="flex size-[26px] flex-shrink-0 items-center justify-center rounded-[7px] bg-[hsl(var(--chat-primary-tint))] text-[hsl(var(--chat-primary))]">
+        <Icon className="size-4" />
+      </span>
       <div className="min-w-0 flex flex-col leading-tight">
-        <span className="text-[12px] font-medium truncate">
+        <span className="truncate text-[12.5px] font-medium text-[hsl(var(--chat-text))]">
           {data.filename || "attachment"}
         </span>
-        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+        <span className="mt-0.5 text-[11px] text-[hsl(var(--chat-text-faint))]">
           {label}
         </span>
       </div>
@@ -563,8 +563,8 @@ export const PromptInput = ({
           // the styles.src.css `.chat-widget-container form ...` rules so
           // there's a single token (--chat-border) controlling both.
           // No utility classes for border colour here.
-          // bg-transparent: the surrounding .chat-prompt-box pill provides the
-          // single composer fill (--chat-surface); a bg here re-split the pill.
+          // The chat-prompt-box class applied by the caller owns the single
+          // composer fill; this base primitive contributes structure only.
           "w-full overflow-hidden rounded-xl bg-transparent transition-colors",
           "[&:focus-within]:shadow-none [&:focus]:shadow-none shadow-none",
           className
@@ -599,7 +599,7 @@ export const PromptInputTextarea = React.forwardRef<
   onChange,
   onKeyDown: externalOnKeyDown,
   className,
-  placeholder = "What would you like to know?",
+  placeholder = "Ask anything…",
   value,
   ...props
 }, ref) => {
@@ -910,7 +910,7 @@ export const PromptInputSubmit = ({
 
   return (
     <Button
-      className={cn("gap-1.5 rounded-lg", className)}
+      className={cn("chat-prompt-submit gap-1.5 rounded-full", className)}
       size={size}
       type={isStopping ? "button" : "submit"}
       variant={variant}

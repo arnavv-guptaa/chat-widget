@@ -33,13 +33,15 @@ const messageContentVariants = cva(
     variants: {
       variant: {
         contained: [
-          // User messages: compact bubbles on the right.
-          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg group-[.is-user]:shadow-sm group-[.is-user]:px-4 group-[.is-user]:py-3",
+          // User messages: compact, high-contrast bubbles on the right. The
+          // tighter tail corner and 1.45 line-height match the renderer rhythm
+          // without changing the public MessageContent API.
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-[5px] group-[.is-user]:px-[15px] group-[.is-user]:py-[9px] group-[.is-user]:text-[14px] group-[.is-user]:leading-[1.45]",
           // Assistant messages: no bubble by default, just text on background.
           "group-[.is-assistant]:max-w-full",
         ],
         flat: [
-          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-lg",
+          "group-[.is-user]:max-w-[var(--chat-message-max-width)] group-[.is-user]:px-[15px] group-[.is-user]:py-[9px] group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-[5px] group-[.is-user]:leading-[1.45]",
           "group-[.is-assistant]:max-w-full",
         ],
         surface: [

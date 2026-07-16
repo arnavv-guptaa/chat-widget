@@ -108,6 +108,7 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lineCount = code.split("\n").length;
   const LanguageIcon = iconForLanguage(language);
 
@@ -144,12 +145,19 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
     };
   }, [open, code, language]);
 
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   const copy = async () => {
     try {
       // Always copy the RAW source — never the highlighted markup.
       await navigator.clipboard.writeText(code);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1400);
     } catch {
       /* clipboard unavailable (e.g. http) — ignore */
     }
@@ -162,7 +170,7 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
           <ChevronRightIcon
             className={cn("chat-code-chevron size-3.5", open && "chat-code-chevron-open")}
           />
-          <LanguageIcon className="size-3.5 opacity-70" />
+          <LanguageIcon className="chat-code-language-icon size-[13px]" />
           <span className="chat-code-lang">{language || "code"}</span>
           <span className="chat-code-meta">
             · {lineCount} line{lineCount === 1 ? "" : "s"}
@@ -174,7 +182,8 @@ function CollapsibleCodeBlock({ code, language }: { code: string; language: stri
           className="chat-code-copy"
           aria-label={copied ? "Copied" : "Copy code"}
         >
-          {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
       <CollapsibleContent>

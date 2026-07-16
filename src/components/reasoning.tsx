@@ -7,7 +7,7 @@ import {
   CollapsibleTrigger,
 } from "../ui/collapsible";
 import { cn } from "../utils/cn";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Response } from "./response";
@@ -124,7 +124,7 @@ const getThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (duration === 0) {
     return <>Thought process</>;
   }
-  return <>Thought for {duration} seconds</>;
+  return <>Thought for {duration}s</>;
 };
 
 export const ReasoningTrigger = memo(
@@ -134,20 +134,20 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "inline-flex items-center gap-1.5 rounded-md text-[12.5px] font-medium text-[hsl(var(--chat-text-faint))] transition-colors hover:text-[hsl(var(--chat-text-muted))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
           className
         )}
         {...props}
       >
         {children ?? (
           <>
-            <BrainIcon className="size-4 flex-shrink-0" />
             {getThinkingMessage(isStreaming, duration)}
             <ChevronDownIcon
               className={cn(
-                "size-4 flex-shrink-0 transition-transform ml-1",
+                "size-2.5 flex-shrink-0 transition-transform duration-150",
                 isOpen ? "rotate-180" : "rotate-0"
               )}
+              strokeWidth={1.6}
             />
           </>
         )}
@@ -166,8 +166,8 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "mt-4 text-sm",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        "ml-2 mt-1 border-l-2 border-[hsl(var(--chat-border))] pl-3 text-[12.5px] italic text-[hsl(var(--chat-text-faint))]",
+        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
         className
       )}
       {...props}

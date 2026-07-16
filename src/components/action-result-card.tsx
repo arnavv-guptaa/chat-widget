@@ -11,13 +11,43 @@ import { AlertTriangle, CheckCircle2, ExternalLinkIcon, Loader2, XCircle } from 
 import type { ComponentType } from 'react';
 import type { ActionResult, ActionResultStatus } from '../types';
 
-type StatusStyle = { Icon: ComponentType<{ className?: string; style?: object; strokeWidth?: number }>; color: string; spin: boolean; label: string };
+type StatusStyle = {
+  Icon: ComponentType<{ className?: string; style?: object; strokeWidth?: number }>;
+  color: string;
+  tint: string;
+  spin: boolean;
+  label: string;
+};
 
 const STATUS_STYLES: Record<ActionResultStatus, StatusStyle> = {
-  pending: { Icon: Loader2, color: 'hsl(var(--chat-text-subtle))', spin: true, label: 'Pending' },
-  success: { Icon: CheckCircle2, color: 'hsl(var(--chat-success))', spin: false, label: 'Done' },
-  partial: { Icon: AlertTriangle, color: 'hsl(var(--chat-warning))', spin: false, label: 'Partial' },
-  error: { Icon: XCircle, color: 'hsl(var(--chat-danger))', spin: false, label: 'Failed' },
+  pending: {
+    Icon: Loader2,
+    color: 'hsl(var(--chat-text-faint))',
+    tint: 'hsl(var(--chat-surface))',
+    spin: true,
+    label: 'Pending',
+  },
+  success: {
+    Icon: CheckCircle2,
+    color: 'hsl(var(--chat-success))',
+    tint: 'hsl(var(--chat-success) / 0.09)',
+    spin: false,
+    label: 'Done',
+  },
+  partial: {
+    Icon: AlertTriangle,
+    color: 'hsl(var(--chat-warning))',
+    tint: 'hsl(var(--chat-warning) / 0.09)',
+    spin: false,
+    label: 'Partial',
+  },
+  error: {
+    Icon: XCircle,
+    color: 'hsl(var(--chat-danger))',
+    tint: 'hsl(var(--chat-danger) / 0.09)',
+    spin: false,
+    label: 'Failed',
+  },
 };
 
 export interface ActionResultCardProps extends ActionResult {
@@ -38,14 +68,14 @@ export function ActionResultCard({
 
   return (
     <div
-      className={cn('not-prose my-2 w-full overflow-hidden rounded-2xl border', className)}
-      style={{ borderColor: 'hsl(var(--chat-border))', backgroundColor: 'hsl(var(--chat-surface))' }}
+      className={cn('not-prose my-[14px] w-full overflow-hidden rounded-[14px] border', className)}
+      style={{ borderColor: 'hsl(var(--chat-border-soft))', backgroundColor: 'hsl(var(--chat-background))' }}
       role="status"
     >
       <div className="flex items-start gap-3 px-3 py-3">
         <span
-          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-xl"
-          style={{ backgroundColor: 'hsl(var(--chat-surface))' }}
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-[9px]"
+          style={{ backgroundColor: s.tint }}
           aria-hidden="true"
         >
           <Icon
@@ -60,8 +90,8 @@ export function ActionResultCard({
               {title}
             </span>
             <span
-              className="rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
-              style={{ borderColor: 'hsl(var(--chat-border))', color: 'hsl(var(--chat-text-muted))' }}
+              className="rounded-full border px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em]"
+              style={{ borderColor: s.color, color: s.color }}
             >
               {s.label}
             </span>
@@ -76,11 +106,11 @@ export function ActionResultCard({
           {fields && fields.length > 0 && (
             <dl className="mt-2 grid gap-1.5">
               {fields.map((f, i) => (
-                <div key={i} className="grid min-w-0 grid-cols-[minmax(72px,auto)_1fr] gap-3 rounded-lg px-2 py-1" style={{ backgroundColor: 'hsl(var(--chat-surface) / 0.55)' }}>
-                  <dt className="truncate text-[11px]" style={{ color: 'hsl(var(--chat-text-muted))' }}>
+                <div key={i} className="grid min-w-0 grid-cols-[80px_1fr] gap-3 rounded-[7px] px-2 py-1" style={{ backgroundColor: 'hsl(var(--chat-surface))' }}>
+                  <dt className="truncate text-[11.5px]" style={{ color: 'hsl(var(--chat-text-faint))' }}>
                     {f.label}
                   </dt>
-                  <dd className="min-w-0 truncate text-[11px] font-medium" style={{ color: 'hsl(var(--chat-text))' }}>
+                  <dd className="min-w-0 truncate font-mono text-[11.5px] font-medium" style={{ color: 'hsl(var(--chat-text))' }}>
                     {f.value}
                   </dd>
                 </div>

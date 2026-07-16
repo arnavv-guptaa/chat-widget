@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "../ui/badge";
 import {
   Collapsible,
   CollapsibleContent,
@@ -9,12 +8,11 @@ import {
 import { cn } from "../utils/cn";
 import type { ToolUIPart } from "ai";
 import {
-  CheckCircleIcon,
+  CheckIcon,
   ChevronDownIcon,
-  CircleIcon,
   ClockIcon,
-  WrenchIcon,
-  XCircleIcon,
+  Loader2Icon,
+  XIcon,
 } from "lucide-react";
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { isValidElement } from "react";
@@ -27,7 +25,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
     // `group` is required so the ToolHeader chevron's
     // `group-data-[state=open]:rotate-180` resolves against this collapsible
     // root — without it the expand/collapse caret never rotated.
-    className={cn("group not-prose w-full rounded-md border border-[hsl(var(--chat-border))]", className)}
+    className={cn("group not-prose w-full", className)}
     {...props}
   />
 );
@@ -48,35 +46,16 @@ export type ToolHeaderProps = {
 };
 
 // AI SDK v6 added approval-requested / approval-responded / output-denied
-// to the tool state union. We map each to a sensible label + icon so
-// they don't fall through to undefined.
-const STATUS_LABELS: Record<ToolUIPart["state"], string> = {
-  "input-streaming": "Pending",
-  "input-available": "Running",
-  "output-available": "Completed",
-  "output-error": "Error",
-  "approval-requested": "Awaiting approval",
-  "approval-responded": "Approved",
-  "output-denied": "Denied",
-};
-
+// to the tool state union. Compact status glyphs keep the exported primitive in
+// the same visual language as AgentToolCall — no bordered card, wrench, or badge.
 const STATUS_ICONS: Record<ToolUIPart["state"], ReactElement> = {
-  "input-streaming": <CircleIcon className="size-4" />,
-  "input-available": <ClockIcon className="size-4 animate-pulse" />,
-  "output-available": <CheckCircleIcon className="size-4 text-[hsl(var(--chat-success))]" />,
-  "output-error": <XCircleIcon className="size-4 text-[hsl(var(--chat-danger))]" />,
-  "approval-requested": <ClockIcon className="size-4 text-[hsl(var(--chat-warning))]" />,
-  "approval-responded": <CheckCircleIcon className="size-4 text-[hsl(var(--chat-warning))]" />,
-  "output-denied": <XCircleIcon className="size-4 text-muted-foreground" />,
-};
-
-const getStatusBadge = (status: ToolUIPart["state"]) => {
-  return (
-    <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
-      {STATUS_ICONS[status]}
-      {STATUS_LABELS[status]}
-    </Badge>
-  );
+  "input-streaming": <Loader2Icon className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
+  "input-available": <Loader2Icon className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
+  "output-available": <CheckIcon className="size-3 text-[hsl(var(--chat-success))]" strokeWidth={2.5} />,
+  "output-error": <XIcon className="size-3 text-[hsl(var(--chat-danger))]" strokeWidth={2.5} />,
+  "approval-requested": <ClockIcon className="size-3 text-[hsl(var(--chat-warning))]" />,
+  "approval-responded": <CheckIcon className="size-3 text-[hsl(var(--chat-warning))]" strokeWidth={2.5} />,
+  "output-denied": <XIcon className="size-3 text-[hsl(var(--chat-text-faint))]" strokeWidth={2.5} />,
 };
 
 export const ToolHeader = ({
@@ -89,19 +68,16 @@ export const ToolHeader = ({
 }: ToolHeaderProps) => (
   <CollapsibleTrigger
     className={cn(
-      "flex w-full items-center justify-between gap-4 p-2",
+      "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
       className
     )}
     {...props}
   >
-    <div className="flex items-center gap-2">
-      <WrenchIcon className="size-4 text-muted-foreground" />
-      <span className="font-medium text-sm">
-        {title ?? toolName ?? type.split("-").slice(1).join("-")}
-      </span>
-      {getStatusBadge(state)}
-    </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    {STATUS_ICONS[state]}
+    <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[hsl(var(--chat-text-muted))]">
+      {title ?? toolName ?? type.split("-").slice(1).join("-")}
+    </span>
+    <ChevronDownIcon className="size-2.5 text-[hsl(var(--chat-text-subtle))] transition-transform duration-150 group-data-[state=open]:rotate-180" />
   </CollapsibleTrigger>
 );
 
@@ -110,7 +86,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      "ml-2 border-l border-[hsl(var(--chat-border-soft))] pl-3 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
       className
     )}
     {...props}

@@ -143,7 +143,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
                the old "Grounded in N sources" metadata line (the footer's count
                carries that signal now, more usefully). */}
             {!isStreamingThisMessage && sourceParts.length > 0 && (
-              <Sources className="mt-2">
+              <Sources className="mt-4">
                 <SourcesTrigger count={sourceParts.length} />
                 <SourcesContent>
                   {sourceParts.map((part, i) => (

@@ -153,23 +153,27 @@ function AgentTurnTranscriptImpl({
           }
         }
         const status = getToolStatus(part, turn);
-        const verb = getToolVerb(part.tool, status.isPending);
+        // Human-in-the-loop: a tool paused awaiting approval shows an explicit
+        // approval card (unless a policy already auto-approved it). The target is
+        // the salient input when available, otherwise the tool name — never a
+        // vague past-tense verb that makes an unapproved action look completed.
+        const awaitingApproval =
+          part.state.status === 'approval-requested' &&
+          !!part.approval &&
+          !part.approval.isAutomatic;
+        const verb = awaitingApproval ? 'Wants to run' : getToolVerb(part.tool, status.isPending);
         // While running show the input subtitle; once done prefer a result summary.
-        const subtitle = status.isPending
-          ? getToolSubtitle(part)
-          : getResultSummary(part) || getToolSubtitle(part);
+        const subtitle = awaitingApproval
+          ? getToolSubtitle(part) || part.tool
+          : status.isPending
+            ? getToolSubtitle(part)
+            : getResultSummary(part) || getToolSubtitle(part);
         const detail =
           part.state.output != null
             ? typeof part.state.output === 'string'
               ? part.state.output
               : JSON.stringify(part.state.output, null, 2)
             : undefined;
-        // Human-in-the-loop: a tool paused awaiting approval shows Approve/Deny
-        // (unless a policy already auto-approved it). onApprove resumes the turn.
-        const awaitingApproval =
-          part.state.status === 'approval-requested' &&
-          !!part.approval &&
-          !part.approval.isAutomatic;
         return (
           <AgentToolCall
             key={item.id}

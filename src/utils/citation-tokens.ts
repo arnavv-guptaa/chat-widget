@@ -213,9 +213,16 @@ export function remarkCitations() {
 
       // Replace this text node with the ordered segment nodes.
       const replacement: MdNode[] = [];
-      for (const seg of segments) {
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
         if (seg.kind === "text") {
-          replacement.push({ type: "text", value: seg.text });
+          // Glue an immediately-following citation chip to the preceding word.
+          // A normal trailing space is a wrap opportunity; swapping only that
+          // final space for NBSP prevents an orphaned chip at the start of a line
+          // without changing splitCitations' public segmentation contract.
+          const nextIsRefs = segments[i + 1]?.kind === "refs";
+          const value = nextIsRefs ? seg.text.replace(/ $/, "\u00a0") : seg.text;
+          replacement.push({ type: "text", value });
         } else {
           for (const ref of seg.refs) replacement.push(citeRefNode(ref));
         }

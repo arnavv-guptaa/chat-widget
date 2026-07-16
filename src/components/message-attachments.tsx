@@ -14,6 +14,13 @@ export type MessageAttachmentsProps = {
   className?: string;
 };
 
+function formatFileSize(size?: number): string | undefined {
+  if (!size || size <= 0) return undefined;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // Open the file's URL in a new tab. The filename and URL come from the
 // (untrusted) AI message stream, so both are validated here to prevent
 // DOM-based XSS. http(s)/blob URLs open directly; inline image data: URLs
@@ -76,23 +83,26 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
           );
         }
         const { Icon, label } = describeFile(attachment);
+        const sizeLabel = formatFileSize(attachment.size);
         return (
           <button
             key={`${attachment.url ?? attachment.filename ?? "att"}-${index}`}
             type="button"
             onClick={() => openAttachment(attachment)}
             className={cn(
-              "group flex items-center gap-2 px-2.5 h-14 rounded-lg border max-w-[220px]",
-              "hover:bg-[hsl(var(--chat-text)/0.04)] transition-colors text-left cursor-pointer",
+              "group flex min-h-12 max-w-[240px] cursor-pointer items-center gap-2.5 rounded-[11px] border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-surface))] px-2.5 text-left transition-colors",
+              "hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
             )}
           >
-            <Icon className="size-5 flex-shrink-0 text-muted-foreground" />
+            <span className="flex size-[26px] flex-shrink-0 items-center justify-center rounded-[7px] bg-[hsl(var(--chat-primary-tint))] text-[hsl(var(--chat-primary))]">
+              <Icon className="size-4" />
+            </span>
             <div className="min-w-0 flex flex-col leading-tight">
-              <span className="text-[12px] font-medium truncate">
+              <span className="truncate text-[12.5px] font-medium text-[hsl(var(--chat-text))]">
                 {attachment.filename}
               </span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                {label}
+              <span className="mt-0.5 truncate text-[11px] text-[hsl(var(--chat-text-faint))]">
+                {label}{sizeLabel ? ` · ${sizeLabel}` : ""}
               </span>
             </div>
           </button>

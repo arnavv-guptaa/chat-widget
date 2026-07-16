@@ -69,7 +69,7 @@ export function ActionButton({
       className={cn(
         'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50',
         variant === 'primary' &&
-          'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-primary-foreground))] shadow-sm hover:brightness-110 hover:shadow',
+          'border-transparent bg-[hsl(var(--chat-primary))] text-[hsl(var(--chat-background))] hover:brightness-110',
         variant === 'secondary' &&
           'border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-background))] text-[hsl(var(--chat-text))] shadow-sm hover:bg-[hsl(var(--chat-hover-bg))]',
         variant === 'ghost' &&
@@ -512,14 +512,14 @@ export interface StatusTrackerProps extends ComponentProps<'ol'> {
 }
 
 /**
- * Vertical timeline: filled markers for completed steps, a pulsing ring on the
- * current one, and a connecting rail so progress reads at a glance.
+ * Vertical timeline: success-filled markers for completed steps, a compact
+ * spinner on the current one, and a quiet connecting rail for at-a-glance progress.
  */
 export function StatusTracker({ steps, className, ...props }: StatusTrackerProps) {
   return (
     <ol
-      className={cn('chat-card-in not-prose rounded-2xl border bg-[hsl(var(--chat-background))] p-3.5', className)}
-      style={{ borderColor: 'hsl(var(--chat-border))', boxShadow: 'var(--chat-shadow-sm)' }}
+      className={cn('chat-card-in not-prose rounded-[10px] border bg-[hsl(var(--chat-background))] p-3.5', className)}
+      style={{ borderColor: 'hsl(var(--chat-border-soft))' }}
       {...props}
     >
       {steps.map((step, index) => {
@@ -531,24 +531,23 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
             <span className="flex flex-col items-center" aria-hidden="true">
               <span
                 className={cn(
-                  'flex size-5 shrink-0 items-center justify-center rounded-full border',
-                  status === 'current' && 'chat-step-pulse',
+                  'mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border',
                 )}
                 style={
                   status === 'complete'
-                    ? { backgroundColor: 'hsl(var(--chat-primary))', borderColor: 'hsl(var(--chat-primary))' }
+                    ? { backgroundColor: 'hsl(var(--chat-success))', borderColor: 'hsl(var(--chat-success))' }
                     : status === 'current'
-                      ? { borderColor: 'hsl(var(--chat-primary))', borderWidth: 2 }
+                      ? { borderColor: 'hsl(var(--chat-text-faint))', borderWidth: 1.5 }
                       : status === 'error'
-                        ? { borderColor: 'hsl(var(--chat-danger))', borderWidth: 2 }
-                        : { borderColor: 'hsl(var(--chat-border))' }
+                        ? { borderColor: 'hsl(var(--chat-danger))', borderWidth: 1.5 }
+                        : { borderColor: 'hsl(var(--chat-border-soft))', borderWidth: 1.5 }
                 }
               >
                 {status === 'complete' && (
-                  <Check className="size-3" style={{ color: 'hsl(var(--chat-primary-foreground))' }} strokeWidth={3} />
+                  <Check className="size-2.5" style={{ color: 'hsl(var(--chat-background))' }} strokeWidth={3} />
                 )}
                 {status === 'current' && (
-                  <span className="size-1.5 rounded-full" style={{ backgroundColor: 'hsl(var(--chat-primary))' }} />
+                  <Loader2 className="size-2.5 animate-spin text-[hsl(var(--chat-text-faint))]" />
                 )}
                 {status === 'error' && (
                   <span className="size-1.5 rounded-full" style={{ backgroundColor: 'hsl(var(--chat-danger))' }} />
@@ -560,7 +559,7 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
                   style={{
                     minHeight: '0.875rem',
                     backgroundColor:
-                      status === 'complete' ? 'hsl(var(--chat-primary) / 0.45)' : 'hsl(var(--chat-border))',
+                      status === 'complete' ? 'hsl(var(--chat-success) / 0.45)' : 'hsl(var(--chat-border-soft))',
                   }}
                 />
               )}
@@ -569,16 +568,17 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
             <span className={cn('min-w-0', !isLast && 'pb-3')}>
               <span
                 className={cn(
-                  'block text-[12px]',
-                  status === 'current' ? 'font-semibold text-[hsl(var(--chat-text))]' : 'font-medium',
-                  status === 'pending' && 'text-[hsl(var(--chat-text-muted))]',
-                  (status === 'complete' || status === 'error') && 'text-[hsl(var(--chat-text))]',
+                  'block text-[13px]',
+                  status === 'current' ? 'font-medium text-[hsl(var(--chat-text))]' : 'font-normal',
+                  status === 'pending' && 'text-[hsl(var(--chat-text-faint))]',
+                  status === 'complete' && 'line-through text-[hsl(var(--chat-text-faint))]',
+                  status === 'error' && 'text-[hsl(var(--chat-danger))]',
                 )}
               >
                 {step.label}
               </span>
               {step.description && (
-                <span className="block text-[11px] text-[hsl(var(--chat-text-muted))]">{step.description}</span>
+                <span className="block text-[11.5px] text-[hsl(var(--chat-text-faint))]">{step.description}</span>
               )}
             </span>
           </li>

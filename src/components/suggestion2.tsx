@@ -49,26 +49,13 @@ export function StarterMessages({
   }
 
   return (
-    <div
-      className={cn(
-        "mb-3",
-        className
-      )}
-      {...props}
-    >
+    <div className={cn("mb-3 grid gap-2", className)} {...props}>
       {prompts.map((prompt, index) => (
-        <div key={`${prompt.title}-${index}`}>
-          <StarterMessageItem
-            prompt={prompt}
-            onClick={() => onPromptSelect(prompt)}
-          />
-          {index < prompts.length - 1 && (
-            // 1px-tall element used as a divider — same --chat-border token
-            // every other separator in the widget uses, so consumers only
-            // need to override one variable to recolour all of them.
-            <div className="h-px mx-3" style={{ backgroundColor: 'hsl(var(--chat-border))' }} />
-          )}
-        </div>
+        <StarterMessageItem
+          key={`${prompt.title}-${index}`}
+          prompt={prompt}
+          onClick={() => onPromptSelect(prompt)}
+        />
       ))}
     </div>
   );
@@ -92,9 +79,10 @@ export function StarterMessageItem({
         className={cn(
           "h-full text-left px-3 py-2.5 rounded-xl",
           "flex flex-col gap-1",
-          "border border-[hsl(var(--chat-text)/0.08)]",
-          "bg-[hsl(var(--chat-text)/0.02)]",
-          "hover:bg-[hsl(var(--chat-text)/0.05)] hover:border-[hsl(var(--chat-text)/0.14)]",
+          "border border-[hsl(var(--chat-border-soft))]",
+          "bg-[hsl(var(--chat-background))]",
+          "hover:bg-[hsl(var(--chat-surface))] hover:border-[hsl(var(--chat-border))]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
           "transition-colors duration-150 ease-out",
           "cursor-pointer",
           className
@@ -102,13 +90,13 @@ export function StarterMessageItem({
         {...props}
       >
         {prompt.icon && (
-          <span className="text-[hsl(var(--chat-text)/0.6)] [&_svg]:size-4">{prompt.icon}</span>
+          <span className="text-[hsl(var(--chat-text-muted))] [&_svg]:size-[15px]">{prompt.icon}</span>
         )}
-        <span className="text-[13px] font-medium leading-snug text-[hsl(var(--chat-text)/0.8)]">
+        <span className="text-[13px] font-medium leading-snug text-[hsl(var(--chat-text))]">
           {prompt.title}
         </span>
         {prompt.subtitle && (
-          <span className="text-[11px] leading-snug text-[hsl(var(--chat-text)/0.4)]">
+          <span className="text-[11.5px] leading-snug text-[hsl(var(--chat-text-faint))]">
             {prompt.subtitle}
           </span>
         )}
@@ -120,29 +108,30 @@ export function StarterMessageItem({
     <button
       type="button"
       className={cn(
-        "w-full text-left px-3 py-2.5 rounded-lg",
-        "bg-transparent",
-        "hover:bg-[hsl(var(--chat-text)/0.03)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]",
+        "w-full rounded-xl border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-background))] px-4 py-3 text-left",
+        "hover:bg-[hsl(var(--chat-surface))] hover:border-[hsl(var(--chat-border))]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
         "transition-colors duration-150 ease-out",
         "cursor-pointer",
         className
       )}
       {...props}
     >
-      <span className="flex items-center gap-2">
+      <span className="flex items-center gap-3">
         {prompt.icon && (
-          <span className="shrink-0 text-[hsl(var(--chat-text)/0.5)] [&_svg]:size-4">{prompt.icon}</span>
+          <span className="shrink-0 text-[hsl(var(--chat-text-muted))] [&_svg]:size-[15px]">{prompt.icon}</span>
         )}
-        <span className="text-[13px] text-[hsl(var(--chat-text)/0.7)]">
-          {prompt.title}
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-[hsl(var(--chat-text))]">
+            {prompt.title}
+          </span>
+          {prompt.subtitle && (
+            <span className="mt-0.5 block text-[11.5px] text-[hsl(var(--chat-text-faint))]">
+              {prompt.subtitle}
+            </span>
+          )}
         </span>
       </span>
-      {prompt.subtitle && (
-        <span className="block text-[11px] text-[hsl(var(--chat-text)/0.4)] mt-0.5">
-          {prompt.subtitle}
-        </span>
-      )}
     </button>
   );
 }

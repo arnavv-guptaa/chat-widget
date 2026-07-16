@@ -40,26 +40,26 @@ export function ChatErrorBanner({
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 px-3 py-2 mb-2 rounded-lg text-[13px]"
+      className="mb-3 flex items-center gap-2 rounded-[9px] px-3 py-2.5 text-[13px]"
       style={{
-        backgroundColor: "hsl(var(--chat-text)/0.04)",
-        border: "1px solid hsl(var(--chat-border))",
+        backgroundColor: "hsl(var(--chat-surface))",
+        border: "1px solid hsl(var(--chat-border-soft))",
       }}
       title={error.message}
     >
       <AlertTriangleIcon
-        className="size-4 mt-0.5 flex-shrink-0"
-        style={{ color: "hsl(var(--chat-text)/0.6)" }}
+        className="size-3.5 flex-shrink-0"
+        style={{ color: "hsl(var(--chat-text-faint))" }}
       />
       <div className="flex-1 min-w-0">
-        <span style={{ color: "hsl(var(--chat-text)/0.85)" }}>{friendly}</span>
+        <span style={{ color: "hsl(var(--chat-text-body))" }}>{friendly}</span>
       </div>
       {canRetry && onRetry && (
         <button
           type="button"
           onClick={onRetry}
-          className="text-[12px] font-medium underline-offset-2 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)]"
-          style={{ color: "hsl(var(--chat-text)/0.85)" }}
+          className="rounded-sm text-[12px] font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
+          style={{ color: "hsl(var(--chat-text-body))" }}
         >
           Try again
         </button>
@@ -69,10 +69,10 @@ export function ChatErrorBanner({
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="flex-shrink-0 -mr-1 -mt-0.5 p-1 rounded hover:bg-[hsl(var(--chat-text)/0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)] transition-colors"
-          style={{ color: "hsl(var(--chat-text)/0.5)" }}
+          className="-mr-1 flex size-5 flex-shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
+          style={{ color: "hsl(var(--chat-text-faint))" }}
         >
-          <XIcon className="size-3.5" />
+          <XIcon className="size-3" />
         </button>
       )}
     </div>

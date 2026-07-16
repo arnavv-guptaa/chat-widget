@@ -135,7 +135,9 @@ describe('remarkCitations — mdast transform', () => {
     run(tree);
     const kids = (tree.children[0] as any).children;
     expect(kids).toHaveLength(3);
-    expect(kids[0]).toEqual({ type: 'text', value: 'see ' });
+    // The render transform glues the chip to the preceding word so it cannot
+    // wrap onto a line by itself; splitCitations itself remains unchanged.
+    expect(kids[0]).toEqual({ type: 'text', value: 'see\u00a0' });
     expect(kids[1].type).toBe('citeRef');
     expect(kids[1].data?.hProperties?.['data-ref-n']).toBe('3');
     expect(kids[2]).toEqual({ type: 'text', value: ' for details' });

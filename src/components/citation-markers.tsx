@@ -7,8 +7,8 @@
  * `[N]` tokens into `citeRef` mdast nodes during the remark pass. Streamdown then
  * asks our `components.citeRef` override to render each one — that's THIS file.
  * We look up the Nth source (1-indexed) from the `CitationSourcesContext` and
- * render a superscript chip that links to it, matching the numbering of the
- * Sources card (sources.tsx shows `index + 1`). Out-of-range refs render as a
+ * render a superscript chip that links to it, matching the stable ordering of
+ * the Sources bibliography. Out-of-range refs render as a
  * muted, non-linking chip so the prose still reads and we never ship a broken
  * href.
  *
@@ -77,7 +77,7 @@ function readRefNumber(props: CiteRefElementProps): number | null {
  * Nth source. Used as `components.citeRef` in response.tsx.
  *
  * Layout: a raised, pill-shaped superscript carrying the 1-indexed source number
- * (so chip "4" == Sources-card row 4). Links open in a new tab with safe rel
+ * (so chip "4" == the fourth bibliography row). Links open in a new tab with safe rel
  * attrs. Out-of-range refs (N > source count, or no sources in context) render
  * muted and non-interactive so the prose still reads.
  */
