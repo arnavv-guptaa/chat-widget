@@ -8,7 +8,7 @@ import {
 import { cn } from "../utils/cn";
 import { safeUrl } from "../utils/url-safety";
 import { ChevronDownIcon, FileTextIcon } from "lucide-react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 
 export type SourcesProps = ComponentProps<"div">;
 
@@ -96,6 +96,61 @@ function sourceHost(href: SourceProps["href"]): string | undefined {
   }
 }
 
+/**
+ * Resolve a favicon URL for a source host. The host is already rendered in the
+ * bibliography row, so requesting its icon leaks nothing the user can't already
+ * see. We use Google's S2 favicon endpoint (a long-stable, widely-used service)
+ * which serves a single 16–32px PNG per domain; the browser fetches it directly
+ * as a normal <img>, no script/credential exchange. Non-http(s) sources (e.g.
+ * kb://) return undefined and fall back to the file glyph.
+ */
+function sourceFaviconUrl(href: SourceProps["href"]): string | undefined {
+  if (typeof href !== "string") return undefined;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    const host = url.hostname.replace(/^www\./, "");
+    if (!host) return undefined;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The 18px leading slot on a source row. Shows the site favicon when the source
+ * is http(s) and the icon loads; falls back to the file glyph on any failure
+ * (blocked domain, offline, non-web scheme, network error) so the row never
+ * ships a broken-image icon. aria-hidden because the host text beside it already
+ * names the source for assistive tech.
+ */
+function SourceGlyph({ href }: { href: string | undefined }) {
+  const [failed, setFailed] = useState(false);
+  const faviconUrl = sourceFaviconUrl(href);
+  if (!faviconUrl || failed) {
+    return (
+      <span
+        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text-faint))]"
+        aria-hidden="true"
+      >
+        <FileTextIcon className="size-3" />
+      </span>
+    );
+  }
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      src={faviconUrl}
+      width={16}
+      height={16}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-[16px] w-[16px] shrink-0 rounded-full bg-[hsl(var(--chat-surface))] object-contain p-[1px]"
+    />
+  );
+}
+
 function compactTitle(title: SourceProps["title"], href: SourceProps["href"]): string {
   if (typeof title === "string" && title.trim()) {
     try {
@@ -125,12 +180,7 @@ export const Source = ({ href, title, children, index: _index, className, ...pro
 
   const content = children ?? (
     <>
-      <span
-        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text-faint))]"
-        aria-hidden="true"
-      >
-        <FileTextIcon className="size-3" />
-      </span>
+      <SourceGlyph href={safeHref} />
       <span className={cn("truncate text-[12.5px] font-medium text-[hsl(var(--chat-text))]", host ? "max-w-[60%]" : "min-w-0 flex-1")}>
         {label}
       </span>

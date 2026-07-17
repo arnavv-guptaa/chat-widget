@@ -8,6 +8,7 @@ const response = readFileSync(new URL('../src/components/response.tsx', import.m
 const tool = readFileSync(new URL('../src/components/tool.tsx', import.meta.url), 'utf8');
 const actionPrimitives = readFileSync(new URL('../src/components/action-primitives.tsx', import.meta.url), 'utf8');
 const agentToolCall = readFileSync(new URL('../src/components/transcript/AgentToolCall.tsx', import.meta.url), 'utf8');
+const interfaceTs = readFileSync(new URL('../src/components/interface.tsx', import.meta.url), 'utf8');
 
 describe('renderer design-system contract', () => {
   it('defines the semantic renderer ramp in defaults and themed mode', () => {
@@ -36,10 +37,15 @@ describe('renderer design-system contract', () => {
     expect(rule?.[1]).toContain('background-color: hsl(var(--chat-primary-tint))');
   });
 
-  it('does not leak source hosts to a third-party favicon service', () => {
-    expect(sources).not.toContain('google.com/s2/favicons');
-    expect(sources).not.toContain('ExternalLinkIcon');
+  it('renders source favicons with a graceful fallback', () => {
+    // The favicon is fetched as a plain <img> from Google's S2 endpoint; the
+    // host is already shown in the row, so this leaks nothing new. A non-web
+    // source or a failed load falls back to the file glyph — never a broken img.
+    expect(sources).toContain('google.com/s2/favicons');
+    expect(sources).toContain('onError={() => setFailed(true)}');
+    expect(sources).toContain('FileTextIcon');
     expect(sources).toContain('safeUrl(href)');
+    expect(sources).not.toContain('ExternalLinkIcon');
   });
 
   it('parses citation tokens only for explicitly sourced assistant responses', () => {
@@ -52,6 +58,14 @@ describe('renderer design-system contract', () => {
     expect(tool).toContain('<span className="sr-only">{STATUS_LABELS[state]}: </span>');
     expect(actionPrimitives).toContain('<span className="sr-only">{statusLabel}: </span>');
     expect(agentToolCall).toContain('<span className="sr-only">{accessibleStatus}: </span>');
+  });
+
+  it('shows an optional greeting-led empty state', () => {
+    // Greeting + assistantName are opt-in; when set they render a strong
+    // headline plus a faint sub line above the starter prompts.
+    expect(interfaceTs).toContain('config?.greeting');
+    expect(interfaceTs).toContain('config?.assistantName');
+    expect(interfaceTs).toContain('letterSpacing: \'-0.01em\'');
   });
 
   it('keeps the composer focus treatment subtle and token-driven', () => {
