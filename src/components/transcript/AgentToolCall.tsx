@@ -87,6 +87,13 @@ function AgentToolCallImpl({
 }: AgentToolCallProps) {
   const [expanded, setExpanded] = useState(false);
   const hasDetail = Boolean((detail && detail.trim()) || errorText);
+  const accessibleStatus = awaitingApproval
+    ? 'Awaiting approval'
+    : isError
+      ? 'Error'
+      : isPending
+        ? 'Running'
+        : 'Completed';
 
   return (
     <div
@@ -124,6 +131,7 @@ function AgentToolCallImpl({
         {/* Every tool row has a compact status glyph: spinner while running,
             check/cross when settled, warning dot while awaiting approval. */}
         <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
+        <span className="sr-only">{accessibleStatus}: </span>
 
         <div className="flex items-baseline gap-1.5 min-w-0 text-[12.5px] leading-5">
           {isPending ? (

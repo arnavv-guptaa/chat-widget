@@ -1382,28 +1382,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             aria-label="Conversations"
           >
             {/* Apple-style Tab Pills */}
-            {tabs.map((tab, index) => (
+            {tabs.map((tab) => (
               <div
                 key={tab.id}
-                className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all duration-150 group flex-shrink-0 min-w-0"
-                style={{
-                  backgroundColor: tab.isActive
-                    ? ('hsl(var(--chat-hover-bg))')
-                    : 'transparent',
-                  color: tab.isActive
-                    ? ('hsl(var(--chat-text))')
-                    : ('hsl(var(--chat-text-muted))')
-                }}
-                onMouseEnter={(e) => {
-                  if (!tab.isActive) {
-                    e.currentTarget.style.backgroundColor = 'hsl(var(--chat-hover-bg))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!tab.isActive) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
+                className={cn(
+                  'group relative flex min-w-0 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors duration-150',
+                  tab.isActive
+                    ? 'bg-[hsl(var(--chat-hover-bg))] text-[hsl(var(--chat-text))]'
+                    : 'bg-transparent text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-hover-bg))]',
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   switchToTab(tab.id);
@@ -1492,7 +1479,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <div className="absolute right-0 top-full z-50 mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
                 width: 'min(22rem, calc(100cqw - 1.5rem))',
                 backgroundColor: 'hsl(var(--chat-background))',
-                border: `1px solid ${'hsl(var(--chat-border-soft))'}`
+                border: '1px solid hsl(var(--chat-border-soft))'
               }}>
                 {/* The search field is the only inset surface; the surrounding
                     header and results share the popover background so the panel

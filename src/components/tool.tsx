@@ -48,14 +48,24 @@ export type ToolHeaderProps = {
 // AI SDK v6 added approval-requested / approval-responded / output-denied
 // to the tool state union. Compact status glyphs keep the exported primitive in
 // the same visual language as AgentToolCall — no bordered card, wrench, or badge.
+const STATUS_LABELS: Record<ToolUIPart["state"], string> = {
+  "input-streaming": "Pending",
+  "input-available": "Running",
+  "output-available": "Completed",
+  "output-error": "Error",
+  "approval-requested": "Awaiting approval",
+  "approval-responded": "Approved",
+  "output-denied": "Denied",
+};
+
 const STATUS_ICONS: Record<ToolUIPart["state"], ReactElement> = {
-  "input-streaming": <Loader2Icon className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
-  "input-available": <Loader2Icon className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
-  "output-available": <CheckIcon className="size-3 text-[hsl(var(--chat-success))]" strokeWidth={2.5} />,
-  "output-error": <XIcon className="size-3 text-[hsl(var(--chat-danger))]" strokeWidth={2.5} />,
-  "approval-requested": <ClockIcon className="size-3 text-[hsl(var(--chat-warning))]" />,
-  "approval-responded": <CheckIcon className="size-3 text-[hsl(var(--chat-warning))]" strokeWidth={2.5} />,
-  "output-denied": <XIcon className="size-3 text-[hsl(var(--chat-text-faint))]" strokeWidth={2.5} />,
+  "input-streaming": <Loader2Icon aria-hidden="true" className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
+  "input-available": <Loader2Icon aria-hidden="true" className="size-3 animate-spin text-[hsl(var(--chat-text-faint))]" />,
+  "output-available": <CheckIcon aria-hidden="true" className="size-3 text-[hsl(var(--chat-success))]" strokeWidth={2.5} />,
+  "output-error": <XIcon aria-hidden="true" className="size-3 text-[hsl(var(--chat-danger))]" strokeWidth={2.5} />,
+  "approval-requested": <ClockIcon aria-hidden="true" className="size-3 text-[hsl(var(--chat-warning))]" />,
+  "approval-responded": <CheckIcon aria-hidden="true" className="size-3 text-[hsl(var(--chat-warning))]" strokeWidth={2.5} />,
+  "output-denied": <XIcon aria-hidden="true" className="size-3 text-[hsl(var(--chat-text-faint))]" strokeWidth={2.5} />,
 };
 
 export const ToolHeader = ({
@@ -74,10 +84,11 @@ export const ToolHeader = ({
     {...props}
   >
     {STATUS_ICONS[state]}
+    <span className="sr-only">{STATUS_LABELS[state]}: </span>
     <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[hsl(var(--chat-text-muted))]">
       {title ?? toolName ?? type.split("-").slice(1).join("-")}
     </span>
-    <ChevronDownIcon className="size-2.5 text-[hsl(var(--chat-text-subtle))] transition-transform duration-150 group-data-[state=open]:rotate-180" />
+    <ChevronDownIcon aria-hidden="true" className="size-2.5 text-[hsl(var(--chat-text-subtle))] transition-transform duration-150 group-data-[state=open]:rotate-180" />
   </CollapsibleTrigger>
 );
 

@@ -5,6 +5,9 @@ const css = readFileSync(new URL('../src/styles.src.css', import.meta.url), 'utf
 const widget = readFileSync(new URL('../src/ChatWidget.tsx', import.meta.url), 'utf8');
 const sources = readFileSync(new URL('../src/components/sources.tsx', import.meta.url), 'utf8');
 const response = readFileSync(new URL('../src/components/response.tsx', import.meta.url), 'utf8');
+const tool = readFileSync(new URL('../src/components/tool.tsx', import.meta.url), 'utf8');
+const actionPrimitives = readFileSync(new URL('../src/components/action-primitives.tsx', import.meta.url), 'utf8');
+const agentToolCall = readFileSync(new URL('../src/components/transcript/AgentToolCall.tsx', import.meta.url), 'utf8');
 
 describe('renderer design-system contract', () => {
   it('defines the semantic renderer ramp in defaults and themed mode', () => {
@@ -43,6 +46,12 @@ describe('renderer design-system contract', () => {
     expect(response).toContain('sources !== undefined');
     expect(response).toContain('? [remarkCitations, ...baseRemarkPlugins]');
     expect(response).not.toContain('(prevProps, nextProps)');
+  });
+
+  it('pairs visual status glyphs with assistive text', () => {
+    expect(tool).toContain('<span className="sr-only">{STATUS_LABELS[state]}: </span>');
+    expect(actionPrimitives).toContain('<span className="sr-only">{statusLabel}: </span>');
+    expect(agentToolCall).toContain('<span className="sr-only">{accessibleStatus}: </span>');
   });
 
   it('keeps the composer focus treatment subtle and token-driven', () => {

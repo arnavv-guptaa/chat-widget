@@ -525,6 +525,14 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
       {steps.map((step, index) => {
         const isLast = index === steps.length - 1;
         const status = step.status ?? 'pending';
+        const statusLabel =
+          status === 'complete'
+            ? 'Completed'
+            : status === 'current'
+              ? 'In progress'
+              : status === 'error'
+                ? 'Error'
+                : 'Pending';
         return (
           <li key={step.id} className="flex gap-2.5">
             {/* Marker + connecting rail */}
@@ -575,6 +583,7 @@ export function StatusTracker({ steps, className, ...props }: StatusTrackerProps
                   status === 'error' && 'text-[hsl(var(--chat-danger))]',
                 )}
               >
+                <span className="sr-only">{statusLabel}: </span>
                 {step.label}
               </span>
               {step.description && (

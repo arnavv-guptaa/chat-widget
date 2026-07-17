@@ -13,7 +13,7 @@ export type StarterMessagesProps = Omit<HTMLAttributes<HTMLDivElement>, 'onSelec
   onPromptSelect: (prompt: StarterPrompt) => void;
   /**
    * How prompts are laid out.
-   * - `'list'` (default): full-width rows separated by dividers — good for
+   * - `'list'` (default): spaced, full-width bordered cards — good for
    *   descriptive prompts, optionally with a subtitle.
    * - `'grid'`: a 2-column chip grid — good for short, scannable prompts,
    *   optionally with an icon.
