@@ -1603,7 +1603,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 </div>
               </div>
             )}
-            </div>
 
             {/* Consumer-supplied header actions (expand, settings, etc.)
                 rendered before the close button so they sit to its left. */}
