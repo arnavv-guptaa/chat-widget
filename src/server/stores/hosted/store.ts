@@ -304,16 +304,24 @@ export function createHostedConfig(options: HostedOptions) {
         return null;
       }
       const appearance = raw.appearance ?? null;
-      const appearanceFollowUps =
+      const appearanceBlob =
         appearance && typeof appearance === 'object' && !Array.isArray(appearance)
-          ? (appearance as Record<string, unknown>).followUps
+          ? (appearance as Record<string, unknown>)
           : undefined;
+      const appearanceFollowUps = appearanceBlob?.followUps;
+      const appearanceAssistantName = appearanceBlob?.assistantName;
       const value: HostedAgentConfig = {
         model: raw.model ?? null,
         systemPrompt: raw.systemPrompt ?? null,
         greeting: raw.greeting ?? null,
         appearance,
         maxOutputTokens: raw.maxOutputTokens ?? null,
+        // Presentational, so it rides the appearance blob rather than earning a
+        // column (same call as followUps). Tolerate a future top-level field too.
+        assistantName:
+          typeof (raw.assistantName ?? appearanceAssistantName) === 'string'
+            ? ((raw.assistantName ?? appearanceAssistantName) as string)
+            : null,
         // The control plane currently stores this under appearance.followUps;
         // also accept a future top-level field so the client survives that API
         // normalization without another release.

@@ -91,6 +91,20 @@ export interface ChatWidgetConfig {
   capabilitiesPrompt?: string;
 
   /**
+   * Headline shown in the empty state, above the starter prompts. Omit to fall
+   * back to "How can I help?" (with `assistantName` folded in when set). When
+   * neither this nor `assistantName` is set the whole greeting block collapses,
+   * so existing embeds keep their bare empty state.
+   */
+  greeting?: string;
+
+  /**
+   * Name of the assistant, shown as the greeting's sub line. Also supplies the
+   * default headline's suffix when `greeting` is omitted.
+   */
+  assistantName?: string;
+
+  /**
    * First-class per-turn context (#162). A typed, structured object describing
    * the user's live app state — current route, the record they're viewing,
    * their plan/role, etc. — sent alongside every message and folded into the

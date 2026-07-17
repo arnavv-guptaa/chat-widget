@@ -88,6 +88,13 @@ export interface HostedAgentConfig {
   model?: string | null;
   systemPrompt?: string | null;
   greeting?: string | null;
+  /**
+   * Assistant's display name, shown as the empty-state greeting's sub line.
+   * Presentational, so the control plane stores it in the `appearance` blob
+   * rather than a column; accepted top-level too in case that's normalized
+   * later (see the hosted store's read).
+   */
+  assistantName?: string | null;
   appearance?: Record<string, unknown> | null;
   /**
    * Max output tokens for the agent's model, resolved from the gateway catalog

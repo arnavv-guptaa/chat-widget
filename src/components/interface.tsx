@@ -1713,24 +1713,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <div className="mb-1 flex flex-col gap-4">
                 {/* Empty-state greeting — inspired by the shared renderer mockup's
                     front screen. Bottom-anchored feel in the composer zone: a
-                    single strong greeting line plus a faint sub line. Both are
-                    optional via config (greeting / assistantName); when neither is
-                    set the block collapses and only the starter prompts show, so
-                    existing embeds are unaffected. */}
+                    strong greeting line plus the assistant's name as a faint sub
+                    line. Both are optional via config (greeting / assistantName);
+                    when neither is set the block collapses and only the starter
+                    prompts show, so existing embeds are unaffected. */}
                 {(config?.greeting || config?.assistantName) && (
                   <div className="px-1">
                     <h2
                       className="text-[17px] font-semibold leading-tight text-[hsl(var(--chat-text))]"
                       style={{ letterSpacing: '-0.01em' }}
                     >
-                      {config?.greeting || `How can I help${config?.assistantName ? `, ${config.assistantName}` : ''}?`}
+                      {config?.greeting || 'How can I help?'}
                     </h2>
-                    {config?.assistantName && !config?.greeting && (
-                      <p className="mt-1 text-[13px] text-[hsl(var(--chat-text-faint))]">
-                        Ask anything to get started.
-                      </p>
-                    )}
-                    {config?.greeting && config?.assistantName && (
+                    {config?.assistantName && (
                       <p className="mt-1 text-[13px] text-[hsl(var(--chat-text-faint))]">
                         {config.assistantName}
                       </p>
