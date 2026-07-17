@@ -33,8 +33,8 @@ interface AgentTurnTranscriptProps {
   onToolApproval?: (approvalId: string, approved: boolean) => void;
   /**
    * The message's source-url parts, in Sources-card order. Threaded down to
-   * `Response` so the inline `[ref: N]` citation chips can link to the Nth
-   * source (#138). Optional — when absent, chips render muted (no broken href).
+   * `Response` so inline `[ref: N]` chips can resolve preserved source IDs
+   * (#138). Supplying the array also opts assistant text into citation parsing.
    */
   sources?: CitationSource[];
 }

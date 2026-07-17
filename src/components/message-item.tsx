@@ -51,7 +51,13 @@ interface MessageItemProps {
   onFeedback?: (feedback: FeedbackEvent) => void;
 }
 
-type SourceUrlPart = { type: 'source-url'; url: string; title?: string };
+type SourceUrlPart = {
+  type: 'source-url';
+  sourceId?: string;
+  url: string;
+  title?: string;
+  citationIds?: number[];
+};
 
 function sourceTitle(part: SourceUrlPart): string {
   return part.title || part.url;
@@ -63,8 +69,8 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
     [message.parts],
   );
   // The same source-url parts, cast to the CitationSource shape the inline
-  // citation chips consume. sourceParts IS the Sources-card list (same array,
-  // same order), so chip N and card row N point at the same URL by construction.
+  // citation chips consume. sourceParts IS the bibliography list; explicit
+  // citationIds preserve the model's original reference mapping through dedupe.
   // Memoized on sourceParts so the identity is stable unless the parts change.
   const citationSources = useMemo(
     () => sourceParts as unknown as CitationSource[],
@@ -178,7 +184,9 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
           <Message from={message.role}>
             <MessageContent>
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              <Response>{(message as any).content || (message as any).text}</Response>
+              <Response sources={message.role === 'assistant' ? citationSources : undefined}>
+                {(message as any).content || (message as any).text}
+              </Response>
             </MessageContent>
           </Message>
         </Fragment>

@@ -752,9 +752,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       },
       onFinish: async ({ messages: finalMessages, isAborted }) => {
         // Citations: stamp de-duplicated `source-url` parts for the retrieved
-        // chunks onto the assistant message so the existing <Sources> UI renders
-        // them and they survive reload (the store persists `parts` verbatim).
-        // Skips any url already present (the model may emit its own source-urls).
+        // chunks onto the assistant message so the Sources UI renders them and
+        // they survive reload (the store persists `parts` verbatim). Existing
+        // URLs keep one row while citationIds aliases are merged.
         if (citationChunks.length > 0) {
           injectCitationParts(finalMessages, citationChunks);
         }
@@ -1520,20 +1520,33 @@ function defaultMemoryBlock(ms: Memory[]): string {
 
 /**
  * Append de-duplicated `source-url` citation parts to the LAST assistant message
- * in `finalMessages`, mutating it in place. Skips any url already present so the
- * model's own source-urls aren't duplicated. The store persists `parts` verbatim
- * and the existing <Sources> UI renders `source-url` parts — zero client change.
+ * in `finalMessages`, mutating it in place. Existing URLs are not duplicated;
+ * their citationIds aliases are merged so original DOC numbers survive dedupe.
+ * The store persists `parts` verbatim and the Sources UI renders source-url parts.
  */
 function injectCitationParts(finalMessages: UIMessage[], chunks: RetrievedChunk[]): void {
   const last = [...finalMessages].reverse().find((m) => m.role === 'assistant');
   if (!last || !Array.isArray(last.parts)) return;
-  const existingUrls = new Set(
-    last.parts
-      .filter((p) => (p as { type?: string }).type === 'source-url')
-      .map((p) => (p as { url?: string }).url)
-      .filter(Boolean) as string[],
-  );
-  const newParts = toSourceParts(chunks).filter((p) => !existingUrls.has(p.url));
+  type CitationPart = { type?: string; url?: string; citationIds?: number[] };
+  const existingByUrl = new Map<string, CitationPart>();
+  for (const rawPart of last.parts) {
+    const part = rawPart as CitationPart;
+    if (part.type === 'source-url' && part.url) existingByUrl.set(part.url, part);
+  }
+  const newParts: ReturnType<typeof toSourceParts> = [];
+  for (const part of toSourceParts(chunks)) {
+    const existing = existingByUrl.get(part.url);
+    if (!existing) {
+      newParts.push(part);
+      continue;
+    }
+    // Preserve the original DOC references even when a provider/model already
+    // emitted the same URL. This keeps citation resolution correct across the
+    // dedupe boundary instead of silently dropping the alias IDs.
+    existing.citationIds = Array.from(
+      new Set([...(existing.citationIds ?? []), ...(part.citationIds ?? [])]),
+    );
+  }
   if (newParts.length === 0) return;
   // Prepend so citations render before/with the answer text.
   (last.parts as unknown[]).unshift(...newParts);

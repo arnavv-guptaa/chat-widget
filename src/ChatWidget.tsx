@@ -409,7 +409,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       //     accent (bg is dark) — the conventional dark-theme look.
       //   - stock (near-black primary on white)          → white text, as
       //     before.
-      // The earlier contrastForegroundTriplet picker produced "black on a dark
+      // The earlier luminance-based contrast picker produced "black on a dark
       // accent" for saturated mid-tone accents (red-500, rose, emerald-600,
       // amber-600) — technically AA but visually muddy, and not what a themed
       // customer expects. Dropping it also retires the miscalibrated 0.179

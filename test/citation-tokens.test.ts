@@ -139,6 +139,7 @@ describe('remarkCitations — mdast transform', () => {
     // wrap onto a line by itself; splitCitations itself remains unchanged.
     expect(kids[0]).toEqual({ type: 'text', value: 'see\u00a0' });
     expect(kids[1].type).toBe('citeRef');
+    expect(kids[1].data?.hName).toBe('citeRef');
     expect(kids[1].data?.hProperties?.['data-ref-n']).toBe('3');
     expect(kids[2]).toEqual({ type: 'text', value: ' for details' });
   });

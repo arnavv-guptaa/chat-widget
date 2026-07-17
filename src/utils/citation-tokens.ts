@@ -9,20 +9,15 @@
  *     says "cite e.g. [1]").
  *
  * Without this, those tokens render as the literal strings "[ref: 4, ref: 6]" /
- * "[1]" — which is the bug: the widget HAS a numbered Sources card (built from
- * `source-url` parts, see message-item.tsx) but nothing links the inline text
- * to it. This module turns the tokens into `citeRef` mdast element nodes so the
- * `citeRef` component override in response.tsx can render them as superscript
- * chips that link to the Nth source (1-indexed, matching the Sources card).
+ * "[1]" — which is the bug: the widget has `source-url` bibliography parts but
+ * nothing links the inline text to them. This module turns tokens into `citeRef`
+ * mdast element nodes so the component override in response.tsx can render chips.
  *
- * CONTRACT — [ref: N] maps to the Nth `source-url` part (1-indexed). The Sources
- * card numbers sources `index + 1` (sources.tsx), so chip N == source N in the
- * card. The model's own DOC numbers (from the retrieval context block) and the
- * deduped `toSourceParts` ordering can diverge, but mapping to source-url parts
- * is the right USER-FACING contract: the inline chip always lines up with the
- * visible numbered source the user can click. Out-of-range refs (N > source
- * count) render as a muted, non-linking chip so the prose still reads and we
- * never ship a broken href.
+ * CONTRACT — [ref: N] retains the model's original reference ID. Knowledge
+ * source parts carry their pre-dedup DOC indices in citationIds, so duplicate
+ * URLs can collapse into one bibliography row without remapping attribution.
+ * Unmatched refs render as muted, non-linking chips so the prose still reads and
+ * we never ship a confidently wrong or broken href.
  *
  * DEPENDENCY-FREE by design. A naive hand-rolled mdast walker is used instead of
  * `unist-util-visit` to avoid adding a runtime dep and the strict-ESM dir-import
@@ -45,13 +40,13 @@ interface MdNode {
   // Element-only fields (hast/mdast element). `properties` carries the
   // data-attributes we stamp so the component override can read them.
   properties?: Record<string, unknown>;
-  data?: { hProperties?: Record<string, unknown>; [k: string]: unknown };
+  data?: { hName?: string; hProperties?: Record<string, unknown>; [k: string]: unknown };
 }
 
 /**
  * One parsed citation ref. `raw` is the original token text (e.g. "ref: 4" or
- * "4") so a renderer can fall back to it if needed; `n` is the 1-indexed source
- * number the chip links to.
+ * "4") so a renderer can fall back to it if needed; `n` is the original
+ * 1-indexed reference ID the chip resolves.
  */
 export interface ParsedRef {
   n: number;
@@ -178,14 +173,17 @@ function walk(
 /**
  * Build a `citeRef` mdast element node for one citation ref. Carries `n` and
  * `raw` as data properties so the `citeRef` component override can read them
- * without re-parsing. The `data.hProperties` path is how react-markdown
- * surfaces custom element attributes into the hast/component layer.
+ * without re-parsing. `data.hName` preserves the custom element through
+ * mdast-util-to-hast; `data.hProperties` carries its attributes to the renderer.
  */
 function citeRefNode(ref: ParsedRef): MdNode {
   return {
     type: "citeRef",
     properties: { n: ref.n, raw: ref.raw },
-    data: { hProperties: { "data-ref-n": String(ref.n), "data-ref-raw": ref.raw } },
+    data: {
+      hName: "citeRef",
+      hProperties: { "data-ref-n": String(ref.n), "data-ref-raw": ref.raw },
+    },
   };
 }
 

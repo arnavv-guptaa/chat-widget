@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const css = readFileSync(new URL('../src/styles.src.css', import.meta.url), 'utf8');
 const widget = readFileSync(new URL('../src/ChatWidget.tsx', import.meta.url), 'utf8');
 const sources = readFileSync(new URL('../src/components/sources.tsx', import.meta.url), 'utf8');
+const response = readFileSync(new URL('../src/components/response.tsx', import.meta.url), 'utf8');
 
 describe('renderer design-system contract', () => {
   it('defines the semantic renderer ramp in defaults and themed mode', () => {
@@ -36,6 +37,12 @@ describe('renderer design-system contract', () => {
     expect(sources).not.toContain('google.com/s2/favicons');
     expect(sources).not.toContain('ExternalLinkIcon');
     expect(sources).toContain('safeUrl(href)');
+  });
+
+  it('parses citation tokens only for explicitly sourced assistant responses', () => {
+    expect(response).toContain('sources !== undefined');
+    expect(response).toContain('? [remarkCitations, ...baseRemarkPlugins]');
+    expect(response).not.toContain('(prevProps, nextProps)');
   });
 
   it('keeps the composer focus treatment subtle and token-driven', () => {
