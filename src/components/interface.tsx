@@ -1457,7 +1457,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             </button>
 
             {/* History Icon */}
-            <div className="relative" ref={dropdownRef}>
+            <div ref={dropdownRef}>
               <button
                 type="button"
                 onClick={() => setShowHistory(!showHistory)}
@@ -1473,11 +1473,18 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               >
                 <HistoryIcon className="h-4 w-4" strokeWidth={2} />
               </button>
+            </div>
 
-            {/* Chat History Dropdown */}
+            {/* Chat History Dropdown — anchored to the HEADER row, not the
+                history button. A right-0 origin on the button wrapper left the
+                popover starting from the button and extending past the widget's
+                left edge (clipped by the root overflow-hidden) once close /
+                header-action buttons sat to its right. Anchoring to the full
+                header makes right-0 the widget's right edge, so the popover
+                extends leftward only into the header width. */}
             {showHistory && (
-              <div className="absolute right-0 top-full z-50 mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
-                width: 'min(22rem, calc(100cqw - 1.5rem))',
+              <div className="absolute right-3 top-full z-50 mt-1.5 overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
+                width: 'min(20rem, calc(100% - 1.5rem))',
                 backgroundColor: 'hsl(var(--chat-background))',
                 border: '1px solid hsl(var(--chat-border-soft))'
               }}>
