@@ -1709,15 +1709,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             </div>
           ) : (
             messages.length === 0 && status !== 'submitted' &&
-            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt || config?.greeting || config?.assistantName) ? (
+            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt || config?.greeting || config?.subGreeting) ? (
               <div className="mb-1 flex flex-col gap-4">
-                {/* Empty-state greeting — inspired by the shared renderer mockup's
-                    front screen. Bottom-anchored feel in the composer zone: a
-                    strong greeting line plus the assistant's name as a faint sub
-                    line. Both are optional via config (greeting / assistantName);
+                {/* Empty-state greeting — a strong headline plus an optional faint
+                    sub line. Both optional via config (greeting / subGreeting);
                     when neither is set the block collapses and only the starter
-                    prompts show, so existing embeds are unaffected. */}
-                {(config?.greeting || config?.assistantName) && (
+                    prompts show, so existing embeds are unaffected. `assistantName`
+                    is identity, not part of this block. */}
+                {(config?.greeting || config?.subGreeting) && (
                   <div className="px-1">
                     <h2
                       className="text-[17px] font-semibold leading-tight text-[hsl(var(--chat-text))]"
@@ -1725,9 +1724,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                     >
                       {config?.greeting || 'How can I help?'}
                     </h2>
-                    {config?.assistantName && (
+                    {config?.subGreeting && (
                       <p className="mt-1 text-[13px] text-[hsl(var(--chat-text-faint))]">
-                        {config.assistantName}
+                        {config.subGreeting}
                       </p>
                     )}
                   </div>

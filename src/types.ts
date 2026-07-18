@@ -92,15 +92,21 @@ export interface ChatWidgetConfig {
 
   /**
    * Headline shown in the empty state, above the starter prompts. Omit to fall
-   * back to "How can I help?" (with `assistantName` folded in when set). When
-   * neither this nor `assistantName` is set the whole greeting block collapses,
-   * so existing embeds keep their bare empty state.
+   * back to "How can I help?". When neither this nor `subGreeting` is set the
+   * greeting block collapses, so existing embeds keep their bare empty state.
    */
   greeting?: string;
 
   /**
-   * Name of the assistant, shown as the greeting's sub line. Also supplies the
-   * default headline's suffix when `greeting` is omitted.
+   * Faint line under the greeting headline (e.g. "Your support assistant").
+   * Free display text — distinct from `assistantName`, which is identity.
+   */
+  subGreeting?: string;
+
+  /**
+   * The assistant's name (identity). Stored and available to the widget; where
+   * it surfaces (header, a11y label, …) is decided separately, so it does not
+   * render on its own today.
    */
   assistantName?: string;
 

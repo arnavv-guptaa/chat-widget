@@ -89,10 +89,16 @@ export interface HostedAgentConfig {
   systemPrompt?: string | null;
   greeting?: string | null;
   /**
-   * Assistant's display name, shown as the empty-state greeting's sub line.
-   * Presentational, so the control plane stores it in the `appearance` blob
-   * rather than a column; accepted top-level too in case that's normalized
-   * later (see the hosted store's read).
+   * Faint line under the greeting headline (free display text). Presentational,
+   * so the control plane stores it in the `appearance` blob rather than a
+   * column; accepted top-level too in case that's normalized later (see the
+   * hosted store's read).
+   */
+  subGreeting?: string | null;
+  /**
+   * The assistant's name (identity, not the greeting sub line). Stored in the
+   * `appearance` blob like `subGreeting`; where it surfaces in the UI is decided
+   * separately.
    */
   assistantName?: string | null;
   appearance?: Record<string, unknown> | null;
