@@ -139,7 +139,8 @@
       "optional": true
     },
     "next": {
-      "optional": true",
+      "optional": true
+    },
     "zod": {
       "optional": true
     },
