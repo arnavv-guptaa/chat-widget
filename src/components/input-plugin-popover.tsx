@@ -263,33 +263,21 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
     }
   }, [highlight]);
 
-  // Visually attached to the input form below: rounded only on the top
-  // corners, no bottom border, sits flush with no margin so the seam
-  // disappears against the form's top edge. Reads like one continuous
-  // surface that "pops out" upward from the input. Width 96% of the
-  // input area, centered, so the panel reads as a smaller surface that
-  // "popped out" of the input rather than spanning the full width.
+  // A compact, inset command palette above the composer. It stays in flow (so
+  // it cannot escape the widget or fight portal boundaries) but reads as its
+  // own elevated surface with the same radius and token ramp as the composer.
   return (
     <div
       role="listbox"
-      className="rounded-t-xl bg-[hsl(var(--chat-background))] overflow-hidden mx-auto"
+      className="mb-2 overflow-hidden rounded-[11px] border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-background))] shadow-[0_6px_20px_rgba(0,0,0,0.07)]"
       onMouseDown={(e) => e.preventDefault()}
-      style={{
-        width: "96%",
-        borderTop: "1px solid hsl(var(--chat-border))",
-        borderLeft: "1px solid hsl(var(--chat-border))",
-        borderRight: "1px solid hsl(var(--chat-border))",
-        // Pull down 1px so our bottom edge overlaps the form's top
-        // border, removing the visible seam between the two surfaces.
-        marginBottom: -1,
-      }}
     >
       {plugin.heading && (
         <div
           className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide"
           style={{
-            color: "hsl(var(--chat-text)/0.5)",
-            borderBottom: "1px solid hsl(var(--chat-border))",
+            color: "hsl(var(--chat-text-subtle))",
+            borderBottom: "1px solid hsl(var(--chat-hairline))",
           }}
         >
           {plugin.heading}
@@ -337,20 +325,14 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
                   )}
                   style={{
                     backgroundColor:
-                      idx === highlight ? "hsl(var(--chat-text)/0.06)" : "transparent",
+                      idx === highlight ? "hsl(var(--chat-hover-bg))" : "transparent",
                   }}
                 >
-                  <span
-                    className="text-[13px] truncate"
-                    style={{ color: "hsl(var(--chat-text)/0.85)" }}
-                  >
+                  <span className="truncate text-[12.5px] font-medium text-[hsl(var(--chat-text))]">
                     {item.label}
                   </span>
                   {item.sublabel && (
-                    <span
-                      className="text-[11px] flex-shrink-0"
-                      style={{ color: "hsl(var(--chat-text)/0.4)" }}
-                    >
+                    <span className="flex-shrink-0 text-[11.5px] text-[hsl(var(--chat-text-faint))]">
                       {item.sublabel}
                     </span>
                   )}
@@ -358,7 +340,7 @@ function PluginPanel({ plugin, items, loading, highlight, onHover, onSelect }: P
                 {idx < items.length - 1 && (
                   <div
                     className="h-px mx-3"
-                    style={{ backgroundColor: "hsl(var(--chat-border))" }}
+                    style={{ backgroundColor: "hsl(var(--chat-hairline))" }}
                   />
                 )}
               </div>

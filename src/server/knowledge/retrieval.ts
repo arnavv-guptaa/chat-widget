@@ -54,23 +54,38 @@ export interface SourceUrlPart {
   sourceId: string;
   url: string;
   title?: string;
+  /** Original 1-indexed DOC references represented by this deduplicated source. */
+  citationIds?: number[];
 }
 
 /**
  * Build de-duplicated `source-url` parts for the retrieved chunks. Dedupe is by
  * citation URL, which is now ANCHOR-GRANULAR by design (DOCS_CONTRACT §4): two
  * chunks from different sections of the same page produce distinct `url#anchor`
- * citations and are intentionally kept as two separate sources; only true
- * duplicates (same page, same section) collapse.
+ * citations and are intentionally kept as separate sources; only true duplicates
+ * collapse. Each row retains every original 1-indexed DOC number in citationIds,
+ * so deduplication can never remap an inline citation to the wrong source.
  */
 export function toSourceParts(chunks: RetrievedChunk[]): SourceUrlPart[] {
-  const seen = new Set<string>();
+  const byUrl = new Map<string, SourceUrlPart>();
   const parts: SourceUrlPart[] = [];
-  for (const c of chunks) {
+  for (const [index, c] of chunks.entries()) {
     const url = citationUrl(c);
-    if (seen.has(url)) continue;
-    seen.add(url);
-    parts.push({ type: 'source-url', sourceId: c.id || url, url, title: c.source.title });
+    const citationId = index + 1;
+    const existing = byUrl.get(url);
+    if (existing) {
+      existing.citationIds?.push(citationId);
+      continue;
+    }
+    const part: SourceUrlPart = {
+      type: 'source-url',
+      sourceId: c.id || url,
+      url,
+      title: c.source.title,
+      citationIds: [citationId],
+    };
+    byUrl.set(url, part);
+    parts.push(part);
   }
   return parts;
 }

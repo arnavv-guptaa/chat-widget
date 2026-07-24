@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Clock, Loader2, X } from 'lucide-react';
+import { Check, ChevronRight, Loader2, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { CodeBlock } from '../code-block';
 import { TextShimmer } from './TextShimmer';
@@ -46,7 +46,7 @@ const ERROR_COLOR = { color: 'hsl(var(--chat-danger))' } as const;
 
 const APPROVAL_COLOR = { color: 'hsl(var(--chat-warning))' } as const;
 
-/** Leading status icon: amber clock (awaiting approval) → spinner (running) →
+/** Leading status icon: amber dot (awaiting approval) → spinner (running) →
  *  green check (done) → red cross (error). */
 function StatusIcon({
   isPending,
@@ -58,15 +58,21 @@ function StatusIcon({
   awaitingApproval?: boolean;
 }) {
   if (awaitingApproval) {
-    return <Clock className="size-3.5 flex-shrink-0" style={APPROVAL_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+    return (
+      <span
+        className="size-[7px] flex-shrink-0 rounded-full"
+        style={{ backgroundColor: APPROVAL_COLOR.color }}
+        aria-hidden="true"
+      />
+    );
   }
   if (isError) {
-    return <X className="size-3.5 flex-shrink-0" style={ERROR_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+    return <X className="size-3 flex-shrink-0" style={ERROR_COLOR} strokeWidth={2.5} aria-hidden="true" />;
   }
   if (isPending) {
-    return <Loader2 className="size-3.5 flex-shrink-0 animate-spin" style={SUBTLE} aria-hidden="true" />;
+    return <Loader2 className="size-[11px] flex-shrink-0 animate-spin" style={SUBTLE} aria-hidden="true" />;
   }
-  return <Check className="size-3.5 flex-shrink-0" style={SUCCESS_COLOR} strokeWidth={2.5} aria-hidden="true" />;
+  return <Check className="size-3 flex-shrink-0" style={SUCCESS_COLOR} strokeWidth={2.5} aria-hidden="true" />;
 }
 
 function AgentToolCallImpl({
@@ -81,14 +87,28 @@ function AgentToolCallImpl({
 }: AgentToolCallProps) {
   const [expanded, setExpanded] = useState(false);
   const hasDetail = Boolean((detail && detail.trim()) || errorText);
+  const accessibleStatus = awaitingApproval
+    ? 'Awaiting approval'
+    : isError
+      ? 'Error'
+      : isPending
+        ? 'Running'
+        : 'Completed';
 
   return (
-    <div className="group/tool select-text">
+    <div
+      className={cn(
+        'group/tool select-text',
+        awaitingApproval &&
+          'rounded-[11px] border border-[hsl(var(--chat-warning)/0.28)] bg-[hsl(var(--chat-warning)/0.055)] px-3 py-2.5',
+      )}
+    >
       <div
         className={cn(
-          'flex items-center gap-2 rounded-md px-2 py-1 -mx-2 transition-colors',
+          'flex items-center gap-2 rounded-md py-1 transition-colors',
+          !awaitingApproval && '-mx-2 px-2',
           hasDetail &&
-            'cursor-pointer hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.25)]',
+            'cursor-pointer hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]',
         )}
         style={HOVER}
         // Only the rows that actually expand a payload are interactive — expose
@@ -108,28 +128,31 @@ function AgentToolCallImpl({
             : undefined
         }
       >
-        {/* While running, the shimmering text alone signals "in progress" — no
-            leading spinner. The status icon still renders for terminal/actionable
-            states (done check, error cross, approval clock) where a glyph carries
-            meaning the text can't. */}
-        {!isPending && (
-          <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
-        )}
+        {/* Every tool row has a compact status glyph: spinner while running,
+            check/cross when settled, warning dot while awaiting approval. */}
+        <StatusIcon isPending={isPending} isError={isError} awaitingApproval={awaitingApproval} />
+        <span className="sr-only">{accessibleStatus}: </span>
 
-        <div className="flex items-baseline gap-1.5 min-w-0 text-[13px] leading-5">
+        <div className="flex items-baseline gap-1.5 min-w-0 text-[12.5px] leading-5">
           {isPending ? (
-            <TextShimmer as="span" className="font-medium whitespace-nowrap flex-shrink-0">
+            <TextShimmer as="span" className="font-semibold whitespace-nowrap flex-shrink-0">
               {verb}
             </TextShimmer>
           ) : (
-            <span className="font-medium whitespace-nowrap flex-shrink-0" style={MUTED}>
+            <span className="font-semibold whitespace-nowrap flex-shrink-0" style={MUTED}>
               {verb}
             </span>
           )}
           {subtitle && (
-            <span className="truncate min-w-0" style={SUBTLE}>
-              {subtitle}
-            </span>
+            awaitingApproval ? (
+              <code className="truncate rounded-md bg-[hsl(var(--chat-warning)/0.1)] px-1.5 py-0.5 font-mono text-[11.5px] text-[hsl(var(--chat-text))]">
+                {subtitle}
+              </code>
+            ) : (
+              <span className="truncate min-w-0 font-mono text-[11.5px] text-[hsl(var(--chat-text-faint))]">
+                {subtitle}
+              </span>
+            )
           )}
         </div>
 
@@ -146,21 +169,19 @@ function AgentToolCallImpl({
 
       {/* Human-in-the-loop: Approve / Deny a paused tool. */}
       {awaitingApproval && onApprove && (
-        <div className="flex items-center gap-2 pl-6 pt-1.5">
+        <div className="flex items-center gap-2 pt-2">
           <button
             type="button"
             onClick={() => onApprove(true)}
-            className="chat-tool-approve inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium"
+            className="chat-tool-approve inline-flex min-h-8 items-center rounded-lg px-3 text-[12.5px] font-semibold"
           >
-            <Check className="size-3.5" strokeWidth={2.5} />
-            Approve
+            Allow
           </button>
           <button
             type="button"
             onClick={() => onApprove(false)}
-            className="chat-tool-deny inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium"
+            className="chat-tool-deny inline-flex min-h-8 items-center rounded-lg px-3 text-[12.5px] font-medium"
           >
-            <X className="size-3.5" strokeWidth={2.5} />
             Deny
           </button>
         </div>

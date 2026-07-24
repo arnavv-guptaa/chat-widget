@@ -13,6 +13,7 @@ import {
 import { toToolPart, type ToolPart, type TurnState } from './types';
 import type { ActionRenderer, ToolRenderer } from '../../types';
 import { ActionResultCard } from '../action-result-card';
+import type { CitationSource } from '../citation-markers';
 
 /**
  * Renders one assistant turn as a clean, in-order flow — text, reasoning, and
@@ -30,6 +31,12 @@ interface AgentTurnTranscriptProps {
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
+  /**
+   * The message's source-url parts, in Sources-card order. Threaded down to
+   * `Response` so inline `[ref: N]` chips can resolve preserved source IDs
+   * (#138). Supplying the array also opts assistant text into citation parsing.
+   */
+  sources?: CitationSource[];
 }
 
 const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
@@ -47,6 +54,7 @@ function AgentTurnTranscriptImpl({
   toolRenderers,
   actionRenderers,
   onToolApproval,
+  sources,
 }: AgentTurnTranscriptProps) {
   const turnId = message.id;
 
@@ -88,7 +96,9 @@ function AgentTurnTranscriptImpl({
             <Fragment key={item.id}>
               <Message from="assistant">
                 <MessageContent>
-                  <Response isStreaming={isTextStreaming}>{item.text}</Response>
+                  <Response isStreaming={isTextStreaming} sources={sources}>
+                    {item.text}
+                  </Response>
                 </MessageContent>
               </Message>
             </Fragment>
@@ -143,23 +153,27 @@ function AgentTurnTranscriptImpl({
           }
         }
         const status = getToolStatus(part, turn);
-        const verb = getToolVerb(part.tool, status.isPending);
+        // Human-in-the-loop: a tool paused awaiting approval shows an explicit
+        // approval card (unless a policy already auto-approved it). The target is
+        // the salient input when available, otherwise the tool name — never a
+        // vague past-tense verb that makes an unapproved action look completed.
+        const awaitingApproval =
+          part.state.status === 'approval-requested' &&
+          !!part.approval &&
+          !part.approval.isAutomatic;
+        const verb = awaitingApproval ? 'Wants to run' : getToolVerb(part.tool, status.isPending);
         // While running show the input subtitle; once done prefer a result summary.
-        const subtitle = status.isPending
-          ? getToolSubtitle(part)
-          : getResultSummary(part) || getToolSubtitle(part);
+        const subtitle = awaitingApproval
+          ? getToolSubtitle(part) || part.tool
+          : status.isPending
+            ? getToolSubtitle(part)
+            : getResultSummary(part) || getToolSubtitle(part);
         const detail =
           part.state.output != null
             ? typeof part.state.output === 'string'
               ? part.state.output
               : JSON.stringify(part.state.output, null, 2)
             : undefined;
-        // Human-in-the-loop: a tool paused awaiting approval shows Approve/Deny
-        // (unless a policy already auto-approved it). onApprove resumes the turn.
-        const awaitingApproval =
-          part.state.status === 'approval-requested' &&
-          !!part.approval &&
-          !part.approval.isAutomatic;
         return (
           <AgentToolCall
             key={item.id}

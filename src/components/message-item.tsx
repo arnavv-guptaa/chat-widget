@@ -1,9 +1,10 @@
 import { Fragment, memo, useMemo } from 'react';
 import type { UIMessage, ChatStatus } from 'ai';
 import { cn } from '../utils/cn';
-import { Message, MessageContent, MessageMetadata } from './message';
+import { Message, MessageContent } from './message';
 import { Response } from './response';
 import { Source, Sources, SourcesContent, SourcesTrigger } from './sources';
+import type { CitationSource } from './citation-markers';
 import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
@@ -50,7 +51,13 @@ interface MessageItemProps {
   onFeedback?: (feedback: FeedbackEvent) => void;
 }
 
-type SourceUrlPart = { type: 'source-url'; url: string; title?: string };
+type SourceUrlPart = {
+  type: 'source-url';
+  sourceId?: string;
+  url: string;
+  title?: string;
+  citationIds?: number[];
+};
 
 function sourceTitle(part: SourceUrlPart): string {
   return part.title || part.url;
@@ -60,6 +67,14 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
   const sourceParts = useMemo(
     () => (message.parts?.filter((part) => part.type === 'source-url') ?? []) as SourceUrlPart[],
     [message.parts],
+  );
+  // The same source-url parts, cast to the CitationSource shape the inline
+  // citation chips consume. sourceParts IS the bibliography list; explicit
+  // citationIds preserve the model's original reference mapping through dedupe.
+  // Memoized on sourceParts so the identity is stable unless the parts change.
+  const citationSources = useMemo(
+    () => sourceParts as unknown as CitationSource[],
+    [sourceParts],
   );
   const fileParts = useMemo(
     () => message.parts?.filter((part) => part.type === 'file') ?? [],
@@ -107,22 +122,6 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
 
   return (
     <div className={cn('group relative', spacing)}>
-      {message.role === 'assistant' && sourceParts.length > 0 && (
-        <Sources>
-          <SourcesTrigger count={sourceParts.length} />
-          <SourcesContent>
-            {sourceParts.map((part, i) => (
-              <Source
-                key={`${message.id}-source-${i}`}
-                href={part.url}
-                title={sourceTitle(part)}
-                index={i}
-              />
-            ))}
-          </SourcesContent>
-        </Sources>
-      )}
-
       {fileParts.length > 0 && (
         <div className={cn('flex mb-1', message.role === 'user' ? 'justify-end' : 'justify-start')}>
           <MessageAttachments attachments={attachments} />
@@ -140,9 +139,29 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
               toolRenderers={toolRenderers}
               actionRenderers={actionRenderers}
               onToolApproval={onToolApproval}
+              sources={citationSources}
             />
+            {/* Sources bibliography footer (#138). Sits BELOW the answer — the
+               inline citation chips link the prose to these sources, so the list
+               is a reference footer, not a top-of-message callout. Collapsed by
+               default; the count is the quiet affordance. Suppressed while
+               streaming so a half-arrived source list doesn't flash. Replaces
+               the old "Grounded in N sources" metadata line (the footer's count
+               carries that signal now, more usefully). */}
             {!isStreamingThisMessage && sourceParts.length > 0 && (
-              <MessageMetadata items={[`Grounded in ${sourceParts.length} source${sourceParts.length === 1 ? '' : 's'}`]} />
+              <Sources className="mt-4">
+                <SourcesTrigger count={sourceParts.length} />
+                <SourcesContent>
+                  {sourceParts.map((part, i) => (
+                    <Source
+                      key={`${message.id}-source-${i}`}
+                      href={part.url}
+                      title={sourceTitle(part)}
+                      index={i}
+                    />
+                  ))}
+                </SourcesContent>
+              </Sources>
             )}
           </>
         ) : (
@@ -165,7 +184,9 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
           <Message from={message.role}>
             <MessageContent>
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              <Response>{(message as any).content || (message as any).text}</Response>
+              <Response sources={message.role === 'assistant' ? citationSources : undefined}>
+                {(message as any).content || (message as any).text}
+              </Response>
             </MessageContent>
           </Message>
         </Fragment>

@@ -304,20 +304,27 @@ export function createHostedConfig(options: HostedOptions) {
         return null;
       }
       const appearance = raw.appearance ?? null;
-      const appearanceFollowUps =
+      const appearanceBlob =
         appearance && typeof appearance === 'object' && !Array.isArray(appearance)
-          ? (appearance as Record<string, unknown>).followUps
+          ? (appearance as Record<string, unknown>)
           : undefined;
+      // Presentational string fields ride the appearance blob rather than
+      // earning a column (same call as followUps). Read the top-level field
+      // first so the client survives a future API normalization that promotes
+      // one out of the blob, without another release.
+      const blobString = (top: unknown, key: string): string | null => {
+        const v = top ?? appearanceBlob?.[key];
+        return typeof v === 'string' ? v : null;
+      };
       const value: HostedAgentConfig = {
         model: raw.model ?? null,
         systemPrompt: raw.systemPrompt ?? null,
         greeting: raw.greeting ?? null,
+        subGreeting: blobString(raw.subGreeting, 'subGreeting'),
+        assistantName: blobString(raw.assistantName, 'assistantName'),
         appearance,
         maxOutputTokens: raw.maxOutputTokens ?? null,
-        // The control plane currently stores this under appearance.followUps;
-        // also accept a future top-level field so the client survives that API
-        // normalization without another release.
-        followUps: normalizeSerializedFollowUpConfig(raw.followUps ?? appearanceFollowUps),
+        followUps: normalizeSerializedFollowUpConfig(raw.followUps ?? appearanceBlob?.followUps),
       };
       if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
       cache.set(key, { value, at: now });

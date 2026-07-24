@@ -7,14 +7,21 @@ import {
 } from "../ui/collapsible";
 import { cn } from "../utils/cn";
 import { safeUrl } from "../utils/url-safety";
-import { BookIcon, ChevronDownIcon, ExternalLinkIcon, FileTextIcon } from "lucide-react";
-import type { ComponentProps } from "react";
+import { ChevronDownIcon, FileTextIcon } from "lucide-react";
+import { useState, type ComponentProps } from "react";
 
 export type SourcesProps = ComponentProps<"div">;
 
+/**
+ * Sources bibliography footer (#138). Lives BELOW the assistant answer, not
+ * above it: the inline citation chips link the prose to these sources, so the
+ * list is a reference footer, not a top-of-message callout. Collapsed by
+ * default; the trigger is a quiet uppercase section label (see SourcesTrigger).
+ * A hairline anchors it to the answer while each source remains an unboxed row.
+ */
 export const Sources = ({ className, ...props }: SourcesProps) => (
   <Collapsible
-    className={cn("not-prose mb-3 text-xs", className)}
+    className={cn("not-prose border-t border-[hsl(var(--chat-hairline))] pt-3 text-xs", className)}
     {...props}
   />
 );
@@ -23,6 +30,12 @@ export type SourcesTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   count: number;
 };
 
+/**
+ * The bibliography footer affordance: a quiet, left-aligned uppercase label,
+ * not a bordered pill. The count remains visible as metadata and the chevron
+ * rotates on open; expanded rows stay unnumbered because inline citation chips
+ * already carry the numeric mapping.
+ */
 export const SourcesTrigger = ({
   className,
   count,
@@ -31,20 +44,22 @@ export const SourcesTrigger = ({
 }: SourcesTriggerProps) => (
   <CollapsibleTrigger
     className={cn(
-      "group/source-trigger inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-      "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.72)] text-[hsl(var(--chat-text-muted))]",
-      "hover:bg-[hsl(var(--chat-hover-bg)/0.58)] hover:text-[hsl(var(--chat-text))]",
-      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]",
+      "group/source-trigger flex w-full items-center gap-1.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors",
+      "text-[hsl(var(--chat-text-subtle))] hover:text-[hsl(var(--chat-text-muted))]",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
       className
     )}
     {...props}
   >
     {children ?? (
       <>
-        <BookIcon className="size-3.5" aria-hidden="true" />
-        <span>{count} source{count === 1 ? "" : "s"}</span>
+        <span>Sources</span>
+        <span className="font-medium normal-case tracking-normal text-[hsl(var(--chat-text-subtle))]">
+          {count}
+        </span>
         <ChevronDownIcon
-          className="size-3.5 transition-transform group-data-[state=open]/source-trigger:rotate-180"
+          className="size-2.5 transition-transform duration-150 group-data-[state=open]/source-trigger:rotate-180"
+          strokeWidth={1.6}
           aria-hidden="true"
         />
       </>
@@ -81,6 +96,61 @@ function sourceHost(href: SourceProps["href"]): string | undefined {
   }
 }
 
+/**
+ * Resolve a favicon URL for a source host. The host is already rendered in the
+ * bibliography row, so requesting its icon leaks nothing the user can't already
+ * see. We use Google's S2 favicon endpoint (a long-stable, widely-used service)
+ * which serves a single 16–32px PNG per domain; the browser fetches it directly
+ * as a normal <img>, no script/credential exchange. Non-http(s) sources (e.g.
+ * kb://) return undefined and fall back to the file glyph.
+ */
+function sourceFaviconUrl(href: SourceProps["href"]): string | undefined {
+  if (typeof href !== "string") return undefined;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    const host = url.hostname.replace(/^www\./, "");
+    if (!host) return undefined;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The 18px leading slot on a source row. Shows the site favicon when the source
+ * is http(s) and the icon loads; falls back to the file glyph on any failure
+ * (blocked domain, offline, non-web scheme, network error) so the row never
+ * ships a broken-image icon. aria-hidden because the host text beside it already
+ * names the source for assistive tech.
+ */
+function SourceGlyph({ href }: { href: string | undefined }) {
+  const [failed, setFailed] = useState(false);
+  const faviconUrl = sourceFaviconUrl(href);
+  if (!faviconUrl || failed) {
+    return (
+      <span
+        className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text-faint))]"
+        aria-hidden="true"
+      >
+        <FileTextIcon className="size-3" />
+      </span>
+    );
+  }
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      src={faviconUrl}
+      width={16}
+      height={16}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-[16px] w-[16px] shrink-0 rounded-full bg-[hsl(var(--chat-surface))] object-contain p-[1px]"
+    />
+  );
+}
+
 function compactTitle(title: SourceProps["title"], href: SourceProps["href"]): string {
   if (typeof title === "string" && title.trim()) {
     try {
@@ -101,7 +171,7 @@ function compactTitle(title: SourceProps["title"], href: SourceProps["href"]): s
   return "Source";
 }
 
-export const Source = ({ href, title, children, index, className, ...props }: SourceProps) => {
+export const Source = ({ href, title, children, index: _index, className, ...props }: SourceProps) => {
   // Citation hrefs come from the AI message stream; only allow safe schemes
   // so a javascript:/data: URL cannot execute on click.
   const safeHref = safeUrl(href);
@@ -110,24 +180,18 @@ export const Source = ({ href, title, children, index, className, ...props }: So
 
   const content = children ?? (
     <>
-      <span
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg border text-[11px] font-semibold"
-        style={{ borderColor: "hsl(var(--chat-border))", backgroundColor: "hsl(var(--chat-surface))", color: "hsl(var(--chat-text-muted))" }}
-        aria-hidden="true"
-      >
-        {typeof index === "number" ? index + 1 : <FileTextIcon className="size-3.5" />}
+      <SourceGlyph href={safeHref} />
+      <span className={cn("truncate text-[12.5px] font-medium text-[hsl(var(--chat-text))]", host ? "max-w-[60%]" : "min-w-0 flex-1")}>
+        {label}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12px] font-medium text-[hsl(var(--chat-text))]">
-          {label}
-        </span>
-        {host && (
-          <span className="mt-0.5 block truncate text-[11px] text-[hsl(var(--chat-text-muted))]">
+      {host && (
+        <>
+          <span className="text-[hsl(var(--chat-text-subtle))]" aria-hidden="true">·</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-[hsl(var(--chat-text-faint))]">
             {host}
           </span>
-        )}
-      </span>
-      <ExternalLinkIcon className="size-3.5 shrink-0 text-[hsl(var(--chat-text-subtle))]" aria-hidden="true" />
+        </>
+      )}
     </>
   );
 
@@ -135,8 +199,8 @@ export const Source = ({ href, title, children, index, className, ...props }: So
     return (
       <span
         className={cn(
-          "flex w-full min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2",
-          "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.52)]",
+          "-mx-2 flex w-auto min-w-0 items-center gap-2 rounded-lg px-2 py-1.5",
+          "bg-transparent",
           className
         )}
       >
@@ -148,10 +212,9 @@ export const Source = ({ href, title, children, index, className, ...props }: So
   return (
     <a
       className={cn(
-        "flex w-full min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2 transition-colors",
-        "border-[hsl(var(--chat-border))] bg-[hsl(var(--chat-surface)/0.52)]",
-        "hover:bg-[hsl(var(--chat-hover-bg)/0.48)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.22)]",
+        "-mx-2 flex w-auto min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors",
+        "bg-transparent hover:bg-[hsl(var(--chat-hover-bg))]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
         className
       )}
       href={safeHref}

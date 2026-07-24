@@ -221,8 +221,7 @@ export function MessageActions({
             autoFocus
             placeholder="What went wrong? (optional)"
             aria-label="Feedback reason"
-            className="h-7 min-w-0 flex-1 max-w-[16rem] rounded-md px-2 text-[12px] bg-[hsl(var(--chat-text)/0.04)] placeholder:text-[hsl(var(--chat-text)/0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)]"
-            style={{ color: "hsl(var(--chat-text)/0.8)" }}
+            className="h-7 min-w-0 max-w-[16rem] flex-1 rounded-[7px] bg-[hsl(var(--chat-surface))] px-2 text-[12px] text-[hsl(var(--chat-text-body))] placeholder:text-[hsl(var(--chat-text-subtle))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
           />
           <ActionButton onClick={handleReasonSubmit} ariaLabel="Submit feedback">
             <SendHorizontalIcon className="size-3.5" />
@@ -255,10 +254,9 @@ function ActionButton({ onClick, disabled, ariaLabel, pressed, children }: Actio
       // as toggles.
       aria-pressed={pressed === undefined ? undefined : pressed}
       className={cn(
-        "p-1.5 rounded-md transition-colors hover:bg-[hsl(var(--chat-text)/0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-text)/0.3)] disabled:opacity-40 disabled:cursor-not-allowed",
-        pressed && "bg-[hsl(var(--chat-text)/0.08)]",
+        "flex size-[26px] items-center justify-center rounded-[7px] p-0 text-[hsl(var(--chat-text-faint))] transition-colors hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)] disabled:cursor-not-allowed disabled:opacity-40",
+        pressed && "bg-[hsl(var(--chat-hover-bg))] text-[hsl(var(--chat-text))]",
       )}
-      style={{ color: pressed ? "hsl(var(--chat-text)/0.85)" : "hsl(var(--chat-text)/0.55)" }}
     >
       {children}
     </button>

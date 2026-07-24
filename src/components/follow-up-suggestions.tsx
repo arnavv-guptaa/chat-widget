@@ -25,7 +25,7 @@ export function FollowUpSuggestions({
   return (
     <div className="mt-4" data-follow-up-suggestions>
       <div
-        className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em]"
+        className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em]"
         style={{ color: 'hsl(var(--chat-text-subtle))' }}
       >
         Related
@@ -36,16 +36,10 @@ export function FollowUpSuggestions({
             key={s}
             type="button"
             onClick={() => onSelect(s)}
-            className="group flex w-full items-center justify-between gap-3 border-t px-2 py-2.5 text-left text-[13px] leading-5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.4)]"
-            style={{ borderColor: 'hsl(var(--chat-border))' }}
+            className="group flex w-full cursor-pointer items-center justify-between gap-3 border-t px-1 py-2.5 text-left text-[13px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
+            style={{ borderColor: 'hsl(var(--chat-hairline))' }}
           >
-            <span
-              className="min-w-0 transition-colors"
-              style={{ color: 'hsl(var(--chat-text-muted))' }}
-              // Step up the ink ramp on hover — same pattern as tab titles.
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'hsl(var(--chat-text))'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'hsl(var(--chat-text-muted))'; }}
-            >
+            <span className="min-w-0 text-[hsl(var(--chat-text-muted))] transition-colors group-hover:text-[hsl(var(--chat-text))]">
               {s}
             </span>
             <ChevronRight

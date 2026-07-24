@@ -33,7 +33,7 @@ import { useInputPlugins } from './input-plugin-popover';
 import { ChatErrorBanner } from './chat-error-banner';
 import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { HistoryIcon, MessageSquareIcon, SearchIcon, ChevronRightIcon, PaperclipIcon, PlusIcon, XIcon } from 'lucide-react';
+import { HistoryIcon, MessageSquareIcon, SearchIcon, PaperclipIcon, SquarePenIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { normalizeFollowUpSuggestions, resolveFollowUpCount } from '../utils/follow-ups';
 import {
@@ -83,6 +83,19 @@ type Conversation = {
   message_count: number;
   metadata?: any;
 };
+
+function formatConversationTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60_000));
+  if (diffMinutes < 1) return 'now';
+  if (diffMinutes < 60) return `${diffMinutes}m`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  if (diffHours < 7 * 24) return date.toLocaleDateString(undefined, { weekday: 'short' });
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 /**
  * Storage access that can never throw. Safari private mode (historically a
@@ -144,7 +157,7 @@ type ChatTab = {
 
 /**
  * Attachment button — compact ghost icon on the left of the prompt row, sized
- * to match the send button (size-9) with a muted paperclip that doesn't
+ * to match the send button with a muted paperclip that doesn't
  * compete with the text or the send action. Reads the attachments context.
  *
  * Hoisted to MODULE scope deliberately: it used to be defined inside
@@ -159,11 +172,9 @@ function AttachButton() {
     <PromptInputButton
       variant="ghost"
       size="icon"
-      // Icon-only affordance: no hover background (the ghost circle looked
-      // odd next to the textarea), the icon just steps up the text ramp.
-      // Rests at text-strong (0.88) rather than text-muted (0.64) so it
-      // reads closer to the text color; hover completes it to full text.
-      className="size-9 text-[hsl(var(--chat-text-strong))] hover:bg-transparent hover:text-foreground"
+      // Quiet icon button: faint at rest, then the shared hover surface and
+      // full text color on interaction.
+      className="size-8 rounded-[7px] text-[hsl(var(--chat-text-faint))] hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))]"
       aria-label="Attach files"
       onClick={() => attachments.openFileDialog()}
     >
@@ -1360,7 +1371,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         {/* backdrop-blur removed: the header is a flex sibling of the scroll
             area, nothing ever renders behind it — the blur was dead CSS
             implying a frosted effect that never happened. */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b relative z-20" style={{
+        <div className="relative z-20 flex min-h-[52px] items-center gap-2 border-b px-3 py-2" style={{
           borderColor: 'hsl(var(--chat-border))',
           backgroundColor: 'hsl(var(--chat-background))'
         }}>
@@ -1371,28 +1382,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             aria-label="Conversations"
           >
             {/* Apple-style Tab Pills */}
-            {tabs.map((tab, index) => (
+            {tabs.map((tab) => (
               <div
                 key={tab.id}
-                className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all duration-150 group flex-shrink-0 min-w-0"
-                style={{
-                  backgroundColor: tab.isActive
-                    ? ('hsl(var(--chat-surface))')
-                    : 'transparent',
-                  color: tab.isActive
-                    ? ('hsl(var(--chat-text))')
-                    : ('hsl(var(--chat-text-muted))')
-                }}
-                onMouseEnter={(e) => {
-                  if (!tab.isActive) {
-                    e.currentTarget.style.backgroundColor = 'hsl(var(--chat-hover-bg))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!tab.isActive) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
+                className={cn(
+                  'group relative flex min-w-0 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors duration-150',
+                  tab.isActive
+                    ? 'bg-[hsl(var(--chat-hover-bg))] text-[hsl(var(--chat-text))]'
+                    : 'bg-transparent text-[hsl(var(--chat-text-muted))] hover:bg-[hsl(var(--chat-hover-bg))]',
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   switchToTab(tab.id);
@@ -1449,77 +1447,63 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {/* Plus Icon */}
             <button
+              type="button"
               onClick={createNewTab}
-              className="flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150"
-              style={{
-                color: 'hsl(var(--chat-text-muted))'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = 'hsl(var(--chat-text))';
-                e.currentTarget.style.backgroundColor = 'hsl(var(--chat-surface))';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'hsl(var(--chat-text-muted))';
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
+              aria-label="New chat"
+              className="chat-header-icon-button flex size-7 items-center justify-center rounded-[7px] text-[hsl(var(--chat-text-faint))] transition-colors duration-150 hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
               title="New Chat"
             >
-              <PlusIcon className="h-4 w-4" strokeWidth={2} />
+              <SquarePenIcon className="size-[15px]" strokeWidth={1.8} />
             </button>
 
             {/* History Icon */}
-            <div className="relative" ref={dropdownRef}>
+            <div ref={dropdownRef}>
               <button
+                type="button"
                 onClick={() => setShowHistory(!showHistory)}
-                className="flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150"
-                style={{
-                  color: showHistory
-                    ? ('hsl(var(--chat-text))')
-                    : ('hsl(var(--chat-text-muted))'),
-                  backgroundColor: showHistory
-                    ? ('hsl(var(--chat-surface))')
-                    : 'transparent'
-                }}
-                onMouseEnter={(e) => {
-                  if (!showHistory) {
-                    e.currentTarget.style.color = 'hsl(var(--chat-text))';
-                    e.currentTarget.style.backgroundColor = 'hsl(var(--chat-surface))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!showHistory) {
-                    e.currentTarget.style.color = 'hsl(var(--chat-text-muted))';
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
+                aria-label="Chat history"
+                aria-expanded={showHistory}
+                className={cn(
+                  'chat-header-icon-button flex size-7 items-center justify-center rounded-[7px] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]',
+                  showHistory
+                    ? 'bg-[hsl(var(--chat-hover-bg))] text-[hsl(var(--chat-text))]'
+                    : 'text-[hsl(var(--chat-text-faint))] hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))]',
+                )}
                 title="Chat History"
               >
                 <HistoryIcon className="h-4 w-4" strokeWidth={2} />
               </button>
+            </div>
 
-            {/* Chat History Dropdown */}
+            {/* Chat History Dropdown — anchored to the HEADER row, not the
+                history button. A right-0 origin on the button wrapper left the
+                popover starting from the button and extending past the widget's
+                left edge (clipped by the root overflow-hidden) once close /
+                header-action buttons sat to its right. Anchoring to the full
+                header makes right-0 the widget's right edge, so the popover
+                extends leftward only into the header width. */}
             {showHistory && (
-              <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl shadow-[var(--chat-shadow-md)] z-50 animate-in fade-in slide-in-from-top-1 duration-150 overflow-hidden" style={{
+              <div className="absolute right-3 top-full z-50 mt-1.5 overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
+                width: 'min(20rem, calc(100% - 1.5rem))',
                 backgroundColor: 'hsl(var(--chat-background))',
-                border: `1px solid ${'hsl(var(--chat-border))'}`
+                border: '1px solid hsl(var(--chat-border-soft))'
               }}>
-                {/* Search Header */}
-                <div className="p-2.5 border-b" style={{
-                  borderColor: 'hsl(var(--chat-border))',
-                  backgroundColor: 'var(--chat-overlay)'
-                }}>
+                {/* The search field is the only inset surface; the surrounding
+                    header and results share the popover background so the panel
+                    remains visually continuous. */}
+                <div className="p-2.5 pb-2" style={{ backgroundColor: 'hsl(var(--chat-background))' }}>
                   <div className="relative">
+                    <SearchIcon
+                      className="pointer-events-none absolute left-2.5 top-1/2 size-[13px] -translate-y-1/2 text-[hsl(var(--chat-text-faint))]"
+                      aria-hidden="true"
+                    />
                     <input
-                      type="text"
-                      placeholder="Search"
+                      type="search"
+                      placeholder="Search chats"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full h-7 px-2.5 text-[13px] rounded-lg focus:outline-none transition-all"
-                      style={{
-                        backgroundColor: 'hsl(var(--chat-surface))',
-                        border: `1px solid ${'hsl(var(--chat-border))'}`,
-                        color: 'hsl(var(--chat-text))'
-                      }}
+                      aria-label="Search chats"
+                      className="h-9 w-full rounded-[9px] bg-[hsl(var(--chat-surface))] pl-8 pr-2.5 text-[13px] text-[hsl(var(--chat-text))] placeholder:text-[hsl(var(--chat-text-subtle))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--chat-primary)/0.18)]"
                     />
                   </div>
                 </div>
@@ -1563,7 +1547,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                             backgroundColor: 'hsl(var(--chat-background) / 0.85)'
                           }}>
 
-                            <h3 className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'hsl(var(--chat-text-muted))' }}>{groupName}</h3>
+                            <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--chat-text-subtle))]">{groupName}</h3>
                           </div>
 
                           {/* Conversation Items */}
@@ -1573,43 +1557,40 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                               return (
                                 <button
                                   key={conversation.id}
-                                  className="w-full px-2 py-1 rounded-md transition-all duration-150 text-left group relative"
-                                  style={{
-                                    backgroundColor: isActiveConversation
-                                      ? ('hsl(var(--chat-surface))')
-                                      : 'transparent'
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    if (!isActiveConversation) {
-                                      e.currentTarget.style.backgroundColor = 'hsl(var(--chat-hover-bg))';
-                                    }
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    if (!isActiveConversation) {
-                                      e.currentTarget.style.backgroundColor = 'transparent';
-                                    }
-                                  }}
+                                  type="button"
+                                  className={cn(
+                                    'group relative w-full rounded-[10px] px-2.5 py-2 text-left transition-colors duration-150',
+                                    isActiveConversation
+                                      ? 'bg-[hsl(var(--chat-hover-bg))]'
+                                      : 'hover:bg-[hsl(var(--chat-surface))]',
+                                  )}
+                                  aria-current={isActiveConversation ? 'page' : undefined}
                                   onClick={() => handleSelectConversation(conversation.id, conversation.title)}
                                 >
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-[12px] line-clamp-1 transition-colors leading-tight" style={{
-                                        fontWeight: isActiveConversation ? 500 : 400,
-                                        color: isActiveConversation
-                                          ? ('hsl(var(--chat-text))')
-                                          : ('hsl(var(--chat-text-strong))')
-                                      }}>
-                                        {conversation.title}
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex min-w-0 items-center gap-2">
+                                        <p
+                                          className={cn(
+                                            'min-w-0 flex-1 truncate text-[13px] leading-5',
+                                            isActiveConversation
+                                              ? 'font-semibold text-[hsl(var(--chat-text))]'
+                                              : 'font-medium text-[hsl(var(--chat-text-body))]',
+                                          )}
+                                        >
+                                          {conversation.title}
+                                        </p>
+                                        <time
+                                          dateTime={conversation.updated_at}
+                                          className="flex-shrink-0 font-mono text-[11px] text-[hsl(var(--chat-text-faint))]"
+                                        >
+                                          {formatConversationTime(conversation.updated_at)}
+                                        </time>
+                                      </div>
+                                      <p className="truncate text-[12px] leading-4 text-[hsl(var(--chat-text-faint))]">
+                                        {conversation.message_count} {conversation.message_count === 1 ? 'message' : 'messages'}
                                       </p>
                                     </div>
-                                    <ChevronRightIcon
-                                      className="h-3 w-3 transition-all duration-150 flex-shrink-0"
-                                      style={{
-                                        color: 'hsl(var(--chat-text-subtle))',
-                                        opacity: isActiveConversation ? 1 : 0
-                                      }}
-                                      strokeWidth={2}
-                                    />
                                   </div>
                                 </button>
                               );
@@ -1622,7 +1603,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 </div>
               </div>
             )}
-            </div>
 
             {/* Consumer-supplied header actions (expand, settings, etc.)
                 rendered before the close button so they sit to its left. */}
@@ -1631,19 +1611,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             {/* Close Chat Widget Button */}
             {onClose && (
               <button
+                type="button"
                 onClick={onClose}
-                className="flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150"
-                style={{
-                  color: 'hsl(var(--chat-text-muted))'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = 'hsl(var(--chat-text))';
-                  e.currentTarget.style.backgroundColor = 'hsl(var(--chat-surface))';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = 'hsl(var(--chat-text-muted))';
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
+                aria-label="Close chat"
+                className="chat-header-icon-button flex size-7 items-center justify-center rounded-[7px] text-[hsl(var(--chat-text-faint))] transition-colors duration-150 hover:bg-[hsl(var(--chat-hover-bg))] hover:text-[hsl(var(--chat-text))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
                 title="Close Chat"
               >
                 <XIcon className="h-4 w-4" strokeWidth={2} />
@@ -1738,8 +1709,28 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             </div>
           ) : (
             messages.length === 0 && status !== 'submitted' &&
-            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt) ? (
-              <div className="mb-1">
+            ((effectiveStarterPrompts && effectiveStarterPrompts.length > 0) || config?.capabilitiesPrompt || config?.greeting || config?.subGreeting) ? (
+              <div className="mb-1 flex flex-col gap-4">
+                {/* Empty-state greeting — a strong headline plus an optional faint
+                    sub line. Both optional via config (greeting / subGreeting);
+                    when neither is set the block collapses and only the starter
+                    prompts show, so existing embeds are unaffected. `assistantName`
+                    is identity, not part of this block. */}
+                {(config?.greeting || config?.subGreeting) && (
+                  <div className="px-1">
+                    <h2
+                      className="text-[17px] font-semibold leading-tight text-[hsl(var(--chat-text))]"
+                      style={{ letterSpacing: '-0.01em' }}
+                    >
+                      {config?.greeting || 'How can I help?'}
+                    </h2>
+                    {config?.subGreeting && (
+                      <p className="mt-1 text-[13px] text-[hsl(var(--chat-text-faint))]">
+                        {config.subGreeting}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {effectiveStarterPrompts && effectiveStarterPrompts.length > 0 && (
                   <StarterMessages
                     prompts={effectiveStarterPrompts}
@@ -1809,25 +1800,24 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               <PromptInputAttachments>
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>
-              {/* Two-zone composer (prompt-kit / PromptBox style): the editor
-                  sits on its own row up top; a bottom action row carries attach
-                  on the left and send on the right. The outer `chat-prompt-box`
-                  rule (styles.src.css) gives the pill container + border + shadow,
-                  using the widget's --chat-* theme so it themes in light/dark. */}
+              {/* Two-zone composer: the editor sits on its own row; a bottom
+                  action row carries attach on the left and send on the right.
+                  `chat-prompt-box` supplies one quiet bordered surface and a
+                  token-derived focus ring in every theme. */}
               <PromptInputTextarea
                 ref={inputRef}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={inputPlugins.onKeyDown}
                 value={input}
-                className="min-h-0 w-full px-3 pt-3 pb-1 leading-7"
+                className="min-h-0 w-full px-3.5 pt-3 pb-1 text-[13.5px] leading-6"
               />
-              <div className="flex items-center gap-1.5 px-2 pb-2">
+              <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
                 {config?.features?.fileUpload === true && <AttachButton />}
                 <PromptInputSubmit
                   // Filled circular send button, right-aligned in the action row.
                   // Colors come entirely from the Button default variant tokens
                   // (bg-primary / text-primary-foreground / disabled:opacity-50).
-                  className="ml-auto size-9 rounded-full p-0 [&_svg]:size-4"
+                  className="ml-auto size-8 rounded-full p-0 [&_svg]:size-3.5"
                   disabled={status === 'streaming' || status === 'submitted' ? false : !input}
                   status={status}
                   onStop={stop}

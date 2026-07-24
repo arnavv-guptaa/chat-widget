@@ -32,7 +32,7 @@ import { ChatWidgetConfig, ChatWidgetSize } from './types';
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
-import { contrastForegroundTriplet, hexToHslTriplet } from './utils/color';
+import { hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
 
 export interface ChatWidgetProps extends ChatWidgetConfig {
@@ -106,6 +106,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   starterPrompts,
   getStarterPrompts,
   capabilitiesPrompt,
+  greeting,
+  subGreeting,
+  assistantName,
   context,
   onClose,
   headerActions,
@@ -366,29 +369,66 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
         return `${(lerp(0, hueDelta, f) + bg.h + 360) % 360} ${lerp(bg.s, text.s, f)}% ${l}%`;
       };
 
-      // Consolidated neutral set: one background, one raised/inset fill, one
-      // hover state, one hairline. The old 0.02/0.035/0.05 surface triplets
-      // and the divider/border twins were imperceptibly close (≤1.3% L apart)
-      // — six names for three distinguishable colors. Every surviving pair is
-      // now ≥4% L apart, and all tokens are raw HSL triplets (consumed inside
-      // hsl(...)), no full-color exceptions.
+      // Renderer design ramp. These are semantic stops — not hard-coded light
+      // colors — derived from the same background→text line as the rest of the
+      // widget. Close structural roles intentionally share a stop (border-soft /
+      // hairline) so the UI gains hierarchy without recreating a dozen
+      // indistinguishable grays.
       styles['--chat-background'] = tone(0);
-      styles['--chat-surface'] = structuralTone(0.05, 3.5); // cards, composer, fills
-      styles['--chat-hover-bg'] = structuralTone(0.1, 6); // the one hover state
-      styles['--chat-border'] = structuralTone(0.12, 7); // hairlines + input borders
-      styles['--chat-text-subtle'] = tone(0.42); // placeholder / disabled
-      styles['--chat-text-muted'] = tone(0.75); // icons / secondary text — close to text, still clearly secondary
-      styles['--chat-text-strong'] = tone(0.88);
+      styles['--chat-surface'] = structuralTone(0.025, 2); // quiet inset canvas
+      styles['--chat-hover-bg'] = structuralTone(0.047, 4); // hover / selected row
+      styles['--chat-hairline'] = structuralTone(0.064, 5.5); // section rules
+      styles['--chat-border-soft'] = styles['--chat-hairline']; // nested surfaces
+      styles['--chat-border'] = structuralTone(0.12, 7); // primary outline
+      styles['--chat-text-subtle'] = tone(0.28); // disabled / model metadata
+      styles['--chat-text-faint'] = tone(0.46); // paths / timestamps / chevrons
+      styles['--chat-text-muted'] = tone(0.72); // secondary copy / controls
+      styles['--chat-text-body'] = tone(0.88); // paragraphs / table cells
+      styles['--chat-text-strong'] = styles['--chat-text-body']; // backwards-compatible alias
       styles['--chat-text'] = tone(1);
       styles['--chat-primary'] = primaryTriplet;
+
+      // A soft accent fill for citations, file tiles, and selected inline tokens.
+      // It is derived from background→primary (not background→text), so a host's
+      // declared brand color remains visible without compromising dark themes.
+      const primary = parse(primaryTriplet)!;
+      const tintHue = primary.s < 1 ? bg.h : primary.h;
+      const tintSaturation = lerp(bg.s, primary.s, 0.8);
+      const primaryTone = (f: number) =>
+        `${tintHue} ${tintSaturation}% ${lerp(bg.l, primary.l, f)}%`;
+      styles['--chat-primary-tint'] = primaryTone(0.1);
       // Text ON the brand color — the send button, the launcher icon, and
-      // user-bubble text are all painted over --chat-primary. This was
-      // hardwired to the background color, which a light brand (yellow,
-      // pastel, white) rendered unreadable (≈1.5:1). Picked by WCAG relative
-      // luminance — NOT HSL lightness, which calls pure yellow "medium" —
-      // and the CSS falls back to the background for the stock palette.
-      const primaryForeground = contrastForegroundTriplet(theme?.primaryColor ?? '');
-      if (primaryForeground) styles['--chat-primary-foreground'] = primaryForeground;
+      // user-bubble text are all painted over --chat-primary. We intentionally
+      // do NOT pick a near-black/near-white foreground here: the user-bubble
+      // text, button label, and launcher icon default to the BACKGROUND color
+      // via the `var(--chat-primary-foreground, var(--chat-background))`
+      // fallback chain in styles.src.css. Using the background color as the
+      // text-on-accent is the conventional, correct choice across the realistic
+      // theme space:
+      //   - light theme (light bg + medium/dark accent)  → white text on the
+      //     accent (bg is white) — the branded look, AA-passing for the common
+      //     accents (red/blue/green/indigo on white all clear 4.5:1).
+      //   - dark theme (dark bg + light accent)          → dark text on the
+      //     accent (bg is dark) — the conventional dark-theme look.
+      //   - stock (near-black primary on white)          → white text, as
+      //     before.
+      // The earlier luminance-based contrast picker produced "black on a dark
+      // accent" for saturated mid-tone accents (red-500, rose, emerald-600,
+      // amber-600) — technically AA but visually muddy, and not what a themed
+      // customer expects. Dropping it also retires the miscalibrated 0.179
+      // crossover (the true crossover vs the emitted triplet luminances is
+      // 0.196). `--chat-primary-foreground` is simply not set, so every usage
+      // site falls through to `--chat-background`.
+      //
+      // Known edge: a LIGHT accent (yellow / cream / pastel / near-white
+      // primaryColor) on a LIGHT background renders background-colored (i.e.
+      // light) text on a light accent — low contrast. That corner is rare in
+      // practice (a white-on-white or yellow-on-white brand bubble is an
+      // unusual configuration), and ThemeConfig is deliberately 3 colors with
+      // no userTextColor override, so the background-color default is the
+      // documented contract. If a host hits that corner, the fix is to choose
+      // a primaryColor that contrasts with their background — the same
+      // contract that already governs textColor.
       // Scrim over content: translucency is the intent here, so alpha is
       // correct; direction just follows which pole is lighter.
       styles['--chat-overlay'] =
@@ -499,6 +539,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     starterPrompts,
     getStarterPrompts,
     capabilitiesPrompt,
+    greeting,
+    subGreeting,
+    assistantName,
     starterPromptsLayout: display?.starterPromptsLayout,
     context,
     inputPlugins,
@@ -507,7 +550,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     followUps,
     feedback,
     onFeedback,
-  }), [userId, apiBase, stableExtraHeaders, requestCredentials, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
+  }), [userId, apiBase, stableExtraHeaders, requestCredentials, model, systemPrompt, temperature, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, greeting, subGreeting, assistantName, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, feedback, onFeedback]);
 
   // Default launcher position respects iOS safe areas (home indicator /
   // rounded corners) — a fixed 24px bottom put the FAB under the home

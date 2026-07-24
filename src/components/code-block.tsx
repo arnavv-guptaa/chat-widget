@@ -112,12 +112,12 @@ export const CodeBlock = ({
     <CodeBlockContext.Provider value={{ code }}>
       <div
         className={cn(
-          "relative w-full overflow-hidden rounded-lg bg-[hsl(var(--chat-text)/0.03)] border border-[hsl(var(--chat-border))]",
+          "relative w-full overflow-hidden rounded-[10px] border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-surface))]",
           className
         )}
         {...props}
       >
-        <div className="relative max-h-96 overflow-y-auto">
+        <div className="relative max-h-56 overflow-y-auto">
           {highlighted ? (
             // Shiki's <pre class="shiki"> markup. Safe to inject: Shiki escapes
             // all token text while building the HTML, so nothing from `code` can
@@ -125,16 +125,16 @@ export const CodeBlock = ({
             // the widget surface shows through; token colors come from the
             // --shiki-light/-dark CSS vars.
             <div
-              className="code-block-shiki m-0 overflow-x-auto p-4 font-mono text-sm"
+              className="code-block-shiki m-0 overflow-x-auto p-3 font-mono text-[12.5px] leading-[1.55]"
               data-language={resolvedLanguage}
               dangerouslySetInnerHTML={{ __html: highlighted }}
             />
           ) : (
             <pre
-              className="m-0 overflow-x-auto p-4 font-mono text-sm text-[hsl(var(--chat-text))]"
+              className="m-0 overflow-x-auto p-3 font-mono text-[12.5px] leading-[1.55] text-[hsl(var(--chat-text))]"
               data-language={resolvedLanguage}
             >
-              <code className="font-mono text-sm">{code}</code>
+              <code className="font-mono text-[12.5px]">{code}</code>
             </pre>
           )}
           {children && (
