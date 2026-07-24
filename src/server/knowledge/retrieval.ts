@@ -54,6 +54,8 @@ export interface SourceUrlPart {
   sourceId: string;
   url: string;
   title?: string;
+  /** Original 1-indexed DOC references represented by this deduplicated source. */
+  citationIds?: number[];
 }
 
 /**
