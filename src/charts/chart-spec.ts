@@ -44,10 +44,15 @@ export const CHART_TYPES = [
 ] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
 
+/** Optional semantic color hint (hex). Renderer may honor it; the theme ramp wins otherwise. */
+const ChartColor = z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional();
+
 /** A single labelled numeric point. `value` MUST be finite (a chart of NaN is a lie). */
 const ChartPoint = z.object({
   label: z.string().min(1),
   value: z.number().finite(),
+  /** Optional semantic color (hex), mainly for pie/donut slices. Renderer may honor it; the theme ramp wins otherwise. */
+  color: ChartColor,
 });
 
 /**
@@ -57,7 +62,6 @@ const ChartPoint = z.object({
  * the renderer MAY honor, but the honesty ramp wins by default; it's mainly for
  * semantically meaningful colors (e.g. "this series is the SLA breach line").
  */
-const ChartColor = z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional();
 export const ChartSeriesSchema = z.object({
   name: z.string().min(1).optional(),
   points: z.array(ChartPoint).min(1).max(500),
@@ -126,19 +130,25 @@ export const ChartSpecSchema = z
     // series: type-dependent. Pie/donut/sparkline => single ChartSeries.
     //        stacked-bar/grouped-bar => array with shared labels (enforced).
     //        everything else => single or array.
-    series: SeriesField,
+    series: SeriesField.optional(),
     /** Pie/donut only: the whole the slices must sum to. */
     whole: WholeField,
     /** Scatter only (replaces `series`). */
     scatter: z.array(ScatterPoint).min(1).max(500).optional(),
   })
-  .passthrough() // lenient: strip-and-ignore unknown future fields on the validated output
+  // NOTE: no .passthrough() — z.object STRIPS unknown keys by default, which is
+  // the honesty contract: a model can't sneak `yMin: 990` (or any future axis
+  // override) through to the renderer.
   .superRefine((spec, ctx) => {
     // Type-specific field requirements + honesty guards.
     if (spec.type === 'scatter') {
       if (!spec.scatter || spec.scatter.length === 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scatter'], message: 'scatter charts require a `scatter` array' });
       }
+    } else if (!spec.series) {
+      // Every non-scatter type charts `series`; scatter is the only shape that
+      // replaces it (making the field optional above so scatter can parse).
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['series'], message: `${spec.type} charts require a \`series\`` });
     } else if (spec.type === 'pie' || spec.type === 'donut') {
       // Pie/donut: a single series; the whole is checked at render time against
       // the actual slice sum (the renderer refuses + shows the error card if the
@@ -179,6 +189,7 @@ export type ChartSpec = z.infer<typeof ChartSpecSchema>;
  * (pie/donut/sparkline) still get a 1-element array; callers index [0].
  */
 export function asSeriesArray(spec: ChartSpec): ChartSeries[] {
+  if (spec.series === undefined) return []; // scatter (uses `spec.scatter`) or a spec that failed the series guard
   return Array.isArray(spec.series) ? spec.series : [spec.series];
 }
 
