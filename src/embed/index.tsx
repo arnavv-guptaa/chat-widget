@@ -21,7 +21,7 @@
  * `window.MordnChat`, and supports a declarative `data-*` auto-init so the
  * simplest sites never touch JavaScript.
  *
- * The API mirrors the React `ChatWidgetConfig` 1:1 (issue #192): whatever a
+ * The API mirrors the React `ChatWidgetProps` 1:1 (issue #192): whatever a
  * developer can pass as props to `<ChatWidget>` they can pass to
  * `MordnChat.init(...)`, so documentation and mental model stay unified across
  * the React and script-tag paths.
@@ -50,7 +50,6 @@
 
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { nanoid } from 'nanoid';
 import { ChatWidget, type ChatWidgetHandle, type ChatWidgetProps } from '../ChatWidget';
 
 // ── Build-time defines ───────────────────────────────────────────────────────
@@ -80,28 +79,11 @@ declare const __MORDN_WIDGET_VERSION__: string;
 
 // ── Public config surface ────────────────────────────────────────────────────
 /**
- * Config accepted by {@link MordnChat.init}. This is the React `ChatWidget`
- * prop surface (`ChatWidgetProps`, which itself extends `ChatWidgetConfig` and
- * adds `agentId` / `apiBase` / `extraHeaders` / `className`) with two changes
- * for the embed context:
- *
- *  - `userId` is OPTIONAL here. In a React app the host supplies the id from its
- *    auth session; a static docs site has no session, so when it is omitted we
- *    mint a stable anonymous id (see {@link resolveUserId}). The server is still
- *    the identity boundary — this id is only for client-side conversation
- *    scoping, exactly like the React path (see the security note in README).
- *  - Two embed-only fields are added: `target` and `cssUrl`.
- *
- * Everything else passes through to `<ChatWidget>` unchanged — 1:1 with the
- * documented React props, so there is a single config vocabulary to learn.
+ * Config accepted by {@link MordnChat.init}. It mirrors the clean-break React
+ * `ChatWidgetProps` surface and adds only the embed-specific `target` and
+ * `cssUrl` fields. Identity and agent selection are resolved by bootstrap.
  */
-export interface MordnChatConfig extends Omit<ChatWidgetProps, 'userId' | 'ref'> {
-  /**
-   * Client-side user id. OPTIONAL for the embed: omit it on anonymous docs
-   * sites and a persistent `anon-…` id is generated and reused across visits.
-   */
-  userId?: string;
-
+export interface MordnChatConfig extends Omit<ChatWidgetProps, 'ref'> {
   /**
    * CSS selector for an existing element to mount INTO (e.g. `"#chat"`). When
    * given, the widget renders inside that element — natural for the `inline` /
@@ -213,59 +195,6 @@ function injectStyles(cssUrl?: string): void {
   document.head.appendChild(link);
 }
 
-// ── Anonymous identity ───────────────────────────────────────────────────────
-// Docs visitors are anonymous — there is no auth session to source a user id
-// from. To keep a visitor's conversation history coherent across page loads we
-// mint ONE persistent id and reuse it. This id is purely a client-side scoping
-// key (same role as the React `userId`); the server remains the real identity
-// boundary and must not trust it (see README security note).
-
-// Kept in sync with clearChatStorage's sign-out sweep (chat-storage-context
-// matches on this prefix) — the anon id IS chat identity and must not survive
-// a blanket sign-out clear.
-const ANON_ID_KEY = 'mordn-chat-anon-id';
-
-/**
- * Return the id to scope this visitor's conversations to. Prefers an explicit
- * `userId` (a docs site with real auth can still pass one). Otherwise reuses a
- * persisted anonymous id, generating and storing a new `anon-…` id on first
- * visit. All localStorage access is guarded: Safari private mode, disabled
- * storage, and quota errors throw on access, so we fall back to a fresh
- * per-session id rather than crashing the whole widget.
- *
- * Scoped PER AGENT: two agents embedded on one origin (product docs + billing
- * help) must not share one anonymous identity — the id flows into the
- * (agent, user) browser-cache scope and into X-User-Id, so a shared id bleeds
- * conversation/memory scope across agent boundaries. Visitors minted before
- * per-agent scoping are migrated (legacy global id copied into the scoped
- * key) so they keep their server-side history instead of being silently
- * re-anonymised.
- */
-function resolveUserId(explicit?: string, agentId?: string): string {
-  if (explicit) return explicit;
-
-  const key = agentId ? `${ANON_ID_KEY}:${agentId}` : ANON_ID_KEY;
-
-  try {
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    if (agentId) {
-      const legacy = window.localStorage.getItem(ANON_ID_KEY);
-      if (legacy) {
-        window.localStorage.setItem(key, legacy);
-        return legacy;
-      }
-    }
-    const fresh = `anon-${nanoid()}`;
-    window.localStorage.setItem(key, fresh);
-    return fresh;
-  } catch {
-    // Storage unavailable/blocked — degrade to an ephemeral id. History won't
-    // persist across reloads, but the widget still works this session.
-    return `anon-${nanoid()}`;
-  }
-}
-
 // ── Shiki CDN wiring (DOCS_CONTRACT §6) ──────────────────────────────────────
 /**
  * Point the sibling highlighting loader at a CDN copy of shiki. In a bundler the
@@ -325,19 +254,14 @@ function init(config: MordnChatConfig = {} as MordnChatConfig): MordnChatInstanc
   ensureShikiUrl();
   injectStyles(config.cssUrl);
 
-  const { target, cssUrl: _cssUrl, userId, ...rest } = config;
+  const { target, cssUrl: _cssUrl, ...rest } = config;
   const { el, owns } = resolveContainer(target);
 
   const handleRef = React.createRef<ChatWidgetHandle | null>();
   const root = createRoot(el);
 
-  // Pass the config through to <ChatWidget> 1:1. `ChatWidget` takes FLAT props
-  // (it is `forwardRef<ChatWidgetHandle, ChatWidgetProps>`, not a `config`
-  // prop), so we spread the remaining fields and layer on the resolved id.
-  const props: ChatWidgetProps = {
-    ...(rest as ChatWidgetProps),
-    userId: resolveUserId(userId, (rest as ChatWidgetProps).agentId),
-  };
+  // Pass the same clean-break public props through to the React component.
+  const props: ChatWidgetProps = rest as ChatWidgetProps;
   root.render(React.createElement(ChatWidget, { ...props, ref: handleRef }));
 
   active = { root, container: el, ownsContainer: owns, handleRef };
@@ -376,9 +300,7 @@ function instanceApi(): MordnChatInstance {
 // without hand-writing JSON.
 //
 // PRECEDENCE: `data-config` (parsed JSON) is the BASE; individual shortcut
-// attributes OVERLAY it (a `data-user-id` beats the `userId` inside
-// `data-config`). This lets a site keep one shared JSON blob and tweak a single
-// field per page via a shortcut.
+// attributes overlay it.
 
 /**
  * Read declarative config off the currently executing `<script>` element.
@@ -392,15 +314,9 @@ function readScriptConfig(script: HTMLElement | null): MordnChatConfig | null {
   const raw = script.getAttribute('data-config');
   const hasConfig = raw !== null;
 
-  // Ergonomic shortcuts. Each maps to a REAL config/prop key (verified against
-  // src/types.ts + src/ChatWidget.tsx): userId, agentId, apiBase, model are the
-  // fields a docs embed realistically sets inline; target/cssUrl are embed-only.
   const shortcuts: Partial<MordnChatConfig> = {};
   const map: Array<[attr: string, key: keyof MordnChatConfig]> = [
-    ['data-user-id', 'userId'],
-    ['data-agent-id', 'agentId'],
     ['data-api-base', 'apiBase'],
-    ['data-model', 'model'],
     ['data-target', 'target'],
     ['data-css-url', 'cssUrl'],
   ];

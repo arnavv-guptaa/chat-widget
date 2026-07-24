@@ -73,7 +73,7 @@ import { FollowUpSuggestions } from './follow-up-suggestions';
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
-import type { StarterPrompt, FollowUpMessage, ChatWidgetConfig } from '../types';
+import type { StarterPrompt, FollowUpMessage, ChatContext } from '../types';
 
 type Conversation = {
   id: string;
@@ -338,26 +338,25 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // The union is collapsed to a concrete object by `resolveChatContext` inside
   // the transport (see below) — i.e. AT SEND TIME, so 'auto'/function capture
   // reflects SPA navigation between messages.
-  const contextRef = useRef<ChatWidgetConfig['context']>(config?.context);
+  const contextRef = useRef<ChatContext | 'auto' | (() => ChatContext | Promise<ChatContext>) | undefined>(config?.context);
   useEffect(() => {
     contextRef.current = config?.context;
   }, [config?.context]);
 
-  // Request headers, same ref pattern as context above: the transport captures
-  // its options once, so a plain object here freezes whatever extraHeaders held
-  // at mount. Hosts that change headers per render (the playground sends its
-  // UNSAVED draft toggles this way, e.g. x-mordn-draft-follow-ups) were getting
-  // stale values on every request. `headers` accepts a resolvable — a function
-  // evaluated per request — so route it through a ref instead.
+  // Generic transport headers are resolved per request so rotating CSRF/session
+  // metadata does not require recreating the chat transport.
   const headersRef = useRef<Record<string, string>>({});
   useEffect(() => {
-    headersRef.current = {
-      'X-User-Id': config?.userId || '',
-      // Extra headers the host injects (e.g. the dashboard playground sends
-      // its unsaved draft model/system-prompt for an owner-authed preview).
-      ...(config?.extraHeaders ?? {}),
-    };
-  }, [config?.userId, config?.extraHeaders]);
+    headersRef.current = config?.headers ?? {};
+  }, [config?.headers]);
+
+  // The full canonical config is included only as request data. The production
+  // handler ignores it; an explicitly configured server preview resolver may
+  // validate and replace the published config with it.
+  const requestConfigRef = useRef(config?.requestConfig);
+  useEffect(() => {
+    requestConfigRef.current = config?.requestConfig;
+  }, [config?.requestConfig]);
 
   const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
     id: activeTabId || 'temp-id',
@@ -367,7 +366,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // are never stale — a static object froze the mount-time values.
       headers: () => headersRef.current,
       // Cookie mode for cross-origin apiBase deployments whose getUserId
-      // reads a session cookie (see ChatWidgetConfig.requestCredentials).
+      // reads a session cookie (see ChatWidgetProps.requestCredentials).
       credentials: config?.requestCredentials,
       // Attach first-class per-turn context (#162, #239) to the request body.
       // Read the RAW prop union from a ref (so the latest value is sent without
@@ -395,6 +394,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             id,
             messages,
             ...(resolvedContext !== undefined ? { context: resolvedContext } : {}),
+            config: requestConfigRef.current,
           },
         };
       },
@@ -493,22 +493,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             const formData = new FormData();
             formData.append('file', fileObj);
             formData.append('conversationId', activeTabId || 'default');
-            // Informational only — the server derives identity from its
-            // verified getChatUserId, never from this field. (It used to
-            // fall back to a 'demo-user' literal, which read like a trust
-            // path that doesn't exist.)
-            formData.append('userId', config?.userId ?? '');
-
-            // Same identity/extra headers as the chat transport and feedback
-            // POSTs — uploads were the one call site sending none, silently
-            // bypassing hosts that read them (e.g. the dashboard playground's
-            // draft-preview headers).
             const uploadResponse = await fetch(`${apiBase}/upload`, {
               method: 'POST',
-              headers: {
-                'X-User-Id': config?.userId || '',
-                ...(config?.extraHeaders ?? {}),
-              },
+              headers: config?.headers,
               body: formData,
               credentials: config?.requestCredentials
             });
@@ -600,11 +587,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
   // Centralized function to load a conversation's messages
   const loadConversation = async (conversationId: string) => {
-    if (!config?.userId) {
-      console.log('Cannot load conversation - no userId');
-      return;
-    }
-
     // Staleness guard: this load only gets to write state while it is BOTH the
     // latest load started (gen) and loading the tab that is still active
     // (activeTabIdRef). Otherwise a slow fetch for a previously-viewed tab
@@ -626,8 +608,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // cache:'no-store' keeps one user's history out of any intermediary
       // cache regardless of response-header handling.
       const response = await fetch(
-        `${apiBase}/history/${encodeURIComponent(conversationId)}?userId=${encodeURIComponent(config.userId)}&limit=${HISTORY_PAGE_SIZE}`,
-        { cache: 'no-store', credentials: config?.requestCredentials },
+        `${apiBase}/history/${encodeURIComponent(conversationId)}?limit=${HISTORY_PAGE_SIZE}`,
+        { cache: 'no-store', headers: config?.headers, credentials: config?.requestCredentials },
       );
       if (!isCurrent()) return;
       if (response.ok) {
@@ -665,7 +647,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const scrollViewportRef = useRef<HTMLElement | null>(null);
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlderRef.current || !hasMoreHistory || !oldestTsRef.current) return;
-    if (!config?.userId || !activeTabId) return;
+    if (!activeTabId) return;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
 
@@ -682,9 +664,9 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     try {
       const res = await fetch(
-        `${apiBase}/history/${encodeURIComponent(activeTabId)}?userId=${encodeURIComponent(config.userId)}` +
-          `&limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
-        { cache: 'no-store', credentials: config?.requestCredentials },
+        `${apiBase}/history/${encodeURIComponent(activeTabId)}` +
+          `?limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+        { cache: 'no-store', headers: config?.headers, credentials: config?.requestCredentials },
       );
       if (!res.ok || !isCurrent()) return;
       const data = await res.json();
@@ -714,7 +696,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMoreHistory, config?.userId, config?.apiBase, activeTabId, setMessages]);
+  }, [hasMoreHistory, config?.apiBase, config?.headers, config?.requestCredentials, activeTabId, setMessages]);
 
   // Tab management functions
   // Generate unique tab ID with better collision avoidance
@@ -865,15 +847,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
   const fetchConversations = async () => {
     if (historyLoaded) return; // Don't reload if already loaded
-    if (!config?.userId) {
-      return; // Wait for real userId
-    }
 
     setLoadingHistory(true);
     try {
       const response = await fetch(
-        `${apiBase}/history?userId=${encodeURIComponent(config.userId)}`,
-        { cache: 'no-store', credentials: config?.requestCredentials },
+        `${apiBase}/history`,
+        { cache: 'no-store', headers: config?.headers, credentials: config?.requestCredentials },
       );
 
       if (response.ok) {
@@ -894,17 +873,16 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   };
 
   useEffect(() => {
-    if (showHistory && !historyLoaded && config?.userId) {
+    if (showHistory && !historyLoaded) {
       fetchConversations();
     }
-  }, [showHistory, historyLoaded, config?.userId]);
+  }, [showHistory, historyLoaded]);
 
-  // Load conversations on component mount (only when we have a userId)
   useEffect(() => {
-    if (!historyLoaded && config?.userId) {
+    if (!historyLoaded) {
       fetchConversations();
     }
-  }, [historyLoaded, config?.userId]);
+  }, [historyLoaded]);
 
   // Note: Message loading is now handled in switchToTab function
   // useChat will automatically manage messages when activeTabId changes
@@ -1045,14 +1023,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const hasLoadedInitialMessages = useRef(false);
   useEffect(() => {
     if (hasLoadedInitialMessages.current) return; // Only run once
-    if (!config?.userId) return; // Wait for userId
-    // Wait for a complete (agent, user) identity before consuming the one-shot
-    // guard. Otherwise, if agentId arrives AFTER userId, the provisional
-    // null-phase clean tab would consume this ref and the restored tab (swapped
-    // in once the real prefix lands) would render with no messages. A
-    // host-pinned conversation is exempt: there is no restore to wait for, and
-    // pinned hosts may legitimately run without an agentId (no persistence).
-    if (!storageKeyPrefix && !id) return;
     if (!activeTabId) return; // Wait for activeTabId to be set
 
     // Load the conversation messages, then flip isInitializing false. This
@@ -1066,7 +1036,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setIsInitializing(false);
       }
     })();
-  }, [config?.userId, activeTabId, storageKeyPrefix, id]);
+  }, [activeTabId, storageKeyPrefix, id]);
 
   // Handle state updates when active tab changes
   // Messages are loaded in switchToTab function, not here
@@ -1180,18 +1150,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     regenerate?.();
   }, [regenerate]);
 
-  // Headers for the best-effort feedback POST. Mirror EXACTLY what the chat
-  // transport sends (see the useChat DefaultChatTransport above): the end-user
-  // id plus any host-injected extra headers. The Next.js handler mounted at
-  // apiBase forwards these to the hosted backend with its server-side Bearer
-  // token, so the widget reuses one auth mechanism instead of inventing another.
-  // Memoized so the memoized MessageItem list doesn't see a new object each render.
+  // Reuse only generic transport headers for the best-effort feedback POST.
   const feedbackHeaders = useMemo(
-    () => ({
-      'X-User-Id': config?.userId || '',
-      ...(config?.extraHeaders ?? {}),
-    }),
-    [config?.userId, config?.extraHeaders],
+    () => config?.headers ?? {},
+    [config?.headers],
   );
 
   // Follow-up chips (#134): the handler appends a persistent data part after
@@ -1264,8 +1226,6 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   }, [messages, status, config?.followUps]);
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
-    if (!config?.userId) return; // Wait for userId
-
     try {
       // Check if this conversation is already open in a tab
       const existingTab = tabs.find(tab => tab.id === selectedConversationId);

@@ -165,7 +165,9 @@ jobs:
           import '@mordn/chat-widget/styles.css';
 
           export default function Home() {
-            return <ChatWidget userId="smoke" agentId="smoke" />;
+            // 0.15.0 zero-prop bootstrap: identity and config come from the
+            // handler's /bootstrap endpoint, not browser props.
+            return <ChatWidget apiBase="/api/chat" />;
           }
           TSX
 

@@ -47,9 +47,9 @@ class HostedMemoryAdapter implements MemoryAdapter {
   constructor(
     public readonly userId: string,
     private readonly apiKey: string,
-    private readonly agentId: string,
     baseUrl: string,
     fetchImpl: typeof fetch,
+    private readonly agentId?: string,
   ) {
     this.base = baseUrl.replace(/\/$/, '');
     this.doFetch = fetchImpl;
@@ -70,7 +70,11 @@ class HostedMemoryAdapter implements MemoryAdapter {
       const res = await this.doFetch(`${this.base}/v1/memory/query`, {
         method: 'POST',
         headers: this.headers(true),
-        body: JSON.stringify({ agentId: this.agentId, query: opts.query, limit: opts.limit }),
+        body: JSON.stringify({
+          ...(this.agentId ? { agentId: this.agentId } : {}),
+          query: opts.query,
+          limit: opts.limit,
+        }),
       });
       if (!res.ok) return [];
       const data = (await res.json().catch(() => null)) as { memories?: Record<string, unknown>[] } | null;
@@ -86,7 +90,7 @@ class HostedMemoryAdapter implements MemoryAdapter {
       method: 'POST',
       headers: this.headers(true),
       body: JSON.stringify({
-        agentId: this.agentId,
+        ...(this.agentId ? { agentId: this.agentId } : {}),
         conversationId: opts.conversationId,
         messages: opts.messages,
       }),
@@ -94,7 +98,8 @@ class HostedMemoryAdapter implements MemoryAdapter {
   }
 
   async list(): Promise<Memory[]> {
-    const params = new URLSearchParams({ agentId: this.agentId });
+    const params = new URLSearchParams();
+    if (this.agentId) params.set('agentId', this.agentId);
     const res = await this.doFetch(`${this.base}/v1/memory?${params}`, { headers: this.headers() });
     if (!res.ok) return [];
     const data = (await res.json().catch(() => null)) as { memories?: Record<string, unknown>[] } | null;
@@ -109,7 +114,8 @@ class HostedMemoryAdapter implements MemoryAdapter {
   }
 
   async forgetAll(): Promise<void> {
-    const params = new URLSearchParams({ agentId: this.agentId });
+    const params = new URLSearchParams();
+    if (this.agentId) params.set('agentId', this.agentId);
     await this.doFetch(`${this.base}/v1/memory?${params}`, {
       method: 'DELETE',
       headers: this.headers(),
@@ -120,8 +126,11 @@ class HostedMemoryAdapter implements MemoryAdapter {
 export interface HostedMemoryOptions {
   /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */
   apiKey: string;
-  /** Agent namespace. Sent on every call; scoped server-side with the tenant + user. */
-  agentId: string;
+  /**
+   * Optional agent assertion for advanced multi-agent control planes. The
+   * standard hosted path omits it because the API key already selects the agent.
+   */
+  agentId?: string;
   /** API base URL. Defaults to the hosted service; override for self-host/local. */
   baseUrl?: string;
   /** Optional fetch override (testing). */
@@ -136,8 +145,7 @@ export interface HostedMemoryOptions {
  */
 export function createHostedMemory(options: HostedMemoryOptions): MemoryAdapterFactory {
   if (!options.apiKey) throw new Error('[chat-widget] createHostedMemory requires an apiKey');
-  if (!options.agentId) throw new Error('[chat-widget] createHostedMemory requires an agentId');
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const fetchImpl = withFetchTimeout(options.fetch ?? fetch, options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
-  return (userId) => new HostedMemoryAdapter(userId, options.apiKey, options.agentId, baseUrl, fetchImpl);
+  return (userId) => new HostedMemoryAdapter(userId, options.apiKey, baseUrl, fetchImpl, options.agentId);
 }

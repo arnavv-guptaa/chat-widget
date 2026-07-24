@@ -47,7 +47,7 @@ export interface MessageActionsProps {
   /** Widget `apiBase`; passed to `submitFeedback`. Falsy → network call skipped
    *  (headless / BYO) and only `onFeedback` fires. */
   feedbackApiBase?: string;
-  /** Headers mirroring the chat transport (`X-User-Id` + host extras) for the
+  /** Generic headers mirroring the chat transport for the
    *  best-effort feedback POST. */
   feedbackHeaders?: Record<string, string>;
   /** Credentials mode mirroring the chat transport (cross-origin cookie auth). */
