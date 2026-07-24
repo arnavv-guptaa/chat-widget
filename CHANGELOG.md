@@ -4,6 +4,9 @@ All notable changes to `@mordn/chat-widget` are documented here. The format foll
 
 ## 0.14.1 — Unreleased
 
+### Added
+- **Official sync GitHub Action + deploy-hook recipes** (#237): a composite action at `actions/sync` (`arnavv-guptaa/chat-widget/actions/sync@main`) wraps the docs-CI webhook (`POST /v1/knowledge/sync`) so a docs repo re-indexes on deploy with ≤10 lines of workflow. Inputs `api-key` (write-scoped tenant key, secret), `api-base` (default `https://api.mordn.com`), `source-ids`, `wait`, `timeout-seconds`; outputs `job-ids`. With `wait: 'true'` it polls each ingestion job (`GET /v1/knowledge/jobs/:jobId`) and fails the workflow on any errored job or timeout, emitting a `$GITHUB_STEP_SUMMARY` table. The key is only ever sent as a Bearer header, never printed. New docs page **`docs/keep-your-index-fresh.md`** covers the freshness ladder (scheduled `PATCH` cadence → deploy-triggered), the GitHub Actions example, Vercel / Netlify / Cloudflare Pages deploy-hook recipes, a plain-curl fallback, and secret hygiene (the tenant key is a full-write credential until the scoped `sync` key in #242 ships).
+
 ### Fixed
 - **Corrected the hosted API default base URL from `https://api.mordn.dev` to `https://api.mordn.com`.** `api.mordn.dev` is not a Mordn domain and does not serve the hosted API; every hosted client (`createHostedChatStore`, `createHostedStorage`, `createHostedConfig`, `createHostedFeedback`, knowledge, memory) that relied on the default was pointed at a dead host. Consumers passing an explicit `baseUrl` were unaffected.
 

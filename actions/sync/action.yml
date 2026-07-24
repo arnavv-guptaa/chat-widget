@@ -1,0 +1,269 @@
+name: 'Mordn — Sync knowledge base'
+description: >-
+  Trigger a re-index of your Mordn docs assistant after a docs deploy. POSTs the
+  docs-CI webhook (POST /v1/knowledge/sync) and, with wait:true, polls each
+  ingestion job to completion so a failed re-sync turns the workflow red.
+author: 'Mordn'
+branding:
+  icon: 'refresh-cw'
+  color: 'purple'
+
+inputs:
+  api-key:
+    description: >-
+      Tenant API key (mck_live_… / mck_test_…) with write scope. Store it as an
+      encrypted secret and pass it via `secrets` — NEVER hardcode it. It is sent
+      only as the `Authorization: Bearer` header and is never printed. Until the
+      scoped `sync` key ships (issue #242) this is a full-write credential —
+      treat it accordingly.
+    required: true
+  api-base:
+    description: >-
+      Base URL of the Mordn API. Defaults to the hosted service; override for
+      self-hosted / local deployments. No trailing slash needed.
+    required: false
+    default: 'https://api.mordn.com'
+  source-ids:
+    description: >-
+      Optional comma-separated source ids (e.g. `src_abc,src_def`) to re-sync
+      just those sources. Omit to re-sync every re-fetchable web source for the
+      key's agent.
+    required: false
+    default: ''
+  wait:
+    description: >-
+      When "true", poll every kicked job until it finishes and fail the step if
+      any job errors (or the timeout is hit). When "false" (default), fire the
+      webhook and return the job ids without waiting.
+    required: false
+    default: 'false'
+  timeout-seconds:
+    description: >-
+      Maximum seconds to wait for all jobs to finish when wait is "true".
+      Ignored when wait is "false".
+    required: false
+    default: '300'
+
+outputs:
+  job-ids:
+    description: 'Space-separated ingestion job ids that were kicked (may be empty if nothing was syncable).'
+    value: ${{ steps.sync.outputs.job-ids }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Trigger sync
+      id: sync
+      shell: bash
+      env:
+        # Passed via env (not the command line) so the key never appears in a
+        # process listing or the run's echoed command. Referenced only inside the
+        # curl header below.
+        MORDN_API_KEY: ${{ inputs.api-key }}
+        MORDN_API_BASE: ${{ inputs.api-base }}
+        MORDN_SOURCE_IDS: ${{ inputs.source-ids }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${MORDN_API_KEY}" ]; then
+          echo "::error::api-key is required (pass a write-scoped tenant key via a secret)."
+          exit 1
+        fi
+
+        # Strip any trailing slashes from the base so "${base}/v1/…" is clean.
+        base="${MORDN_API_BASE%/}"
+        if [ -z "${base}" ]; then
+          echo "::error::api-base is empty. Provide the Mordn API base URL."
+          exit 1
+        fi
+
+        # Build the request body. Empty source-ids -> {} (re-sync all web
+        # sources). A CSV -> {"sourceIds":["src_a","src_b"]}. jq builds the JSON
+        # so ids are safely quoted/escaped (never string-concatenated).
+        if [ -n "${MORDN_SOURCE_IDS}" ]; then
+          body="$(
+            jq -cn --arg csv "${MORDN_SOURCE_IDS}" \
+              '{sourceIds: ($csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0)))}'
+          )"
+        else
+          body='{}'
+        fi
+
+        echo "POST ${base}/v1/knowledge/sync"
+        # -sS: quiet but keep errors. Split body and status: write the response
+        # body to a file, capture the HTTP code on stdout. The key is in the
+        # header only. `|| true` keeps a curl transport failure (empty code)
+        # from tripping `set -e` before we can print a clean message.
+        resp_file="$(mktemp)"
+        code="$(
+          curl -sS -o "${resp_file}" -w '%{http_code}' \
+            -X POST "${base}/v1/knowledge/sync" \
+            -H "Authorization: Bearer ${MORDN_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            --data "${body}" || true
+        )"
+
+        # Any non-2xx (or an empty code from a transport failure) is fatal. Print
+        # the status + response body (which never contains the key) and fail.
+        case "${code}" in
+          2??) : ;;
+          *)
+            echo "::error::Sync request failed (HTTP ${code:-000})."
+            echo "Response body:"
+            cat "${resp_file}" || true
+            echo
+            rm -f "${resp_file}"
+            exit 1
+            ;;
+        esac
+
+        # Extract job ids. The API returns { "jobIds": [ ... ] }. jq -e fails if
+        # the field is missing/not an array, so a malformed 2xx is caught too.
+        if ! job_ids="$(jq -er '.jobIds | @tsv' "${resp_file}" 2>/dev/null)"; then
+          echo "::error::Response did not contain a jobIds array."
+          echo "Response body:"
+          cat "${resp_file}" || true
+          echo
+          rm -f "${resp_file}"
+          exit 1
+        fi
+        rm -f "${resp_file}"
+
+        # @tsv gives tab-separated ids; normalise to a single space-separated
+        # line for the output and for downstream iteration.
+        job_ids="$(printf '%s' "${job_ids}" | tr '\t' ' ')"
+
+        count=0
+        if [ -n "${job_ids}" ]; then
+          # shellcheck disable=SC2086
+          set -- ${job_ids}
+          count="$#"
+        fi
+        echo "Kicked ${count} sync job(s): ${job_ids:-<none>}"
+        echo "job-ids=${job_ids}" >> "${GITHUB_OUTPUT}"
+
+    - name: Wait for jobs
+      if: ${{ inputs.wait == 'true' }}
+      shell: bash
+      env:
+        MORDN_API_KEY: ${{ inputs.api-key }}
+        MORDN_API_BASE: ${{ inputs.api-base }}
+        MORDN_JOB_IDS: ${{ steps.sync.outputs.job-ids }}
+        MORDN_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        base="${MORDN_API_BASE%/}"
+        job_ids="${MORDN_JOB_IDS:-}"
+
+        summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+        {
+          echo "### Mordn knowledge sync"
+          echo
+          echo "| Job | Status | Progress | Stage |"
+          echo "| --- | --- | --- | --- |"
+        } >> "${summary}"
+
+        if [ -z "${job_ids}" ]; then
+          echo "No jobs were kicked (nothing syncable) — nothing to wait for."
+          echo "| _(none)_ | — | — | No re-fetchable sources were kicked. |" >> "${summary}"
+          exit 0
+        fi
+
+        # Validate the timeout is a positive integer; fall back to 300 otherwise.
+        case "${MORDN_TIMEOUT_SECONDS}" in
+          ''|*[!0-9]*) timeout_s=300 ;;
+          *) timeout_s="${MORDN_TIMEOUT_SECONDS}" ;;
+        esac
+        [ "${timeout_s}" -gt 0 ] 2>/dev/null || timeout_s=300
+
+        deadline=$(( $(date +%s) + timeout_s ))
+        poll_interval=5
+
+        # shellcheck disable=SC2086
+        set -- ${job_ids}
+        total_jobs="$#"
+
+        failed=0
+        # Track which jobs are still pending via a space-padded list we trim as
+        # each one settles. Quote-safe: ids are opaque tokens, never eval'd.
+        pending=" ${job_ids} "
+
+        while [ -n "$(printf '%s' "${pending}" | tr -d ' ')" ]; do
+          now="$(date +%s)"
+          if [ "${now}" -ge "${deadline}" ]; then
+            echo "::error::Timed out after ${timeout_s}s waiting for ${total_jobs} job(s) to finish."
+            for jid in ${pending}; do
+              echo "  - ${jid}: still pending at timeout"
+              echo "| \`${jid}\` | ⏱️ timeout | — | Did not finish within ${timeout_s}s. |" >> "${summary}"
+            done
+            failed=1
+            break
+          fi
+
+          still_pending=""
+          for jid in ${pending}; do
+            resp_file="$(mktemp)"
+            code="$(
+              curl -sS -o "${resp_file}" -w '%{http_code}' \
+                "${base}/v1/knowledge/jobs/${jid}" \
+                -H "Authorization: Bearer ${MORDN_API_KEY}" \
+                -H 'Accept: application/json' || true
+            )"
+
+            # A transient non-2xx (e.g. a brief 5xx, or a 404 before the job row
+            # is visible) shouldn't kill the run — keep the job pending and retry
+            # until the deadline. Only a terminal job status settles it.
+            case "${code}" in
+              2??) : ;;
+              *)
+                echo "  - ${jid}: status check returned HTTP ${code:-000}, retrying"
+                rm -f "${resp_file}"
+                still_pending="${still_pending} ${jid}"
+                continue
+                ;;
+            esac
+
+            status="$(jq -r '.status // "unknown"' "${resp_file}" 2>/dev/null || echo unknown)"
+            done_n="$(jq -r '.progress.done // 0' "${resp_file}" 2>/dev/null || echo 0)"
+            total_n="$(jq -r '.progress.total // 0' "${resp_file}" 2>/dev/null || echo 0)"
+            stage="$(jq -r '.progress.stage // ""' "${resp_file}" 2>/dev/null || echo '')"
+            err_msg="$(jq -r '.error // ""' "${resp_file}" 2>/dev/null || echo '')"
+            rm -f "${resp_file}"
+
+            case "${status}" in
+              done)
+                echo "  - ${jid}: done (${done_n}/${total_n})"
+                echo "| \`${jid}\` | ✅ done | ${done_n}/${total_n} | ${stage:-completed} |" >> "${summary}"
+                ;;
+              error)
+                echo "::error::Job ${jid} failed: ${err_msg:-unknown error}"
+                echo "| \`${jid}\` | ❌ error | ${done_n}/${total_n} | ${err_msg:-unknown error} |" >> "${summary}"
+                failed=1
+                ;;
+              queued|running)
+                still_pending="${still_pending} ${jid}"
+                ;;
+              *)
+                # Unknown/unexpected status — keep polling; it will either settle
+                # or hit the timeout branch above.
+                still_pending="${still_pending} ${jid}"
+                ;;
+            esac
+          done
+
+          pending="${still_pending}"
+          # Only sleep if there is still work AND time left.
+          if [ -n "$(printf '%s' "${pending}" | tr -d ' ')" ]; then
+            now="$(date +%s)"
+            [ "${now}" -lt "${deadline}" ] || continue
+            sleep "${poll_interval}"
+          fi
+        done
+
+        if [ "${failed}" -ne 0 ]; then
+          echo "::error::One or more sync jobs did not complete successfully."
+          exit 1
+        fi
+        echo "All ${total_jobs} sync job(s) completed successfully."

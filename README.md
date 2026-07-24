@@ -486,6 +486,39 @@ You can also run the suite programmatically with `runEvals` from
 
 ---
 
+## Keep your index fresh (re-sync on deploy)
+
+When your docs ship, the index should follow within a minute — **deploy at 2:00,
+correct answers by 2:01** — without waiting for a crawler. Put sources on a
+`daily`/`weekly` cadence, or re-index the moment a docs deploy succeeds.
+
+This repo ships an official composite GitHub Action —
+`arnavv-guptaa/chat-widget/actions/sync` — so a docs repo re-indexes on every
+merge with ≤10 lines of workflow:
+
+```yaml
+# .github/workflows/resync-docs.yml
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**']
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: arnavv-guptaa/chat-widget/actions/sync@main
+        with:
+          api-key: ${{ secrets.MORDN_CHAT_KEY }}
+          # wait: 'true'   # poll jobs and fail the run if any re-sync errors
+```
+
+Add `wait: 'true'` to gate the workflow on freshness (a failed re-index goes red
+in CI). The full freshness ladder, Vercel / Netlify / Cloudflare Pages
+deploy-hook recipes, a plain-curl fallback, and secret-hygiene guidance are in
+**[docs/keep-your-index-fresh.md](./docs/keep-your-index-fresh.md)**.
+
+---
+
 ## Exports
 
 ```ts
