@@ -460,3 +460,15 @@ if (failed > 0) {
   for (const f of failures) console.log(`  - ${f}`);
   process.exitCode = 1;
 }
+
+// Under vitest this file is collected by the *.test.ts glob; surface the
+// harness outcome as a real suite so vitest gates on it instead of erroring
+// with "no test suite found". Plain-node runs never hit this import.
+if (process.env.VITEST) {
+  const { test } = await import('vitest');
+  test(`page-context harness (${passed} passed, ${failed} failed)`, () => {
+    if (failed > 0) {
+      throw new Error(`page-context harness failures:\n${failures.join('\n')}`);
+    }
+  });
+}

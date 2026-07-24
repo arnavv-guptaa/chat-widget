@@ -41,6 +41,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit tests
+        # vitest was previously never run in CI, so "green" didn't cover the
+        # test suite at all — this is now a hard gate alongside typecheck.
+        run: npm test
+
       - name: Lint
         # Non-blocking for now: the repo declares a `lint` script but ships no
         # eslint dependency or config yet. Run it if eslint resolves, otherwise

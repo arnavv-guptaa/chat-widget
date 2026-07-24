@@ -61,10 +61,11 @@ describe('renderer design-system contract', () => {
   });
 
   it('shows an optional greeting-led empty state', () => {
-    // Greeting + assistantName are opt-in; when set they render a strong
+    // Greeting + subGreeting are opt-in; when set they render a strong
     // headline plus a faint sub line above the starter prompts.
+    // (assistantName is identity, deliberately not part of this block.)
     expect(interfaceTs).toContain('config?.greeting');
-    expect(interfaceTs).toContain('config?.assistantName');
+    expect(interfaceTs).toContain('config?.subGreeting');
     expect(interfaceTs).toContain('letterSpacing: \'-0.01em\'');
   });
 
