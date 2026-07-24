@@ -120,25 +120,43 @@ export interface ChatWidgetConfig {
    *
    * - **object** — a static/updating {@link ChatContext} you assemble yourself,
    *   e.g. `context={{ route: '/billing', plan: 'pro' }}`. Sent as-is.
-   * - **`'auto'`** — built-in page capture (#239): the widget snapshots
-   *   `{ url, path, title, hash }` from `window.location` / `document` on every
-   *   send. One-line page awareness for docs hosts, and the standard shape
-   *   #201's ask-about-this-page retrieval bias consumes. SSR-safe: during a
-   *   server render there is no page to read, so it contributes `{}` and the
-   *   real values are captured on the client at send time. Captures NO identity
-   *   data (no cookies, referrer, or user agent) — only the page location.
+   * - **`'auto'`** — built-in page capture (#239). On every send the widget
+   *   snapshots a DELIBERATELY NARROW page shape:
+   *     - `url`   — `origin + pathname` only (NO query string, NO fragment)
+   *     - `path`  — `pathname`
+   *     - `title` — `document.title`
+   *     - `hash`  — the fragment, but ONLY when it looks like a plain docs
+   *                 anchor (e.g. `#installation`); token- or router-state
+   *                 fragments are dropped.
+   *   The query string and non-anchor fragments are EXCLUDED because they
+   *   routinely carry password-reset tokens, OAuth `state`/`code`, signed-URL
+   *   signatures, tenant ids, and PII in search params — data that must not be
+   *   handed to a model provider by default (once a host enables
+   *   `trustClientContext`). It captures NO identity data either (no cookies,
+   *   referrer, or user agent). One-line page awareness for docs hosts, and the
+   *   standard shape #201's ask-about-this-page retrieval bias consumes.
+   *   SSR-safe: during a server render there is no page to read, so it
+   *   contributes `{}` and the real values are captured on the client at send
+   *   time.
    * - **function** — `() => ChatContext | Promise<ChatContext>`, called (and
-   *   awaited) per send. Use it to compose: spread the auto fields and add your
-   *   own, e.g. `context={() => ({ ...buildAutoPageContext(), docsVersion })}`.
-   *   If it throws/rejects the turn still sends (context degrades to `{}`); it
-   *   never blocks the message.
+   *   awaited) per send. This is the ONLY way to opt into richer page capture —
+   *   the `'auto'` string always uses the safe defaults above. Call
+   *   `buildAutoPageContext({ includeQuery: true })` to append the query string
+   *   (and add a `query` field), or `{ includeHash: true }` to take the raw
+   *   fragment; spread the result and add your own fields, e.g.
+   *   `context={() => ({ ...buildAutoPageContext(), docsVersion })}`. If it
+   *   throws/rejects the turn still sends (context degrades to `{}`); it never
+   *   blocks the message.
    *
    * SECURITY (unchanged by `'auto'` / the function form): the browser controls
-   * this value, so the server treats it as UNTRUSTED. It is only injected when
-   * the handler opts in — either via a server-side `getContext` (authoritative;
-   * can validate/merge/override) or `trustClientContext: true`. `'auto'` does
-   * NOT make the value trusted; it only saves you from hand-wiring the page
-   * fields. Never put secrets here.
+   * this value, so the server treats it as UNTRUSTED input. It is only injected
+   * when the handler opts in — either via a server-side `getContext`
+   * (authoritative; can validate/merge/override) or `trustClientContext: true`.
+   * `'auto'` does NOT make the value trusted; it only saves you from
+   * hand-wiring the safe page fields. Choosing `includeQuery` / `includeHash`
+   * ships more of the URL, so only enable them when you have confirmed the
+   * query/fragment on your pages is free of tokens and PII. Never put secrets
+   * here.
    */
   context?: ChatContext | 'auto' | (() => ChatContext | Promise<ChatContext>);
 
