@@ -111,18 +111,36 @@ export interface ChatWidgetConfig {
   assistantName?: string;
 
   /**
-   * First-class per-turn context (#162). A typed, structured object describing
-   * the user's live app state — current route, the record they're viewing,
-   * their plan/role, etc. — sent alongside every message and folded into the
-   * model's system prompt server-side so answers are aware of what the user is
-   * actually doing (not just generic Q&A).
+   * First-class per-turn context (#162, #239). Describes the user's live app
+   * state — current route, the record they're viewing, their plan/role, etc. —
+   * sent alongside every message and folded into the model's system prompt
+   * server-side so answers are aware of what the user is actually doing (not
+   * just generic Q&A). Accepts three shapes, resolved fresh at SEND TIME (so
+   * SPA navigation between messages is reflected):
    *
-   * SECURITY: the browser controls this value, so the server treats it as
-   * UNTRUSTED. It is only injected when the handler opts in — either via a
-   * server-side `getContext` (authoritative; can validate/merge/override) or
-   * `trustClientContext: true`. Never put secrets here.
+   * - **object** — a static/updating {@link ChatContext} you assemble yourself,
+   *   e.g. `context={{ route: '/billing', plan: 'pro' }}`. Sent as-is.
+   * - **`'auto'`** — built-in page capture (#239): the widget snapshots
+   *   `{ url, path, title, hash }` from `window.location` / `document` on every
+   *   send. One-line page awareness for docs hosts, and the standard shape
+   *   #201's ask-about-this-page retrieval bias consumes. SSR-safe: during a
+   *   server render there is no page to read, so it contributes `{}` and the
+   *   real values are captured on the client at send time. Captures NO identity
+   *   data (no cookies, referrer, or user agent) — only the page location.
+   * - **function** — `() => ChatContext | Promise<ChatContext>`, called (and
+   *   awaited) per send. Use it to compose: spread the auto fields and add your
+   *   own, e.g. `context={() => ({ ...buildAutoPageContext(), docsVersion })}`.
+   *   If it throws/rejects the turn still sends (context degrades to `{}`); it
+   *   never blocks the message.
+   *
+   * SECURITY (unchanged by `'auto'` / the function form): the browser controls
+   * this value, so the server treats it as UNTRUSTED. It is only injected when
+   * the handler opts in — either via a server-side `getContext` (authoritative;
+   * can validate/merge/override) or `trustClientContext: true`. `'auto'` does
+   * NOT make the value trusted; it only saves you from hand-wiring the page
+   * fields. Never put secrets here.
    */
-  context?: ChatContext;
+  context?: ChatContext | 'auto' | (() => ChatContext | Promise<ChatContext>);
 
   /**
    * Called when the user dismisses the widget. The widget renders its own

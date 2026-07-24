@@ -4,6 +4,9 @@ All notable changes to `@mordn/chat-widget` are documented here. The format foll
 
 ## 0.14.1 — Unreleased
 
+### Added
+- **`context: 'auto'` — built-in page-context capture (#239).** The `context` prop now also accepts `'auto'` and a `() => ChatContext | Promise<ChatContext>` function in addition to a plain object. `'auto'` snapshots `{ url, path, title, hash }` from the browser on **every send** (so SPA navigation between messages is reflected), is SSR-safe, works in the script-tag embed, and captures no identity data. The function form lets hosts compose the auto fields with their own via the new exported `buildAutoPageContext()` helper. The server trust boundary is unchanged: client context stays untrusted and is only injected when the handler opts in via `getContext` / `trustClientContext`. Part of #188.
+
 ### Fixed
 - **Corrected the hosted API default base URL from `https://api.mordn.dev` to `https://api.mordn.com`.** `api.mordn.dev` is not a Mordn domain and does not serve the hosted API; every hosted client (`createHostedChatStore`, `createHostedStorage`, `createHostedConfig`, `createHostedFeedback`, knowledge, memory) that relied on the default was pointed at a dead host. Consumers passing an explicit `baseUrl` were unaffected.
 

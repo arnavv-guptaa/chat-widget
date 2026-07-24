@@ -132,6 +132,48 @@ export default function Assistant({ userId }: { userId: string }) {
 > **server ignores it for authorization** — your `getChatUserId` is the only
 > source of identity. See the security note above.
 
+## Page context (`context`)
+
+Give the assistant awareness of what the user is looking at with the `context`
+prop. It is sent alongside every message and resolved **fresh on each send**, so
+on a docs SPA the next question always reflects the page the user navigated to.
+
+The fastest path is built-in page capture — one line, no wiring:
+
+```tsx
+// Snapshots { url, path, title, hash } from the browser on every send.
+<ChatWidget userId={userId} context="auto" />
+```
+
+Pass an object when you assemble the shape yourself, or a function to **compose**
+the auto fields with your own (the function may be async and runs per send):
+
+```tsx
+import { ChatWidget, buildAutoPageContext } from '@mordn/chat-widget';
+
+<ChatWidget
+  userId={userId}
+  context={() => ({
+    ...buildAutoPageContext(),        // url / path / title / hash
+    docsVersion: getActiveDocsVersion(), // your own fields
+  })}
+/>
+```
+
+`'auto'` is SSR-safe (during a server render there is no page to read, so it
+contributes nothing and the real values are captured on the client at send
+time — no hydration mismatch), works in the script-tag embed
+(`data-config='{"context":"auto"}'`), and captures **no identity data** — only
+the page location, never cookies, referrer, or user agent. A function that
+throws never blocks the message; the turn just sends without context.
+
+> **Trust boundary (unchanged by `'auto'`).** `context` is browser-controlled,
+> so the server treats it as **untrusted** and ignores it unless the handler
+> opts in — either a server-side `getContext` (authoritative; can
+> validate/merge/override) or `trustClientContext: true`. Choosing `'auto'`
+> saves you the wiring; it does **not** make the value trusted. Never put
+> secrets in it.
+
 ## Suggested follow-ups
 
 Turn on contextual next-step chips with one server-side option:
