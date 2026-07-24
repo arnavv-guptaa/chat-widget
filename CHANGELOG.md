@@ -2,12 +2,35 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## 0.14.1 — Unreleased
+## 0.14.5 — 2026-07-24
 
 ### Added
 - **`context: 'auto'` — built-in page-context capture (#239).** The `context` prop now also accepts `'auto'` and a `() => ChatContext | Promise<ChatContext>` function in addition to a plain object. `'auto'` snapshots a **safe** page shape on **every send** (so SPA navigation between messages is reflected): `url` = `origin + pathname` (**no query string, no fragment**), `path` = pathname, `title` = `document.title`, and `hash` **only when it is a plain docs anchor** (token- and router-state fragments are dropped). The query string and non-anchor fragments are excluded by design because they routinely carry reset tokens, OAuth `state`/`code`, signed-URL signatures, tenant ids, and PII in search params. It is SSR-safe, works in the script-tag embed, and captures no identity data (no cookies, referrer, or user agent). The function form lets hosts compose the auto fields with their own via the new exported `buildAutoPageContext()` helper, and explicitly opt into more of the URL with `buildAutoPageContext({ includeQuery, includeHash })`. The server trust boundary is unchanged: client context stays untrusted and is only injected when the handler opts in via `getContext` / `trustClientContext`. Part of #188.
 - **Official sync GitHub Action + deploy-hook recipes** (#237): a composite action at `actions/sync` (pin `uses:` to a full 40-char commit SHA — never `@main` — since a key is passed) wraps the docs-CI webhook (`POST /v1/knowledge/sync`) so a docs repo re-indexes **after a deploy goes live**. Inputs `api-key` (prefer a least-privilege `sync`-scoped key once chat-api PR #17 is deployed; else a write-scoped tenant key, secret), `api-base` (default `https://api.mordn.com`), `source-ids`, `wait`, `timeout-seconds` (default `600`, spans queue + run); outputs `job-ids`. With `wait: 'true'` it polls each returned ingestion job (`GET /v1/knowledge/jobs/:jobId`) — including any coalesced rerun from an overlapping deploy — and fails the workflow on any errored job, emitting a `$GITHUB_STEP_SUMMARY` table that reports a still-unfinished job at timeout distinctly (⏱️ pending vs ❌ error). The key is only ever sent as a Bearer header, never printed. New docs page **`docs/keep-your-index-fresh.md`** covers the freshness ladder (scheduled `PATCH` cadence → deployment-gated re-sync), deployment-gated GitHub Actions triggers (`workflow_run` / `deployment_status` / deploy-gated `push`), Vercel / Netlify / Cloudflare Pages deploy-hook recipes, a plain-curl fallback, overlap/coalesce semantics (safe to fire from every deploy; overlapping deploys are coalesced, never lost — with a compatibility note for chat-api without the claim/coalesce fix), and secret hygiene.
 
+
+### Fixed
+- CI now runs the vitest suite as a hard gate (it previously only covered typecheck/build/esm-check), and the `page-context` node harness registers as a real vitest suite when collected.
+
+## 0.14.4 — 2026-07-24
+
+### Fixed
+- **Wire tool `cleanup()` before setup-time throws (#231).** Tools that allocate resources in setup no longer leak them when a later tool's setup throws.
+
+## 0.14.3 — 2026-07-24
+
+### Changed
+- **Renderer design-system refresh (#233)** with open-by-default code previews, semantic renderer ramp, linked citation chips, and greeting-led empty state (`greeting` / `subGreeting`).
+
+### Fixed
+- Repaired a malformed `peerDependenciesMeta` brace in `package.json` introduced by the release stamp.
+
+## 0.14.2 — 2026-07-16
+
+### Fixed
+- **Removed `agentId` from `createHostedKnowledgeRetriever`** — the hosted knowledge API scopes by key, not agent.
+
+## 0.14.1 — 2026-07-15
 
 ### Fixed
 - **Corrected the hosted API default base URL from `https://api.mordn.dev` to `https://api.mordn.com`.** `api.mordn.dev` is not a Mordn domain and does not serve the hosted API; every hosted client (`createHostedChatStore`, `createHostedStorage`, `createHostedConfig`, `createHostedFeedback`, knowledge, memory) that relied on the default was pointed at a dead host. Consumers passing an explicit `baseUrl` were unaffected.
