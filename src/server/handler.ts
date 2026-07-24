@@ -366,14 +366,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // a DB transaction, a temp scope). The single guarded teardown below MUST
     // be registered before any subsequent awaited call that can throw, so a
     // setup-time failure (resolveModel / buildSystemPrompt / getContext /
-    // retrieval / memory / streamText construction) still tears the resource
-    // down instead of leaking it through the dispatch catch → 500 path.
+    // retrieval / memory) still tears the resource down instead of leaking it
+    // through the dispatch catch → 500 path.
     //
-    // `streamTimer` / `streamAbort` are declared with `let` further down and
-    // captured by closure; they are `undefined` until the optional stream-
-    // timeout block sets them, so the `if (streamTimer)` guard below is a no-op
-    // until then. `cleanedUp` makes this idempotent across every completion
-    // path (setup-throw / on-error / on-finish / client-abort).
+    // `streamTimer` / `streamAbort` are assigned by the optional stream-timeout
+    // block further down and captured by closure; they are `undefined` until
+    // then, so the `if (streamTimer)` guard below is a no-op until then.
+    // `cleanedUp` makes this idempotent across every completion path
+    // (setup-throw / on-error / on-finish / client-abort).
     let streamAbort: AbortController | undefined;
     let streamTimer: ReturnType<typeof setTimeout> | undefined;
     let cleanedUp = false;
@@ -393,17 +393,19 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // token) must still release the tool resource — register the listener now.
     request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
 
-    // From here through `streamText(...)` construction, several awaited calls
-    // can throw (resolveModel when no model is configured, buildSystemPrompt,
-    // getContext, retrieval/memory resolution, streamText itself). The stream
-    // lifecycle handlers (onError/onFinish) only own cleanup once `result`
-    // exists; a throw before that point would propagate to `dispatch`'s catch
-    // and return a 500 WITHOUT releasing `built.cleanup()` — leaking the
-    // per-request tool resource (MCP socket / DB tx / temp scope) on every
-    // setup failure. Wrap the whole setup region so a throw here runs the
-    // teardown guard before becoming a 500. `runCleanup` is idempotent, so the
-    // later stream-lifecycle calls are unaffected if setup succeeded.
+    // From here through the `system` join + `tools` merge (and the optional
+    // streamTimeoutMs assignment), several awaited calls can throw — resolveModel
+    // when no model is configured, buildSystemPrompt, retrieval namespace
+    // resolution / query, and the memory recall path. The stream lifecycle
+    // handlers (onError/onFinish) only own cleanup once `result` exists; a throw
+    // before that point would propagate to `dispatch`'s catch and return a 500
+    // WITHOUT releasing `built.cleanup()` — leaking the per-request tool
+    // resource on every setup failure. Wrap the setup region so a throw here
+    // runs the teardown guard before becoming a 500. The try ends BEFORE the
+    // stream-lifecycle state (finalUsage etc.) and `streamText()` are declared,
+    // so none of those declarations are trapped in the try's block scope.
     try {
+
     // Fetch hosted config once (best-effort — a failure must never break the
     // turn). The inner try/catch swallows BOTH a synchronous throw and an async
     // rejection, honouring the "throwing falls through to code/defaults"
@@ -619,6 +621,19 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       streamTimer = setTimeout(() => streamAbort!.abort(), streamTimeoutMs);
     }
 
+    // ── Setup-failure teardown ───────────────────────────────────────────────
+    // A throw inside the try above (model/system/retrieval/memory setup) must
+    // still release the per-request tool resource before the error becomes a 500
+    // in `dispatch`. The stream lifecycle handlers never ran (no `result`), so
+    // this is the only teardown path. Await so serverless runtimes don't freeze
+    // the cleanup mid-flight, then rethrow — the caller maps it to a 500 exactly
+    // as before, just without the leak. `runCleanup` is idempotent, so the later
+    // stream-lifecycle calls are unaffected when setup succeeded.
+    } catch (setupErr) {
+      await runCleanup('setup-error');
+      throw setupErr;
+    }
+
     // streamText's own onFinish is the only place usage + providerMetadata are
     // available (the UI-stream onFinish below exposes neither). Capture them
     // here so the host's onChatFinish hook gets real numbers, not undefined, and
@@ -730,16 +745,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       },
     });
-    } catch (setupErr) {
-      // A setup-time failure (model/system/retrieval/memory/streamText
-      // construction) must still release the per-request tool resource before
-      // the error becomes a 500 in `dispatch`. The stream lifecycle handlers
-      // never ran (no `result`), so this is the only teardown path. Await so
-      // serverless runtimes don't freeze the cleanup mid-flight, then rethrow
-      // — the caller maps it to a 500 exactly as before, just without the leak.
-      await runCleanup('setup-error');
-      throw setupErr;
-    }
 
     let mappedStreamError: string | undefined;
     const mapStreamError = (err: unknown): string => {
@@ -787,9 +792,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       },
       onFinish: async ({ messages: finalMessages, isAborted }) => {
         // Citations: stamp de-duplicated `source-url` parts for the retrieved
-        // chunks onto the assistant message so the existing <Sources> UI renders
-        // them and they survive reload (the store persists `parts` verbatim).
-        // Skips any url already present (the model may emit its own source-urls).
+        // chunks onto the assistant message so the Sources UI renders them and
+        // they survive reload (the store persists `parts` verbatim). Existing
+        // URLs keep one row while citationIds aliases are merged.
         if (citationChunks.length > 0) {
           injectCitationParts(finalMessages, citationChunks);
         }
@@ -1555,20 +1560,33 @@ function defaultMemoryBlock(ms: Memory[]): string {
 
 /**
  * Append de-duplicated `source-url` citation parts to the LAST assistant message
- * in `finalMessages`, mutating it in place. Skips any url already present so the
- * model's own source-urls aren't duplicated. The store persists `parts` verbatim
- * and the existing <Sources> UI renders `source-url` parts — zero client change.
+ * in `finalMessages`, mutating it in place. Existing URLs are not duplicated;
+ * their citationIds aliases are merged so original DOC numbers survive dedupe.
+ * The store persists `parts` verbatim and the Sources UI renders source-url parts.
  */
 function injectCitationParts(finalMessages: UIMessage[], chunks: RetrievedChunk[]): void {
   const last = [...finalMessages].reverse().find((m) => m.role === 'assistant');
   if (!last || !Array.isArray(last.parts)) return;
-  const existingUrls = new Set(
-    last.parts
-      .filter((p) => (p as { type?: string }).type === 'source-url')
-      .map((p) => (p as { url?: string }).url)
-      .filter(Boolean) as string[],
-  );
-  const newParts = toSourceParts(chunks).filter((p) => !existingUrls.has(p.url));
+  type CitationPart = { type?: string; url?: string; citationIds?: number[] };
+  const existingByUrl = new Map<string, CitationPart>();
+  for (const rawPart of last.parts) {
+    const part = rawPart as CitationPart;
+    if (part.type === 'source-url' && part.url) existingByUrl.set(part.url, part);
+  }
+  const newParts: ReturnType<typeof toSourceParts> = [];
+  for (const part of toSourceParts(chunks)) {
+    const existing = existingByUrl.get(part.url);
+    if (!existing) {
+      newParts.push(part);
+      continue;
+    }
+    // Preserve the original DOC references even when a provider/model already
+    // emitted the same URL. This keeps citation resolution correct across the
+    // dedupe boundary instead of silently dropping the alias IDs.
+    existing.citationIds = Array.from(
+      new Set([...(existing.citationIds ?? []), ...(part.citationIds ?? [])]),
+    );
+  }
   if (newParts.length === 0) return;
   // Prepend so citations render before/with the answer text.
   (last.parts as unknown[]).unshift(...newParts);
