@@ -488,33 +488,44 @@ You can also run the suite programmatically with `runEvals` from
 
 ## Keep your index fresh (re-sync on deploy)
 
-When your docs ship, the index should follow within a minute — **deploy at 2:00,
-correct answers by 2:01** — without waiting for a crawler. Put sources on a
-`daily`/`weekly` cadence, or re-index the moment a docs deploy succeeds.
+When your docs ship, the index should follow shortly after the new page is
+**actually live** — typically fresh within about a minute of the trigger for
+changed-page workloads (measure your own pipeline before quoting an SLO).
+Put sources on a `daily`/`weekly` cadence, or re-index the moment a docs deploy
+**goes live** — trigger on the deploy, not on the push, so the crawler never
+races your host's build and indexes the old page.
 
 This repo ships an official composite GitHub Action —
-`arnavv-guptaa/chat-widget/actions/sync` — so a docs repo re-indexes on every
-merge with ≤10 lines of workflow:
+`arnavv-guptaa/chat-widget/actions/sync`. Trigger it on a genuine post-deploy
+signal — here, the completion of your deploy workflow:
 
 ```yaml
 # .github/workflows/resync-docs.yml
+name: Re-sync docs
 on:
-  push:
-    branches: [main]
-    paths: ['docs/**']
+  workflow_run:
+    workflows: ["Deploy docs"]     # the name: of your deploy workflow
+    types: [completed]
 jobs:
   resync:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - uses: arnavv-guptaa/chat-widget/actions/sync@main
+      # Pin to an immutable commit SHA (never @main while a key is passed).
+      # Resolve it with: git ls-remote https://github.com/arnavv-guptaa/chat-widget <ref>
+      - uses: arnavv-guptaa/chat-widget/actions/sync@REPLACE_WITH_40_CHAR_COMMIT_SHA
         with:
-          api-key: ${{ secrets.MORDN_CHAT_KEY }}
-          # wait: 'true'   # poll jobs and fail the run if any re-sync errors
+          api-key: ${{ secrets.MORDN_SYNC_KEY }}   # prefer a sync-scoped key
+          wait: 'true'   # poll jobs (incl. any coalesced rerun) and fail on error
 ```
 
-Add `wait: 'true'` to gate the workflow on freshness (a failed re-index goes red
-in CI). The full freshness ladder, Vercel / Netlify / Cloudflare Pages
-deploy-hook recipes, a plain-curl fallback, and secret-hygiene guidance are in
+`wait: 'true'` gates the workflow on freshness (a failed re-index goes red in
+CI) and covers the coalesced rerun when deploys overlap. Pin the `uses:` ref to a
+full 40-char commit SHA — never `@main` — since a credential is passed (a release
+tag will be published; pin it by SHA per GitHub's hardening guidance). The full
+freshness ladder, other deployment-gated triggers (`deployment_status`, a
+deploy-gated `push` job), Vercel / Netlify / Cloudflare Pages deploy-hook recipes,
+overlap/coalesce semantics, and secret-hygiene guidance are in
 **[docs/keep-your-index-fresh.md](./docs/keep-your-index-fresh.md)**.
 
 ---

@@ -1,8 +1,10 @@
 name: 'Mordn — Sync knowledge base'
 description: >-
-  Trigger a re-index of your Mordn docs assistant after a docs deploy. POSTs the
-  docs-CI webhook (POST /v1/knowledge/sync) and, with wait:true, polls each
-  ingestion job to completion so a failed re-sync turns the workflow red.
+  Trigger a re-index of your Mordn docs assistant AFTER a docs deploy has gone
+  live. POSTs the docs-CI webhook (POST /v1/knowledge/sync) and, with wait:true,
+  polls each ingestion job to completion so a failed re-sync turns the workflow
+  red. Run this only once the new content is actually served at the public URL —
+  see docs/keep-your-index-fresh.md for deployment-gated trigger patterns.
 author: 'Mordn'
 branding:
   icon: 'refresh-cw'
@@ -11,11 +13,15 @@ branding:
 inputs:
   api-key:
     description: >-
-      Tenant API key (mck_live_… / mck_test_…) with write scope. Store it as an
-      encrypted secret and pass it via `secrets` — NEVER hardcode it. It is sent
-      only as the `Authorization: Bearer` header and is never printed. Until the
-      scoped `sync` key ships (issue #242) this is a full-write credential —
-      treat it accordingly.
+      Mordn API key for the docs agent. Prefer a least-privilege `sync`-scoped
+      key once your chat-api deployment supports it (chat-api PR #17); it can
+      only trigger re-indexing. Otherwise use a tenant key (mck_live_… /
+      mck_test_…) with write scope — a full-write credential, so scope it to the
+      one agent and treat it accordingly. Do NOT mint a `sync`-scoped key before
+      chat-api PR #17 is deployed: older servers treat an unknown scope as
+      read/write. Store it as an encrypted secret and pass it via `secrets` —
+      NEVER hardcode it. It is sent only as the `Authorization: Bearer` header
+      and is never printed.
     required: true
   api-base:
     description: >-
@@ -32,17 +38,25 @@ inputs:
     default: ''
   wait:
     description: >-
-      When "true", poll every kicked job until it finishes and fail the step if
-      any job errors (or the timeout is hit). When "false" (default), fire the
-      webhook and return the job ids without waiting.
+      When "true", poll every returned job id until it finishes and fail the
+      step if any job errors (or the timeout is hit). Every requested syncable
+      source contributes a job id whose terminal success guarantees the content
+      as-of-trigger-time is indexed, so waiting on the returned ids also covers a
+      coalesced rerun (an overlapping deploy is queued behind the active sync,
+      never dropped). When "false" (default), fire the webhook and return the job
+      ids without waiting.
     required: false
     default: 'false'
   timeout-seconds:
     description: >-
-      Maximum seconds to wait for all jobs to finish when wait is "true".
-      Ignored when wait is "false".
+      Maximum seconds to wait for ALL jobs to finish when wait is "true". This
+      budget spans BOTH the queue wait and the run: a coalesced rerun can sit
+      `queued` behind an in-flight sync before it starts, so size this for
+      queue + run, not run alone. A job still queued/running when the budget is
+      hit is reported as ⏱️ pending (distinct from ❌ error) and the step exits
+      non-zero. Ignored when wait is "false".
     required: false
-    default: '300'
+    default: '600'
 
 outputs:
   job-ids:
@@ -190,18 +204,27 @@ runs:
         # each one settles. Quote-safe: ids are opaque tokens, never eval'd.
         pending=" ${job_ids} "
 
-        while [ -n "$(printf '%s' "${pending}" | tr -d ' ')" ]; do
-          now="$(date +%s)"
-          if [ "${now}" -ge "${deadline}" ]; then
-            echo "::error::Timed out after ${timeout_s}s waiting for ${total_jobs} job(s) to finish."
-            for jid in ${pending}; do
-              echo "  - ${jid}: still pending at timeout"
-              echo "| \`${jid}\` | ⏱️ timeout | — | Did not finish within ${timeout_s}s. |" >> "${summary}"
-            done
-            failed=1
-            break
-          fi
+        # Remember the LAST status seen for each still-pending job so that, if we
+        # hit the timeout, we can report a job still `queued` (e.g. a coalesced
+        # rerun waiting behind an in-flight sync) distinctly from one still
+        # `running`. Stored in a temp dir, one file per job. Job ids are opaque
+        # `[A-Za-z0-9_-]` tokens; we sanitise defensively so the id can never
+        # escape the state dir as a path.
+        state_dir="$(mktemp -d)"
+        trap 'rm -rf "${state_dir}"' EXIT
+        last_status_file() {
+          printf '%s/%s' "${state_dir}" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_')"
+        }
+        for jid in ${pending}; do
+          printf 'pending' > "$(last_status_file "${jid}")"
+        done
 
+        # Poll at least once, then loop while jobs remain AND time is left. The
+        # timeout is evaluated AFTER each poll pass (not before it), and the sleep
+        # is capped to the time remaining — so a job that settles during the final
+        # wait is still observed on a last poll instead of being misreported as a
+        # timeout.
+        while : ; do
           still_pending=""
           for jid in ${pending}; do
             resp_file="$(mktemp)"
@@ -243,27 +266,63 @@ runs:
                 failed=1
                 ;;
               queued|running)
+                printf '%s' "${status}" > "$(last_status_file "${jid}")"
                 still_pending="${still_pending} ${jid}"
                 ;;
               *)
                 # Unknown/unexpected status — keep polling; it will either settle
-                # or hit the timeout branch above.
+                # or be reported as pending at the timeout.
                 still_pending="${still_pending} ${jid}"
                 ;;
             esac
           done
 
           pending="${still_pending}"
-          # Only sleep if there is still work AND time left.
-          if [ -n "$(printf '%s' "${pending}" | tr -d ' ')" ]; then
-            now="$(date +%s)"
-            [ "${now}" -lt "${deadline}" ] || continue
+
+          # All settled — done.
+          [ -n "$(printf '%s' "${pending}" | tr -d ' ')" ] || break
+
+          # Jobs remain: if we're out of time, report each still-pending job by
+          # its LAST observed status. A `queued` job is almost always a coalesced
+          # rerun that hadn't started yet — pending, not failed — so it gets a
+          # ⏱️ pending row distinct from a ❌ error. The step still exits non-zero
+          # (freshness wasn't confirmed within the budget); raise timeout-seconds,
+          # which spans queue + run.
+          now="$(date +%s)"
+          if [ "${now}" -ge "${deadline}" ]; then
+            echo "::error::Timed out after ${timeout_s}s: ${total_jobs} job(s) requested; some are still pending (this budget covers queue + run — a coalesced rerun can sit queued behind an in-flight sync)."
+            for jid in ${pending}; do
+              last="$(cat "$(last_status_file "${jid}")" 2>/dev/null || echo pending)"
+              case "${last}" in
+                queued)
+                  echo "  - ${jid}: still queued at timeout (likely a coalesced rerun waiting behind an active sync — raise timeout-seconds)"
+                  echo "| \`${jid}\` | ⏱️ pending (queued) | — | Still queued after ${timeout_s}s (queue + run). Likely a coalesced rerun; raise timeout-seconds. |" >> "${summary}"
+                  ;;
+                running)
+                  echo "  - ${jid}: still running at timeout (raise timeout-seconds)"
+                  echo "| \`${jid}\` | ⏱️ pending (running) | — | Still running after ${timeout_s}s (queue + run). Raise timeout-seconds. |" >> "${summary}"
+                  ;;
+                *)
+                  echo "  - ${jid}: still pending at timeout"
+                  echo "| \`${jid}\` | ⏱️ pending | — | Did not finish within ${timeout_s}s (queue + run). Raise timeout-seconds. |" >> "${summary}"
+                  ;;
+              esac
+            done
+            failed=1
+            break
+          fi
+
+          # Time remains: sleep, but never past the deadline, then poll again.
+          remaining=$(( deadline - now ))
+          if [ "${remaining}" -lt "${poll_interval}" ]; then
+            sleep "${remaining}"
+          else
             sleep "${poll_interval}"
           fi
         done
 
         if [ "${failed}" -ne 0 ]; then
-          echo "::error::One or more sync jobs did not complete successfully."
+          echo "::error::One or more sync jobs did not complete successfully (errored or still pending at timeout)."
           exit 1
         fi
         echo "All ${total_jobs} sync job(s) completed successfully."
