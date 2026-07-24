@@ -132,6 +132,75 @@ export default function Assistant({ userId }: { userId: string }) {
 > **server ignores it for authorization** — your `getChatUserId` is the only
 > source of identity. See the security note above.
 
+## Page context (`context`)
+
+Give the assistant awareness of what the user is looking at with the `context`
+prop. It is sent alongside every message and resolved **fresh on each send**, so
+on a docs SPA the next question always reflects the page the user navigated to.
+
+The fastest path is built-in page capture — one line, no wiring:
+
+```tsx
+// Snapshots a SAFE page shape from the browser on every send:
+//   url   → origin + pathname (no query string, no fragment)
+//   path  → pathname
+//   title → document.title
+//   hash  → only when it's a plain docs anchor (e.g. #installation)
+<ChatWidget userId={userId} context="auto" />
+```
+
+**What `'auto'` sends by default — and what it deliberately drops.** The query
+string and non-anchor fragments are **excluded**, because in the wild they
+routinely carry password-reset tokens, OAuth `state`/`code`, signed-URL
+signatures, tenant ids, and PII in search params. Once a host enables
+`trustClientContext` those values would flow straight to the model provider, so
+the default capture never includes them. A fragment is kept **only** when it
+looks like a plain in-page anchor (`#installation`, `#step-2.1`); anything
+containing `=`, `&`, `?`, or `/` (i.e. `#access_token=…&state=…` or a
+`#/app/users/42` hash-router path) is dropped. `'auto'` also captures **no
+identity data** — never cookies, `document.referrer`, or `navigator.userAgent`.
+
+Pass an object when you assemble the shape yourself, or a function to **compose**
+the auto fields with your own (the function may be async and runs per send):
+
+```tsx
+import { ChatWidget, buildAutoPageContext } from '@mordn/chat-widget';
+
+<ChatWidget
+  userId={userId}
+  context={() => ({
+    ...buildAutoPageContext(),        // safe: url (origin+path) / path / title / anchor-only hash
+    docsVersion: getActiveDocsVersion(), // your own fields
+  })}
+/>
+```
+
+**Opting into more of the URL.** If — and only if — you have confirmed the
+query string / fragment on your pages is free of tokens and PII, the **function
+form** can capture more. The bare `'auto'` string always uses the safe
+defaults; richer capture goes through `buildAutoPageContext(options)`:
+
+```tsx
+// includeQuery: append ?search to `url` AND add a separate `query` field.
+// includeHash:  take the fragment verbatim, bypassing the anchor heuristic.
+context={() => buildAutoPageContext({ includeQuery: true, includeHash: true })}
+```
+
+`'auto'` is SSR-safe (during a server render there is no page to read, so it
+contributes nothing and the real values are captured on the client at send
+time — no hydration mismatch) and works in the script-tag embed
+(`data-config='{"context":"auto"}'`). A function that throws never blocks the
+message; the turn just sends without context.
+
+> **Trust boundary (unchanged by `'auto'`).** `context` is browser-controlled,
+> so the server treats it as **untrusted** input and ignores it unless the
+> handler opts in — either a server-side `getContext` (authoritative; can
+> validate/merge/override) or `trustClientContext: true`. Choosing `'auto'`
+> saves you the wiring; it does **not** make the value trusted, and the safe
+> default is exactly why the query string / non-anchor fragment are stripped.
+> `includeQuery` / `includeHash` ship more of the URL — enable them only after
+> confirming those parts hold no tokens or PII. Never put secrets in `context`.
+
 ## Suggested follow-ups
 
 Turn on contextual next-step chips with one server-side option:

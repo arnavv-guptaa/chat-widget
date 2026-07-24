@@ -62,6 +62,14 @@ export type { CitationSource } from './components/citation-markers';
 export { remarkCitations, parseRefs, splitCitations } from './utils/citation-tokens';
 export type { ParsedRef, CitationSegment } from './utils/citation-tokens';
 
+// Built-in page-context capture for `context: 'auto'` (#239). Exported so hosts
+// can compose it in the function form of the `context` prop, e.g.
+// `context={() => ({ ...buildAutoPageContext(), docsVersion })}`. The bare
+// `'auto'` string uses safe defaults (no query string, anchor-only fragment);
+// pass `AutoPageContextOptions` to opt into the query string / raw fragment.
+export { buildAutoPageContext, isSafeAnchorHash } from './utils/page-context';
+export type { AutoPageContextOptions } from './utils/page-context';
+
 // Action result card (#166) — structured, false-completion-proof tool results
 export { ActionResultCard } from './components/action-result-card';
 export type { ActionResultCardProps } from './components/action-result-card';

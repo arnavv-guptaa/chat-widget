@@ -36,6 +36,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, PaperclipIcon, SquarePenIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { normalizeFollowUpSuggestions, resolveFollowUpCount } from '../utils/follow-ups';
+import { resolveChatContext } from '../utils/page-context';
 import {
   hasRenderableAssistantContent,
   messagesForTranscript,
@@ -72,7 +73,7 @@ import { FollowUpSuggestions } from './follow-up-suggestions';
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
-import type { StarterPrompt, FollowUpMessage } from '../types';
+import type { StarterPrompt, FollowUpMessage, ChatWidgetConfig } from '../types';
 
 type Conversation = {
   id: string;
@@ -330,10 +331,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // source of truth once a conversation persists.
   const initialMessagesRef = useRef<any[] | undefined>(initialMessages);
 
-  // First-class per-turn context (#162). Held in a ref so the transport's
+  // First-class per-turn context (#162, #239). Holds the RAW `context` prop
+  // union (object | 'auto' | function) in a ref so the transport's
   // prepareSendMessagesRequest always reads the latest value without
   // re-creating the chat (and resetting the stream) on every context change.
-  const contextRef = useRef<unknown>(config?.context);
+  // The union is collapsed to a concrete object by `resolveChatContext` inside
+  // the transport (see below) — i.e. AT SEND TIME, so 'auto'/function capture
+  // reflects SPA navigation between messages.
+  const contextRef = useRef<ChatWidgetConfig['context']>(config?.context);
   useEffect(() => {
     contextRef.current = config?.context;
   }, [config?.context]);
@@ -364,9 +369,17 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // Cookie mode for cross-origin apiBase deployments whose getUserId
       // reads a session cookie (see ChatWidgetConfig.requestCredentials).
       credentials: config?.requestCredentials,
-      // Attach first-class per-turn context (#162) to the request body. Read
-      // from a ref so the latest context is sent without re-creating the chat.
-      // When `context` is undefined it serialises away — zero overhead.
+      // Attach first-class per-turn context (#162, #239) to the request body.
+      // Read the RAW prop union from a ref (so the latest value is sent without
+      // re-creating the chat) and collapse it to a concrete object HERE, at send
+      // time, via resolveChatContext: 'auto' → live page capture, function →
+      // called/awaited (degrades to {} on throw), object → as-is. Resolving at
+      // send time is what makes 'auto'/function reflect SPA route changes
+      // between messages. When it resolves to undefined we omit `context`
+      // entirely so it serialises away — zero overhead, same as before.
+      //
+      // The AI SDK awaits prepareSendMessagesRequest (it may return a Promise),
+      // so an async resolver here is supported and does not block anything else.
       //
       // CRITICAL: the callback receives `id` and `messages` as SEPARATE fields,
       // NOT inside `body` (which is only the optional custom-body object, usually
@@ -374,9 +387,17 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       // we must explicitly include `id` and `messages`, or the server receives
       // `{}` and rejects with "Missing conversation id". (Default transport adds
       // these for you; once you override prepareSendMessagesRequest you own them.)
-      prepareSendMessagesRequest: ({ id, messages, body }) => ({
-        body: { ...body, id, messages, context: contextRef.current },
-      }),
+      prepareSendMessagesRequest: async ({ id, messages, body }) => {
+        const resolvedContext = await resolveChatContext(contextRef.current);
+        return {
+          body: {
+            ...body,
+            id,
+            messages,
+            ...(resolvedContext !== undefined ? { context: resolvedContext } : {}),
+          },
+        };
+      },
     }),
     // Human-in-the-loop tool approval: once the user has answered all pending
     // approval requests on the last assistant message, automatically send the
