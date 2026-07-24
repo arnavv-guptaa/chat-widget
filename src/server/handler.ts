@@ -361,6 +361,23 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // configured) are merged in later, after namespaces are resolved.
     const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
 
+    // ── Hoisted setup state: declared here (before the try), assigned inside it ──
+    // These are the setup-region values that the post-try streamText({...}) call
+    // and the uiStream onFinish block must read. Declaring them OUTSIDE the try
+    // (and assigning inside) keeps them in scope after the catch, so a setup
+    // throw → runCleanup('setup-error') → rethrow never traps them in the try's
+    // block scope (the original #231 bug). `undefined`/null until the try assigns.
+    let model: LanguageModel | undefined;
+    let modelLabel: string | { modelId?: string } | undefined;
+    let followUpConfig: ServerFollowUpConfig | null = null;
+    let resolvedMaxOutputTokens: number | undefined;
+    let citationChunks: RetrievedChunk[] = [];
+    let memoryAdapter: MemoryAdapter | null = null;
+    let memoryEnabled = false;
+    let memoryOrgId: string | undefined;
+    let system = '';
+    let tools: ToolSet = {};
+
     // ── Teardown guard: wired the instant the per-request resource exists ──
     // `buildTools` may allocate a resource that needs cleanup (an MCP socket,
     // a DB transaction, a temp scope). The single guarded teardown below MUST
@@ -422,11 +439,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       : null;
 
     // Model: code option > hosted > throw.
-    const model = await resolveModel(ctx, hosted?.model);
+    model = await resolveModel(ctx, hosted?.model);
     // String label of the model for persistence (the `model` column). A
     // LanguageModel is either a gateway string ("anthropic/claude-…") or a
     // provider object exposing `.modelId`.
-    const modelLabel =
+    modelLabel =
       typeof model === 'string' ? model : (model as { modelId?: string }).modelId;
 
     // Suggested follow-ups: explicit code config > published hosted config > off.
@@ -437,7 +454,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       hosted?.appearance && typeof hosted.appearance === 'object' && !Array.isArray(hosted.appearance)
         ? (hosted.appearance as Record<string, unknown>).followUps
         : undefined;
-    const followUpConfig = resolveFollowUps(
+    followUpConfig = resolveFollowUps(
       hosted?.followUps ?? normalizeSerializedFollowUpConfig(appearanceFollowUps),
     );
 
@@ -445,7 +462,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // via /v1/config) > undefined (provider default). Passing the model's true
     // limit stops long answers truncating at a low default. Guard against a
     // bad/zero value so we never send an invalid cap.
-    const resolvedMaxOutputTokens =
+    resolvedMaxOutputTokens =
       typeof maxOutputTokensOption === 'number' && maxOutputTokensOption > 0
         ? maxOutputTokensOption
         : typeof hosted?.maxOutputTokens === 'number' && hosted.maxOutputTokens > 0
@@ -500,7 +517,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let retrievalSystem = '';
     let retrievalTools: ToolSet = {};
     // Chunks gathered for citation emission (auto-inject + tool results).
-    const citationChunks: RetrievedChunk[] = [];
+    citationChunks = [];
     const wantCitations = retrieval ? retrieval.citations !== false : false;
 
     if (retrieval) {
@@ -541,10 +558,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     }
 
     // ── Memory: retrieve BEFORE generation (hot path; fail-soft + timeout) ──
-    let memoryAdapter: MemoryAdapter | null = null;
+    memoryAdapter = null;
     let memorySystem = '';
-    let memoryEnabled = false;
-    let memoryOrgId: string | undefined;
+    memoryEnabled = false;
+    memoryOrgId = undefined;
     if (memory) {
       if (memory.isEnabledForUser) {
         // Consent gate fails CLOSED: if the host's check throws, disable memory
@@ -601,12 +618,12 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Fold retrieval + memory + context into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
-    const system = [baseSystem, RENDERING_SYSTEM, contextSystem, historySystem, retrievalSystem, memorySystem]
+    system = [baseSystem, RENDERING_SYSTEM, contextSystem, historySystem, retrievalSystem, memorySystem]
       .filter(Boolean)
       .join('\n\n');
 
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
-    const tools: ToolSet = { ...retrievalTools, ...(built.tools ?? {}) };
+    tools = { ...retrievalTools, ...(built.tools ?? {}) };
 
     // Optional wall-clock timeout for the stream. When `streamTimeoutMs` is set,
     // abort the stream after that budget (and on client-abort) so a hung/stalled
