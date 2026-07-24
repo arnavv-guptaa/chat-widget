@@ -73,7 +73,7 @@ import { FollowUpSuggestions } from './follow-up-suggestions';
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
-import type { StarterPrompt, FollowUpMessage, ChatWidgetConfig } from '../types';
+import type { StarterPrompt, FollowUpMessage, ChatContext } from '../types';
 
 type Conversation = {
   id: string;
@@ -338,7 +338,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // The union is collapsed to a concrete object by `resolveChatContext` inside
   // the transport (see below) — i.e. AT SEND TIME, so 'auto'/function capture
   // reflects SPA navigation between messages.
-  const contextRef = useRef<ChatWidgetConfig['context']>(config?.context);
+  const contextRef = useRef<ChatContext | 'auto' | (() => ChatContext | Promise<ChatContext>) | undefined>(config?.context);
   useEffect(() => {
     contextRef.current = config?.context;
   }, [config?.context]);
