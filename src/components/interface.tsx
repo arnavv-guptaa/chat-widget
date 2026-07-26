@@ -1474,8 +1474,13 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                     remains visually continuous. */}
                 <div className="p-2.5 pb-2" style={{ backgroundColor: 'hsl(var(--chat-background))' }}>
                   <div className="relative">
+                    {/* Centered via inset-y-0 + my-auto, NOT top-1/2/-translate-y-1/2:
+                        the translate utilities depend on @property-initialized
+                        --tw-* vars, which some host pages strip — leaving the icon
+                        pinned off-center (seen live on the demo). Auto margins
+                        need no custom properties. */}
                     <SearchIcon
-                      className="pointer-events-none absolute left-2.5 top-1/2 size-[13px] -translate-y-1/2 text-[hsl(var(--chat-text-faint))]"
+                      className="pointer-events-none absolute left-2.5 inset-y-0 my-auto size-[13px] text-[hsl(var(--chat-text-faint))]"
                       aria-hidden="true"
                     />
                     <input

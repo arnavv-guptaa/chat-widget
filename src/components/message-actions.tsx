@@ -154,8 +154,10 @@ export function MessageActions({
         "flex flex-col gap-1.5 -ml-1.5 transition-opacity duration-150",
         alwaysVisible
           // LAST message: in-flow (small top margin) so it never overlaps the
-          // composer sitting just below, and stays visible.
-          ? "mt-1.5 opacity-100"
+          // composer sitting just below. Hover/focus-revealed like every other
+          // message — a permanently visible icon row under the sources list
+          // read as stray "copy icons from the sources" (user feedback).
+          ? "mt-1.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
           // Other messages: ABSOLUTELY positioned in the gap below the message so
           // the hidden row adds NO height (it was inflating the assistant→user
           // gap). Reveals on hover/focus of the message group.
