@@ -71,4 +71,15 @@ jobs:
         # Actions OIDC environment (id-token: write granted above) and exchanges
         # the OIDC token for a short-lived publish credential. --provenance is
         # implied under OIDC but kept explicit for clarity.
-        run: npx -y npm@11.18.0 publish --access public --provenance
+        #
+        # Dist-tag: npm refuses to implicitly move `latest` to a version LOWER
+        # than the registry's current latest (how the v0.14.6 backport publish
+        # failed). Compare and pass an explicit tag: maintenance-line publishes
+        # get `maintenance`, forward publishes keep `latest`.
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          CUR="$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>/dev/null || echo 0.0.0)"
+          HIGHEST="$(printf '%s\n%s\n' "$PKG" "$CUR" | sort -V | tail -1)"
+          if [ "$HIGHEST" = "$PKG" ]; then DIST_TAG=latest; else DIST_TAG=maintenance; fi
+          echo "Publishing $PKG with --tag $DIST_TAG (registry latest: $CUR)"
+          npx -y npm@11.18.0 publish --access public --provenance --tag "$DIST_TAG"
