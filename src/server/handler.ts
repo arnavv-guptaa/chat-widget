@@ -825,8 +825,12 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // The one case we must NOT persist is an abort that produced no content
         // (stopped before the first token): that would leave an empty assistant
         // bubble in history. Guard on the turn actually having assistant output.
+        // Require actual assistant content on EVERY path, not just aborts: a
+        // finish that produced no parts (observed in production as a spurious
+        // second save ~5s after the real turn) must not persist an empty
+        // assistant bubble into history.
         const shouldPersist =
-          finalMessages.length > 0 && (!isAborted || hasAssistantContent(finalMessages));
+          finalMessages.length > 0 && hasAssistantContent(finalMessages);
         if (shouldPersist) {
           // Normalise token usage + gateway cost for this turn (best-effort —
           // returns null when there's nothing worth recording, and never throws).
