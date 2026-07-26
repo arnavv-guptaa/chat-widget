@@ -2,6 +2,13 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.14.6 — 2026-07-26
+
+### Fixed
+- Last-message copy/retry actions are hover-revealed (the always-visible row under the sources list read as stray icons).
+- History search icon centers without transform custom properties (was visibly misplaced on hosts that strip `@property` rules).
+- The handler never persists a contentless assistant turn (stops the spurious empty second save that left blank assistant bubbles in history; server-side guard shipped separately in chat-api#22).
+
 ## 0.14.5 — 2026-07-24
 
 ### Added
