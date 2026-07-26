@@ -2,7 +2,17 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## 0.15.0 — Unreleased
+## 0.15.1 — 2026-07-26
+
+### Added
+- Trusted in-transcript chart rendering: `mordn-chart`/`chart` fences render a validated ChartSpec as zero-dep SVG (#230/#248).
+
+### Fixed
+- Last-message copy/retry actions are hover-revealed (the always-visible row under the sources list read as stray icons).
+- History search icon centers without transform custom properties (was visibly misplaced on hosts that strip `@property` rules).
+- The handler never persists a contentless assistant turn (blank-bubble guard; pairs with chat-api#22).
+
+## 0.15.0 — 2026-07-25
 
 ### Breaking
 - `<ChatWidget />` now bootstraps published client configuration and an opaque browser-storage scope from `/api/chat/bootstrap`; browser `userId`, `agentId`, `widgetId`, model, prompt, temperature, and flattened appearance props are removed.
