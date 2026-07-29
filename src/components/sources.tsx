@@ -104,16 +104,22 @@ function sourceHost(href: SourceProps["href"]): string | undefined {
  * as a normal <img>, no script/credential exchange. Non-http(s) sources (e.g.
  * kb://) return undefined and fall back to the file glyph.
  */
-function sourceFaviconUrl(href: SourceProps["href"]): string | undefined {
-  if (typeof href !== "string") return undefined;
+function sourceFaviconUrls(href: SourceProps["href"]): string[] {
+  if (typeof href !== "string") return [];
   try {
     const url = new URL(href);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return [];
     const host = url.hostname.replace(/^www\./, "");
-    if (!host) return undefined;
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`;
+    if (!host) return [];
+    return [
+      // The site's own favicon first: S2 only has icons for domains Google has
+      // indexed, and for anything else it 200s with a generic grey globe — so
+      // it can't be the primary source (seen live: every mordn.com row globed).
+      `${url.origin}/favicon.ico`,
+      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`,
+    ];
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -125,9 +131,12 @@ function sourceFaviconUrl(href: SourceProps["href"]): string | undefined {
  * names the source for assistive tech.
  */
 function SourceGlyph({ href }: { href: string | undefined }) {
-  const [failed, setFailed] = useState(false);
-  const faviconUrl = sourceFaviconUrl(href);
-  if (!faviconUrl || failed) {
+  // Index into the candidate chain (origin /favicon.ico → S2); onError steps to
+  // the next candidate, and running past the end falls back to the file glyph.
+  const [candidate, setCandidate] = useState(0);
+  const faviconUrls = sourceFaviconUrls(href);
+  const faviconUrl = faviconUrls[candidate];
+  if (!faviconUrl) {
     return (
       <span
         className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-[hsl(var(--chat-surface))] text-[hsl(var(--chat-text-faint))]"
@@ -141,11 +150,12 @@ function SourceGlyph({ href }: { href: string | undefined }) {
     <img
       alt=""
       aria-hidden="true"
+      key={faviconUrl}
       src={faviconUrl}
       width={16}
       height={16}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setCandidate((i) => i + 1)}
       className="h-[16px] w-[16px] shrink-0 rounded-full bg-[hsl(var(--chat-surface))] object-contain p-[1px]"
     />
   );

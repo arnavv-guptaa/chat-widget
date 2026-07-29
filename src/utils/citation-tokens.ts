@@ -5,6 +5,8 @@
  *   - `[ref: N]`          — explicit ref form (used by the docs/RAG system prompt
  *     and the `searchKnowledge` tool's `ref` field).
  *   - `[ref: N, ref: M]`  — comma-separated list inside one bracket.
+ *   - `[r: N]` / `[r:N]`  — abbreviated ref form (models shorten "ref" to "r"
+ *     unprompted; observed live on the demo agent).
  *   - `[N]`               — bare numeric form (the auto-retrieve context prompt
  *     says "cite e.g. [1]").
  *
@@ -73,7 +75,7 @@ export interface ParsedRef {
  * separated. Numbers are 1–999 (aSources list is never that long; this also
  * excludes years 1000–9999 which would otherwise false-positive as bare refs).
  */
-const REF_TOKEN_RE = /^(?:ref:\s*)?([1-9]\d{0,2})(?:\s*,\s*(?:ref:\s*)?([1-9]\d{0,2}))*$/i;
+const REF_TOKEN_RE = /^(?:r(?:ef)?:\s*)?([1-9]\d{0,2})(?:\s*,\s*(?:r(?:ef)?:\s*)?([1-9]\d{0,2}))*$/i;
 
 /**
  * A bracket that looks like a citation token. We match the whole bracket
@@ -81,7 +83,7 @@ const REF_TOKEN_RE = /^(?:ref:\s*)?([1-9]\d{0,2})(?:\s*,\s*(?:ref:\s*)?([1-9]\d{
  * Captures the inner content (group 1). Only brackets whose inner content fully
  * matches REF_TOKEN_RE are treated as citations — checked in `parseRefs`.
  */
-const BRACKET_RE = /\[((?:ref:\s*)?[1-9]\d{0,2}(?:\s*,\s*(?:ref:\s*)?[1-9]\d{0,2})*)\]/gi;
+const BRACKET_RE = /\[((?:r(?:ef)?:\s*)?[1-9]\d{0,2}(?:\s*,\s*(?:r(?:ef)?:\s*)?[1-9]\d{0,2})*)\]/gi;
 
 /** Upper bound on citation index — guards against a malformed/huge number. */
 const MAX_REF = 999;

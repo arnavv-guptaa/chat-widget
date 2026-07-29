@@ -774,6 +774,22 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // stream closes. Failures degrade silently (no chips / placeholder
         // title) and never turn a successful answer into an error.
         if (request.signal.aborted) return; // the SDK's abort chunk is terminal
+
+        // RAG citations for the LIVE message. Until now `source-url` parts were
+        // only stamped onto the PERSISTED copy (ui-stream onFinish →
+        // injectCitationParts), so the Sources card appeared after a reload but
+        // never on first render. Emit them on the stream too; the persist-time
+        // injection dedupes by URL, so nothing doubles up on save.
+        if (
+          citationChunks.length > 0 &&
+          finishReason !== 'error' &&
+          finishReason !== 'content-filter'
+        ) {
+          for (const part of toSourceParts(citationChunks)) {
+            followUpWriter?.write(part as unknown as Parameters<UIMessageStreamWriter['write']>[0]);
+          }
+        }
+
         const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle;
         if (
           (!followUpConfig && !generateTitleThisTurn) ||

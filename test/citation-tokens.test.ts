@@ -38,6 +38,17 @@ describe('parseRefs — bracket inner content', () => {
     ]);
   });
 
+  it('parses abbreviated r: form (models shorten "ref" unprompted)', () => {
+    expect(parseRefs('r:3')).toEqual([{ n: 3, raw: '3' }]);
+    expect(parseRefs('r: 5')).toEqual([{ n: 5, raw: '5' }]);
+    expect(parseRefs('r: 1, r: 5')).toEqual([
+      { n: 1, raw: '1' },
+      { n: 5, raw: '5' },
+    ]);
+    // But a non-ref word starting with r is still prose, not a citation.
+    expect(parseRefs('rev: 3')).toBeNull();
+  });
+
   it('rejects non-citation brackets (years, versions, words)', () => {
     expect(parseRefs('2024')).toBeNull(); // 4-digit year — too large to be a ref index
     expect(parseRefs('v2')).toBeNull(); // not numeric
