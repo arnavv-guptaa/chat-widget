@@ -1291,11 +1291,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   };
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // The popover is anchored to the HEADER, not the history button (see the
+  // comment at its render site), so it is NOT a descendant of dropdownRef —
+  // the outside-click check must test both, or clicks inside the panel (the
+  // search field, scrollbar, empty states) read as "outside" and dismiss it.
+  const historyPanelRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const inButton = dropdownRef.current?.contains(target) ?? false;
+      const inPanel = historyPanelRef.current?.contains(target) ?? false;
+      if (!inButton && !inPanel) {
         setShowHistory(false);
       }
     };
@@ -1485,7 +1493,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 header makes right-0 the widget's right edge, so the popover
                 extends leftward only into the header width. */}
             {showHistory && (
-              <div className="absolute right-3 top-full z-50 mt-1.5 overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
+              <div ref={historyPanelRef} className="absolute right-3 top-full z-50 mt-1.5 overflow-hidden rounded-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.07)] animate-in fade-in slide-in-from-top-1 duration-150" style={{
                 width: 'min(20rem, calc(100% - 1.5rem))',
                 backgroundColor: 'hsl(var(--chat-background))',
                 border: '1px solid hsl(var(--chat-border-soft))'
