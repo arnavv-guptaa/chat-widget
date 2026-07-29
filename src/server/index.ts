@@ -52,6 +52,7 @@ export type {
   HostedAgentConfig,
   FeedbackEvent,
   ServerFollowUpConfig,
+  ServerTitleConfig,
   BuiltTools,
   UploadPolicy,
   RetrievalConfig,

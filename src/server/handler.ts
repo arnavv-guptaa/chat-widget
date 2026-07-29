@@ -38,6 +38,7 @@ import {
   stepCountIs,
   streamText,
   type LanguageModel,
+  type LanguageModelUsage,
   type ModelMessage,
   type ToolSet,
   type UIMessage,
@@ -51,6 +52,7 @@ import type {
   ChatRequestContext,
   CreateChatHandlerOptions,
   ServerFollowUpConfig,
+  ServerTitleConfig,
   UploadPolicy,
 } from './handler-types';
 import type { RetrievedChunk } from './knowledge/types';
@@ -70,6 +72,7 @@ import {
   normalizeFollowUpSuggestions,
   resolveFollowUpCount,
 } from '../utils/follow-ups';
+import { generateThreadTitle } from './thread-title';
 import { BOOTSTRAP_PROTOCOL_VERSION, isAgentConfig, type AgentConfig, type PublishedAgentConfig } from '../config';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -203,6 +206,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     model: modelOption,
     maxOutputTokens: maxOutputTokensOption,
     followUps: followUpsOption,
+    titles: titlesOption,
     buildTools,
     store: storeFactory,
     storage: storageFactory,
@@ -275,6 +279,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const value = followUpsOption !== undefined ? followUpsOption : hostedValue;
     if (value === true) return {};
     if (!value || value.enabled === false) return null;
+    return value;
+  }
+
+  function resolveTitles(
+    hostedValue: boolean | ServerTitleConfig | null | undefined,
+  ): ServerTitleConfig | null {
+    // Same precedence as follow-ups (code > hosted), but the default is ON:
+    // placeholder titles are strictly worse and the extra call is tiny, so the
+    // feature works without any config. `false` at either level disables it.
+    const value = titlesOption !== undefined ? titlesOption : hostedValue;
+    if (value === undefined || value === null || value === true) return {};
+    if (value === false || value.enabled === false) return null;
     return value;
   }
 
@@ -379,8 +395,13 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // Ownership chokepoint: create the conversation for this user, or reject
     // (403) if the id belongs to someone else. Nothing is persisted on reject.
+    // Capture whether the thread is still unnamed HERE — the store's own
+    // saveTurn below stamps the placeholder prefix title, so ensure-time is the
+    // only reliable "first exchange" signal for smart title generation.
+    let conversationNeedsTitle = false;
     try {
-      await store.ensureConversation(conversationId);
+      const conversation = await store.ensureConversation(conversationId);
+      conversationNeedsTitle = conversation.title === 'New Chat';
     } catch (err) {
       if (err instanceof ConversationOwnershipError) {
         return new Response('Forbidden', { status: 403 });
@@ -435,6 +456,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let model: LanguageModel | undefined;
     let modelLabel: string | { modelId?: string } | undefined;
     let followUpConfig: ServerFollowUpConfig | null = null;
+    let titleConfig: ServerTitleConfig | null = null;
     let resolvedMaxOutputTokens: number | undefined;
     let citationChunks: RetrievedChunk[] = [];
     let memoryAdapter: MemoryAdapter | null = null;
@@ -499,6 +521,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // Suggested follow-ups: explicit code config > resolved canonical runtime > off.
     followUpConfig = resolveFollowUps(runtime?.followUps);
+
+    // Smart thread titles: explicit code config > resolved canonical runtime > ON.
+    titleConfig = resolveTitles(runtime?.titles);
 
     // Max output tokens: code option > hosted (the model's real catalog limit,
     // via /v1/config) > undefined (provider default). Passing the model's true
@@ -743,13 +768,15 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           followUpWriter?.write({ type: 'finish', finishReason });
         };
 
-        // Suggested follow-ups are a SECOND, post-response operation. The main
-        // text has fully streamed before this awaits, and the result is appended
-        // as a typed data part before the response stream closes. Failures
-        // degrade to no chips and never turn a successful answer into an error.
+        // Follow-ups and the smart thread title are SECOND, post-response
+        // operations. The main text has fully streamed before this awaits, and
+        // each result is appended as a typed data part before the response
+        // stream closes. Failures degrade silently (no chips / placeholder
+        // title) and never turn a successful answer into an error.
         if (request.signal.aborted) return; // the SDK's abort chunk is terminal
+        const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle;
         if (
-          !followUpConfig ||
+          (!followUpConfig && !generateTitleThisTurn) ||
           finishReason === 'error' ||
           finishReason === 'content-filter' ||
           !text.trim()
@@ -766,51 +793,122 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             parts: [{ type: 'text', text }],
           },
         ]);
-        const max = resolveFollowUpCount(followUpConfig.max);
+
+        // The two secondary calls are independent — run them concurrently so
+        // the slower one alone bounds how late the finish event lands. Each
+        // task catches its own failure and resolves null; usage/metadata merges
+        // happen after BOTH settle, on this callback's single thread.
+        const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
+          generateTitleThisTurn
+            ? generateThreadTitle({
+                model: model!,
+                messages: transcript,
+                timeoutMs: titleConfig!.timeoutMs,
+                abortSignal: request.signal,
+              }).catch((err) => {
+                console.warn(
+                  JSON.stringify({
+                    event: 'title.generate_failed',
+                    userId: ctx.userId,
+                    conversationId,
+                    error: err instanceof Error ? err.message : String(err),
+                  }),
+                );
+                return null;
+              })
+            : Promise.resolve(null);
+
+        const followUpTask: Promise<{
+          suggestions: string[];
+          usage?: LanguageModelUsage;
+          providerMetadata?: unknown;
+        } | null> = followUpConfig
+          ? (async () => {
+              const max = resolveFollowUpCount(followUpConfig!.max);
+              if (followUpConfig!.generate) {
+                return {
+                  suggestions: normalizeFollowUpSuggestions(
+                    await followUpConfig!.generate(transcript, ctx),
+                    max,
+                  ),
+                };
+              }
+              const generated = await generateFollowUpSuggestions({
+                model: model!,
+                messages: transcript,
+                max,
+                timeoutMs: followUpConfig!.timeoutMs,
+                abortSignal: request.signal,
+              });
+              return {
+                suggestions: generated.suggestions,
+                usage: generated.usage,
+                providerMetadata: generated.providerMetadata,
+              };
+            })().catch((err) => {
+              console.warn(
+                JSON.stringify({
+                  event: 'followups.generate_failed',
+                  userId: ctx.userId,
+                  conversationId,
+                  error: err instanceof Error ? err.message : String(err),
+                }),
+              );
+              return null;
+            })
+          : Promise.resolve(null);
 
         try {
-          let suggestions: string[];
-          if (followUpConfig.generate) {
-            suggestions = normalizeFollowUpSuggestions(
-              await followUpConfig.generate(transcript, ctx),
-              max,
-            );
-          } else {
-            const generated = await generateFollowUpSuggestions({
-              model,
-              messages: transcript,
-              max,
-              timeoutMs: followUpConfig.timeoutMs,
-              abortSignal: request.signal,
-            });
-            suggestions = generated.suggestions;
-            // Include the secondary call in this turn's token/cost record. The
-            // dashboard must not under-report spend just because the call powers
-            // UI guidance rather than visible answer text.
-            finalUsage = mergeLanguageModelUsage(finalUsage, generated.usage);
-            finalTotalUsage = mergeLanguageModelUsage(finalTotalUsage, generated.usage);
+          const [generatedTitle, followUpResult] = await Promise.all([titleTask, followUpTask]);
+
+          if (generatedTitle) {
+            // Include the secondary calls in this turn's token/cost record. The
+            // dashboard must not under-report spend just because these calls
+            // power UI chrome rather than visible answer text.
+            finalUsage = mergeLanguageModelUsage(finalUsage, generatedTitle.usage);
+            finalTotalUsage = mergeLanguageModelUsage(finalTotalUsage, generatedTitle.usage);
             finalProviderMetadata = mergeProviderMetadata(
               finalProviderMetadata,
-              generated.providerMetadata,
+              generatedTitle.providerMetadata,
             );
           }
-
-          if (suggestions.length > 0) {
-            followUpWriter?.write({
-              type: 'data-follow-ups',
-              id: 'follow-ups',
-              data: { suggestions },
-            });
+          if (generatedTitle?.title) {
+            // Persist first, then tell the client: if the rename fails, the
+            // open tab must not show a title that a reload would lose.
+            try {
+              await store.renameConversation(conversationId, generatedTitle.title);
+              followUpWriter?.write({
+                type: 'data-thread-title',
+                id: 'thread-title',
+                data: { title: generatedTitle.title },
+              });
+            } catch (err) {
+              console.warn(
+                JSON.stringify({
+                  event: 'title.rename_failed',
+                  userId: ctx.userId,
+                  conversationId,
+                  error: err instanceof Error ? err.message : String(err),
+                }),
+              );
+            }
           }
-        } catch (err) {
-          console.warn(
-            JSON.stringify({
-              event: 'followups.generate_failed',
-              userId: ctx.userId,
-              conversationId,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
+
+          if (followUpResult) {
+            finalUsage = mergeLanguageModelUsage(finalUsage, followUpResult.usage);
+            finalTotalUsage = mergeLanguageModelUsage(finalTotalUsage, followUpResult.usage);
+            finalProviderMetadata = mergeProviderMetadata(
+              finalProviderMetadata,
+              followUpResult.providerMetadata,
+            );
+            if (followUpResult.suggestions.length > 0) {
+              followUpWriter?.write({
+                type: 'data-follow-ups',
+                id: 'follow-ups',
+                data: { suggestions: followUpResult.suggestions },
+              });
+            }
+          }
         } finally {
           finishUiStream();
         }
