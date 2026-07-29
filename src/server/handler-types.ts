@@ -270,6 +270,22 @@ export interface ServerFollowUpConfig {
   ) => string[] | Promise<string[]>;
 }
 
+/**
+ * Smart thread titles: after a conversation's FIRST completed exchange, a small
+ * structured second call (same resolved model) names the thread. The title is
+ * persisted via `store.renameConversation` and appended to the assistant
+ * message as a `data-thread-title` UI part so the open tab renames live. The
+ * first-message-prefix placeholder remains until the generated title lands —
+ * and on any generation failure — so this only ever improves on the previous
+ * behaviour.
+ */
+export interface ServerTitleConfig {
+  /** Master switch. Default true when the object is provided. */
+  enabled?: boolean;
+  /** Timeout for the post-response generator. Default 5000ms. */
+  timeoutMs?: number;
+}
+
 export interface CreateChatHandlerOptions {
   // ── REQUIRED injection ───────────────────────────────────────────────────
 
@@ -316,6 +332,19 @@ export interface CreateChatHandlerOptions {
    * hosted dashboard setting. Default: off.
    */
   followUps?: boolean | ServerFollowUpConfig;
+
+  /**
+   * Smart thread titles: name a conversation from its first exchange with a
+   * small structured second call (same resolved model), replacing the
+   * first-message-prefix placeholder. The title is persisted through the store
+   * and pushed to the client as a `data-thread-title` part, so it never delays
+   * first-token streaming.
+   *
+   * Precedence: code > hosted config > ON. Unlike `followUps`, this defaults to
+   * enabled — pass `false` (in code or hosted config) to keep placeholder-only
+   * titles.
+   */
+  titles?: boolean | ServerTitleConfig;
 
   /**
    * Build the tool set for this request. Async and context-aware so tools can

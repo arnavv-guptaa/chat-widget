@@ -1156,6 +1156,27 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     [config?.headers],
   );
 
+  // Smart thread titles: after the first exchange the handler renames the
+  // conversation server-side and appends a persistent `data-thread-title` part
+  // to the assistant message. Adopt it for the owning tab, replacing the
+  // optimistic first-message-prefix placeholder. The part is persisted with the
+  // message, so this also re-applies harmlessly on history reload.
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (status !== 'ready' || !last || last.role !== 'assistant') return;
+    const dataPart = (last.parts ?? []).find(
+      (part) => (part as { type?: string }).type === 'data-thread-title',
+    ) as { data?: { title?: unknown } } | undefined;
+    const rawTitle = dataPart?.data?.title;
+    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+    if (!title) return;
+    setTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.id === activeTabId && tab.title !== title ? { ...tab, title } : tab,
+      ),
+    );
+  }, [messages, status, activeTabId]);
+
   // Follow-up chips (#134): the handler appends a persistent data part after
   // the assistant's text settles. Prefer that one-toggle, server-safe path; keep
   // the original host generator/static list as a backwards-compatible fallback.

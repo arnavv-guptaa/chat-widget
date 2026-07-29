@@ -15,6 +15,11 @@ export interface SerializableFollowUpConfig {
   timeoutMs?: number;
 }
 
+export interface SerializableTitleConfig {
+  enabled?: boolean;
+  timeoutMs?: number;
+}
+
 export interface SerializableMemoryConfig {
   enabled: boolean;
   /** Inject recalled memories before generation. */
@@ -31,6 +36,12 @@ export interface AgentRuntimeConfig {
   temperature?: number;
   maxOutputTokens?: number;
   followUps?: boolean | SerializableFollowUpConfig;
+  /**
+   * Smart thread titles: a lightweight post-response model call names the
+   * conversation after its first exchange. Default ON — pass `false` to keep
+   * the first-message-prefix placeholder titles.
+   */
+  titles?: boolean | SerializableTitleConfig;
   memory?: SerializableMemoryConfig;
 }
 
@@ -142,13 +153,23 @@ function validFollowUps(value: unknown): boolean {
   );
 }
 
+function validTitles(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    only(value, ['enabled', 'timeoutMs']) &&
+    optional(value.enabled, bool) &&
+    optional(value.timeoutMs, (candidate) => integerInRange(candidate, 1))
+  );
+}
+
 function validRuntime(value: unknown): value is AgentRuntimeConfig {
-  if (!isRecord(value) || !only(value, ['model', 'systemPrompt', 'temperature', 'maxOutputTokens', 'followUps', 'memory'])) return false;
+  if (!isRecord(value) || !only(value, ['model', 'systemPrompt', 'temperature', 'maxOutputTokens', 'followUps', 'titles', 'memory'])) return false;
   if (!nonEmptyString(value.model)) return false;
   if (!optional(value.systemPrompt, str)) return false;
   if (!optional(value.temperature, (v) => finite(v) && v >= 0 && v <= 2)) return false;
   if (!optional(value.maxOutputTokens, (v) => integerInRange(v, 1))) return false;
   if (!optional(value.followUps, (candidate) => typeof candidate === 'boolean' || validFollowUps(candidate))) return false;
+  if (!optional(value.titles, (candidate) => typeof candidate === 'boolean' || validTitles(candidate))) return false;
   return optional(
     value.memory,
     (candidate) =>
