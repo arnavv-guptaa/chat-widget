@@ -4,7 +4,7 @@ import { generateObject, type LanguageModel, type LanguageModelUsage } from 'ai'
 import { z } from 'zod';
 import type { FollowUpMessage } from '../types';
 
-export const DEFAULT_THREAD_TITLE_TIMEOUT_MS = 5_000;
+export const DEFAULT_THREAD_TITLE_TIMEOUT_MS = 10_000;
 /** Hard display cap — matches what conversation lists can render comfortably. */
 export const MAX_THREAD_TITLE_CHARS = 60;
 const MAX_TRANSCRIPT_CHARS = 4_000;
@@ -78,7 +78,12 @@ export async function generateThreadTitle(args: {
     system: THREAD_TITLE_SYSTEM_PROMPT,
     prompt: ['Title this conversation.', '<conversation>', transcript, '</conversation>'].join('\n'),
     temperature: 0.3,
-    maxOutputTokens: 64,
+    // Reasoning-by-default models (gemini-2.5-*, gpt-5-*) spend output budget
+    // on thinking tokens BEFORE the JSON: a tight cap (the original 64) makes
+    // them return nothing at all ("No object generated"). The visible title is
+    // still ~15 tokens; the headroom is for reasoning, and the timeout — not
+    // this cap — bounds the cost of a runaway generation.
+    maxOutputTokens: 2_000,
     maxRetries: 1,
     timeout:
       typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0
