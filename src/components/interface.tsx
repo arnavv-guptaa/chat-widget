@@ -561,18 +561,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     });
     // Model and webSearch are sent via transport's prepareSendMessagesRequest using refs
 
-    // Update tab title if this is the first message (title is still "New Chat")
-    const activeTab = tabs.find(tab => tab.id === activeTabId);
-    if (activeTab && activeTab.title === 'New Chat' && message.text) {
-      const newTitle = message.text.slice(0, 100);
-      setTabs(prevTabs =>
-        prevTabs.map(tab =>
-          tab.id === activeTabId
-            ? { ...tab, title: newTitle }
-            : tab
-        )
-      );
-    }
+    // No optimistic prefix title (removed): the tab stays "New Chat" until the
+    // server's generated thread title arrives as a data-thread-title part a few
+    // seconds after the first answer. Keeping the default is what lets the
+    // server retry naming on the next turn if generation ever fails.
 
     setInput('');
     // The sent message is no longer a draft.
