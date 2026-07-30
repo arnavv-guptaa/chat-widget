@@ -83,6 +83,14 @@ export async function generateThreadTitle(args: {
     // silently starves the JSON ("No object generated", seen live at 64). The
     // timeout is the cost bound.
     maxRetries: 1,
+    // These are trivial structured generations - reasoning adds seconds of
+    // thinking-token latency for zero quality gain, and the stream's finish
+    // event waits on this call. Explicitly request none/minimal; providers
+    // that don't know these options ignore them.
+    providerOptions: {
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+      openai: { reasoningEffort: 'minimal' },
+    },
     timeout:
       typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0
         ? args.timeoutMs
