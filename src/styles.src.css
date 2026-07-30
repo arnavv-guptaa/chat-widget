@@ -350,6 +350,14 @@
 }
 .chat-widget-container .is-assistant .chat-message-content > *:first-child { margin-top: 0; }
 .chat-widget-container .is-assistant .chat-message-content > *:last-child { margin-bottom: 0; }
+/* Trailing-margin trim. Streamdown's own root utility ([&>*:last-child]:mb-0)
+   loses to these scoped prose rules on specificity, so without this every
+   bubble ends with the last block's full bottom margin — and a document ending
+   in nested lists traps one trailing margin PER nesting level (margins cannot
+   collapse across <li>). Zeroing every last-child level ends the bubble flush. */
+.chat-widget-container .is-assistant .chat-message-content :is(p, ul, ol, blockquote, pre):last-child {
+  margin-bottom: 0;
+}
 
 /* Emphasis — medium (not heavy) bold, at full colour. */
 .chat-widget-container .is-assistant .chat-message-content strong {
