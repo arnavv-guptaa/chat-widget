@@ -87,9 +87,9 @@ describe('ChartBlock — line y-axis (the screenshot bug)', () => {
 });
 
 describe('ChartBlock — provenance + a11y', () => {
-  it('shows Model-generated when no source', () => {
+  it('shows no provenance label when no source (model-generated is a tautology in an assistant bubble)', () => {
     const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'x', series: { points: [{ label: 'a', value: 1 }] } }} />);
-    expect(container.querySelector('.chat-chart-provenance')?.textContent).toBe('Model-generated');
+    expect(container.querySelector('.chat-chart-provenance')).toBeNull();
   });
   it('shows Source: <x> when source is set', () => {
     const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'x', source: 'CRM', series: { points: [{ label: 'a', value: 1 }] } }} />);
