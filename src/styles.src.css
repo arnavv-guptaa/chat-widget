@@ -485,7 +485,20 @@
 .chat-widget-container .is-assistant .chat-message-content hr {
   border: none;
   border-top: 1px solid hsl(var(--chat-border));
-  margin: 1em 0;
+  margin: 0.9em 0;
+}
+
+/* Stacking corrections — junctions where two components' spacing would
+   otherwise compound into an oversized gap:
+   1. A heading right after a divider is double-separated (the hr already
+      provides the visual break), so its breathing room collapses to a nudge.
+   2. Margins cannot collapse across an <li> boundary, so a nested list's
+      block margins STACK with its parent item's — keep nested lists snug. */
+.chat-widget-container .is-assistant .chat-message-content hr + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 0.45em;
+}
+.chat-widget-container .is-assistant .chat-message-content li > :is(ul, ol) {
+  margin: 0.28em 0 0.2em;
 }
 
 /* Media — never let an image/embed push past the column; scale it to fit. */
