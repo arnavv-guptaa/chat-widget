@@ -815,7 +815,20 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           finishReason !== 'content-filter'
         ) {
           for (const part of toSourceParts(citationChunks)) {
-            followUpWriter?.write(part as unknown as Parameters<UIMessageStreamWriter['write']>[0]);
+            // The client validates chunks with z.strictObject — a source-url
+            // chunk admits ONLY sourceId/url/title/providerMetadata. Extra keys
+            // (a top-level citationIds) fail validation and error the whole
+            // stream at finish. Alias IDs therefore ride inside
+            // providerMetadata; the resolver reads them from either place.
+            followUpWriter?.write({
+              type: 'source-url',
+              sourceId: part.sourceId,
+              url: part.url,
+              ...(part.title ? { title: part.title } : {}),
+              ...(part.citationIds && part.citationIds.length > 0
+                ? { providerMetadata: { mordn: { citationIds: part.citationIds } } }
+                : {}),
+            } as Parameters<UIMessageStreamWriter['write']>[0]);
           }
         }
 
