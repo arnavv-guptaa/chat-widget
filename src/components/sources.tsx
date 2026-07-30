@@ -75,7 +75,9 @@ export const SourcesContent = ({
 }: SourcesContentProps) => (
   <CollapsibleContent
     className={cn(
-      "mt-2 grid w-full gap-2",
+      // gap-0: rows tile edge-to-edge so hover targets are contiguous (no dead
+      // zones between links); each row's own py provides the visual rhythm.
+      "mt-2 grid w-full gap-0",
       "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-1 data-[state=open]:slide-in-from-top-1 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
       className
     )}
