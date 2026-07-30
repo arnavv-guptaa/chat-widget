@@ -78,12 +78,10 @@ export async function generateThreadTitle(args: {
     system: THREAD_TITLE_SYSTEM_PROMPT,
     prompt: ['Title this conversation.', '<conversation>', transcript, '</conversation>'].join('\n'),
     temperature: 0.3,
-    // Reasoning-by-default models (gemini-2.5-*, gpt-5-*) spend output budget
-    // on thinking tokens BEFORE the JSON: a tight cap (the original 64) makes
-    // them return nothing at all ("No object generated"). The visible title is
-    // still ~15 tokens; the headroom is for reasoning, and the timeout — not
-    // this cap — bounds the cost of a runaway generation.
-    maxOutputTokens: 2_000,
+    // No maxOutputTokens: it is a truncation guard, not a conciseness control -
+    // the schema caps the title and on reasoning-by-default models a cap
+    // silently starves the JSON ("No object generated", seen live at 64). The
+    // timeout is the cost bound.
     maxRetries: 1,
     timeout:
       typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0

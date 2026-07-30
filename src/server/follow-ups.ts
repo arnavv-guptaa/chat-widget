@@ -78,12 +78,10 @@ export async function generateFollowUpSuggestions(args: {
       '</conversation>',
     ].join('\n'),
     temperature: 0.3,
-    // Reasoning-by-default models (gemini-2.5-*, gpt-5-*) spend output budget
-    // on thinking tokens BEFORE the JSON: the original 256 cap left them
-    // nothing to answer with ("No object generated") and follow-ups silently
-    // never appeared. Same fix as the thread-title call: real headroom, with
-    // the timeout - not the cap - bounding runaway cost.
-    maxOutputTokens: 2_000,
+    // No maxOutputTokens: it is a truncation guard, not a conciseness control -
+    // the schema (item/char caps) shapes the output, and on reasoning-by-default
+    // models a cap silently starves the JSON ("No object generated", seen live
+    // at 256). The timeout is the cost bound.
     maxRetries: 1,
     timeout:
       typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0
