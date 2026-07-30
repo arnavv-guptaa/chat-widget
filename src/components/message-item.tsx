@@ -57,6 +57,9 @@ type SourceUrlPart = {
   url: string;
   title?: string;
   citationIds?: number[];
+  /** Live-streamed parts carry alias IDs here (the source-url chunk schema is
+   *  strict, so the handler can't put citationIds at the top level). */
+  providerMetadata?: { mordn?: { citationIds?: number[] } };
 };
 
 function sourceTitle(part: SourceUrlPart): string {
@@ -71,9 +74,15 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
   // The same source-url parts, cast to the CitationSource shape the inline
   // citation chips consume. sourceParts IS the bibliography list; explicit
   // citationIds preserve the model's original reference mapping through dedupe.
+  // Live-streamed parts carry the alias IDs in providerMetadata (strict chunk
+  // schema); persisted parts carry them at the top level — normalize both.
   // Memoized on sourceParts so the identity is stable unless the parts change.
   const citationSources = useMemo(
-    () => sourceParts as unknown as CitationSource[],
+    () =>
+      sourceParts.map((part) => ({
+        ...part,
+        citationIds: part.citationIds ?? part.providerMetadata?.mordn?.citationIds,
+      })) as unknown as CitationSource[],
     [sourceParts],
   );
   const fileParts = useMemo(

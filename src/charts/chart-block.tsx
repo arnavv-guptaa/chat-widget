@@ -10,7 +10,9 @@
  * light/dark/white-label for free.
  *
  * Trust boundary (PRD §3):
- *   - provenance line on every chart ("Source: <x>" / "Model-generated")
+ *   - provenance line when the spec declares one ("Source: <x>"); unsourced
+ *     charts render no label - inside an assistant bubble "model-generated"
+ *     is a tautology, so only positive provenance carries signal
  *   - a renderer that throws (e.g. a pie that doesn't sum to a whole) is caught
  *     here and rendered as the error card — never a broken/partial chart
  *   - the data table + Copy CSV make the numbers one click away
@@ -74,7 +76,10 @@ export function ChartBlock({ spec, className }: ChartBlockProps) {
     }
   };
 
-  const provenance = spec.source ? `Source: ${spec.source}` : 'Model-generated';
+  // Positive provenance only. The old fallback ("Model-generated") labeled
+  // every unsourced chart, but inside an assistant bubble that's a tautology -
+  // the signal lives entirely in "Source: <x>" being present.
+  const provenance = spec.source ? `Source: ${spec.source}` : null;
 
   if (renderError) {
     return <ChartErrorCard error={renderError} rawText={JSON.stringify(spec, null, 2)} className={className} />;
@@ -88,7 +93,7 @@ export function ChartBlock({ spec, className }: ChartBlockProps) {
       </div>
       {svg}
       <div className="chat-chart-footer">
-        <span className="chat-chart-provenance">{provenance}</span>
+        {provenance ? <span className="chat-chart-provenance">{provenance}</span> : <span />}
         <div className="chat-chart-actions">
           <button type="button" onClick={() => setShowData((s) => !s)} className="chat-chart-toggle" aria-expanded={showData} aria-label={showData ? 'Hide data' : 'View data'}>
             <ChevronDownIcon className="size-3.5" style={{ transform: showData ? 'rotate(180deg)' : undefined }} />

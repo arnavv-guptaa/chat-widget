@@ -41,8 +41,9 @@ describe('renderer design-system contract', () => {
     // The favicon is fetched as a plain <img> from Google's S2 endpoint; the
     // host is already shown in the row, so this leaks nothing new. A non-web
     // source or a failed load falls back to the file glyph — never a broken img.
+    expect(sources).toContain('/favicon.ico');
     expect(sources).toContain('google.com/s2/favicons');
-    expect(sources).toContain('onError={() => setFailed(true)}');
+    expect(sources).toContain('setCandidate((i) => i + 1)');
     expect(sources).toContain('FileTextIcon');
     expect(sources).toContain('safeUrl(href)');
     expect(sources).not.toContain('ExternalLinkIcon');

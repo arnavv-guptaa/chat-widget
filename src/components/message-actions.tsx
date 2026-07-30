@@ -154,10 +154,13 @@ export function MessageActions({
         "flex flex-col gap-1.5 -ml-1.5 transition-opacity duration-150",
         alwaysVisible
           // LAST message: in-flow (small top margin) so it never overlaps the
-          // composer sitting just below. Hover/focus-revealed like every other
-          // message — a permanently visible icon row under the sources list
-          // read as stray "copy icons from the sources" (user feedback).
-          ? "mt-1.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
+          // composer sitting just below, and ALWAYS visible — the freshest
+          // answer is where copy/regenerate/rate get used, so they shouldn't
+          // need a hover to discover (standard chat-product convention).
+          // NOTE: reverses an earlier hover-reveal decision ("stray copy icons
+          // under the sources list"); the tightened sources footer with its
+          // hairline separation reads as a distinct zone now.
+          ? "mt-1.5"
           // Other messages: ABSOLUTELY positioned in the gap below the message so
           // the hidden row adds NO height (it was inflating the assistant→user
           // gap). Reveals on hover/focus of the message group.

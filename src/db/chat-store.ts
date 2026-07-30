@@ -209,17 +209,9 @@ export async function saveChat({
 
     const conv = existingConv[0];
 
-    // Update title if this is the first user message and title is still "New Chat"
-    if (conv.title === 'New Chat') {
-      const firstUserMessage = chatMessages.find((m) => m.role === 'user');
-      if (firstUserMessage) {
-        const textPart = firstUserMessage.parts?.find((p) => p.type === 'text') as { text: string } | undefined;
-        if (textPart?.text) {
-          const newTitle = textPart.text.slice(0, 100);
-          await updateConversationTitle(userId, chatId, newTitle);
-        }
-      }
-    }
+    // No prefix auto-title here (removed): the title stays 'New Chat' until the
+    // handler's generated thread title lands. The default title doubles as the
+    // "still needs a title" signal, enabling retry on the thread's next turn.
 
     // Get existing message IDs from database
     const existingMessages = await db

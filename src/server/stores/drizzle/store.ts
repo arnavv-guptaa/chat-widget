@@ -230,16 +230,10 @@ class DrizzleChatStore implements ChatStore {
 
     await this.db.insert(messages).values(values).onConflictDoNothing({ target: messages.id });
 
-    // Auto-title from the first user message while the title is still default.
-    if (owned.title === 'New Chat') {
-      const firstUserText = turnMessages
-        .filter((m) => m.role === 'user')
-        .map((m) => textFromParts(m.parts))
-        .find((t) => t.length > 0);
-      if (firstUserText) {
-        await this.renameConversation(conversationId, firstUserText.slice(0, 100));
-      }
-    }
+    // No prefix auto-title here (removed): the title stays 'New Chat' until the
+    // handler's generated thread title lands via renameConversation. Keeping the
+    // default is load-bearing — it is the handler's "still needs a title" signal,
+    // so a failed generation retries naturally on the thread's next turn.
 
     // Bump updatedAt so the conversation surfaces at the top of the history list.
     await this.db

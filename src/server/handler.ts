@@ -73,6 +73,7 @@ import {
   resolveFollowUpCount,
 } from '../utils/follow-ups';
 import { generateThreadTitle } from './thread-title';
+import { buildRenderingSystem } from '../generative/registry';
 import { BOOTSTRAP_PROTOCOL_VERSION, isAgentConfig, type AgentConfig, type PublishedAgentConfig } from '../config';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -95,18 +96,10 @@ const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant.';
 // any operator prompt. Without it, models routinely "draw" tables as
 // ASCII/box-drawing art inside a code fence — which the widget renders as a
 // collapsed code pill instead of the styled GFM table it fully supports.
-const RENDERING_SYSTEM = [
-  'Formatting: replies render as GitHub-Flavored Markdown.',
-  'Present tabular data as GFM pipe tables (`| Col | Col |` with a `| --- |` separator row).',
-  'Never draw tables as ASCII or box-drawing art, and never put a table inside a code fence — fences are for code only.',
-  // Charts steer (PRD §7): one paragraph, same mechanism as the table steer.
-  // The model gets a hint + a shape, not a schema dump — keeping the prompt
-  // small. The fence language `mordn-chart` is distinctive enough that a normal
-  // `json` fence won't trigger the chart renderer. The widget validates the
-  // body and renders an error card on any mismatch, so an invalid spec never
-  // ships a misleading partial chart.
-  'When your answer would benefit from a chart, emit a fenced `mordn-chart` block whose body is a JSON object: { "schemaVersion": 2, "type": "bar"|"horizontal-bar"|"line"|"area"|"multi-line"|"stacked-bar"|"grouped-bar"|"pie"|"donut"|"scatter"|"sparkline", "title": string, "subtitle"?: string, "xLabel"?: string, "yLabel"?: string, "source"?: string, "legend"?: boolean, "valueLabels"?: boolean, "series": { "name"?: string, "points": [{ "label": string, "value": number }], "color"?: "#hex" } | [{ ... }], "whole"?: { "total": number, "tolerance"?: number }, "scatter"?: [{ "x": number, "y": number, "label"?: string }] }. Choose the chart kind to fit the data: bar to compare discrete categories, horizontal-bar when category names are long, line/area for a sequence over an ordered axis, multi-line to compare several series over the same axis, stacked-bar to show parts-of-a-whole across categories, grouped-bar to compare series side-by-side per category, pie/donut ONLY for parts summing to a single whole (set `whole.total`), scatter for two numeric variables, sparkline for a tiny inline trend. Always start numeric axes at zero for bar/area/stacked-bar. For pie/donut the slices must sum to the declared whole. Only chart data you are confident is accurate; if you are unsure of the numbers, say so in prose instead. Keep categorical charts to at most 20 points and line/scatter to at most 200.',
-].join(' ');
+// Assembled from the generative component registry — the same source of truth
+// the client fence router reads — so the vocabulary the model is taught and
+// the renderers that exist can never drift apart.
+const RENDERING_SYSTEM = buildRenderingSystem();
 
 // Hard cap on the raw chat request body. Enforced against the ACTUAL bytes read
 // off the stream (not the forgeable Content-Length), so a chunked / omitted-
@@ -740,6 +733,35 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let finalStepCount: number | undefined;
     let followUpWriter: UIMessageStreamWriter | null = null;
 
+    // Smart thread title — launched BEFORE the main stream, in parallel with
+    // it. The input is the user's OPENING MESSAGE only (the assistant's answer
+    // just restates the topic), so nothing here depends on the stream; by the
+    // time onFinish awaits this it has usually already settled, and the finish
+    // event isn't delayed by a second model call. The result is consumed in
+    // streamText.onFinish (rename + data part) so ordering guarantees hold.
+    const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle && !!lastUser;
+    const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
+      generateTitleThisTurn
+        ? generateThreadTitle({
+            model,
+            messages: toFollowUpMessages([lastUser!]),
+            timeoutMs: titleConfig!.timeoutMs,
+            // Deliberately NOT tied to request.signal: a user stopping the
+            // answer mid-stream still deserves a named thread. The call is
+            // bounded by its own timeout, so nothing dangles.
+          }).catch((err) => {
+            console.warn(
+              JSON.stringify({
+                event: 'title.generate_failed',
+                userId: ctx.userId,
+                conversationId,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+            return null;
+          })
+        : Promise.resolve(null);
+
     const result = streamText({
       model,
       system,
@@ -774,7 +796,35 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // stream closes. Failures degrade silently (no chips / placeholder
         // title) and never turn a successful answer into an error.
         if (request.signal.aborted) return; // the SDK's abort chunk is terminal
-        const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle;
+
+        // RAG citations for the LIVE message. Until now `source-url` parts were
+        // only stamped onto the PERSISTED copy (ui-stream onFinish →
+        // injectCitationParts), so the Sources card appeared after a reload but
+        // never on first render. Emit them on the stream too; the persist-time
+        // injection dedupes by URL, so nothing doubles up on save.
+        if (
+          citationChunks.length > 0 &&
+          finishReason !== 'error' &&
+          finishReason !== 'content-filter'
+        ) {
+          for (const part of toSourceParts(citationChunks)) {
+            // The client validates chunks with z.strictObject — a source-url
+            // chunk admits ONLY sourceId/url/title/providerMetadata. Extra keys
+            // (a top-level citationIds) fail validation and error the whole
+            // stream at finish. Alias IDs therefore ride inside
+            // providerMetadata; the resolver reads them from either place.
+            followUpWriter?.write({
+              type: 'source-url',
+              sourceId: part.sourceId,
+              url: part.url,
+              ...(part.title ? { title: part.title } : {}),
+              ...(part.citationIds && part.citationIds.length > 0
+                ? { providerMetadata: { mordn: { citationIds: part.citationIds } } }
+                : {}),
+            } as Parameters<UIMessageStreamWriter['write']>[0]);
+          }
+        }
+
         if (
           (!followUpConfig && !generateTitleThisTurn) ||
           finishReason === 'error' ||
@@ -794,30 +844,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           },
         ]);
 
-        // The two secondary calls are independent — run them concurrently so
-        // the slower one alone bounds how late the finish event lands. Each
-        // task catches its own failure and resolves null; usage/metadata merges
-        // happen after BOTH settle, on this callback's single thread.
-        const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
-          generateTitleThisTurn
-            ? generateThreadTitle({
-                model: model!,
-                messages: transcript,
-                timeoutMs: titleConfig!.timeoutMs,
-                abortSignal: request.signal,
-              }).catch((err) => {
-                console.warn(
-                  JSON.stringify({
-                    event: 'title.generate_failed',
-                    userId: ctx.userId,
-                    conversationId,
-                    error: err instanceof Error ? err.message : String(err),
-                  }),
-                );
-                return null;
-              })
-            : Promise.resolve(null);
-
+        // The title task (launched before the stream — see titleTask above) has
+        // usually already settled by now; follow-ups still need the answer text,
+        // so they start here. Awaiting both keeps usage/metadata merges on this
+        // callback's single thread.
         const followUpTask: Promise<{
           suggestions: string[];
           usage?: LanguageModelUsage;
@@ -1014,6 +1044,33 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 error: err instanceof Error ? err.message : String(err),
               }),
             );
+          }
+
+          // Stopped-but-kept turns still deserve a name. The normal rename +
+          // data-thread-title emission lives in streamText.onFinish, which the
+          // abort path never reaches — so consume the (already running,
+          // abort-immune) titleTask here for persisted aborts. Stream's gone:
+          // the open tab keeps its placeholder, but history/reload show the
+          // generated title. Title-call usage isn't merged on this path — the
+          // usage row above is already written; a rare stop costs one uncounted
+          // ~15-token call rather than a second usage row.
+          if (isAborted && generateTitleThisTurn) {
+            const generated = await titleTask;
+            if (generated?.title) {
+              try {
+                await store.renameConversation(conversationId, generated.title);
+              } catch (err) {
+                console.warn(
+                  JSON.stringify({
+                    event: 'title.rename_failed',
+                    userId: ctx.userId,
+                    conversationId,
+                    aborted: true,
+                    error: err instanceof Error ? err.message : String(err),
+                  }),
+                );
+              }
+            }
           }
         }
         if (onChatFinish) {
