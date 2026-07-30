@@ -54,7 +54,9 @@ export const SourcesTrigger = ({
     {children ?? (
       <>
         <span>Sources</span>
-        <span className="font-medium normal-case tracking-normal text-[hsl(var(--chat-text-subtle))]">
+        {/* No explicit color: inherit the trigger's, so hover shifts the whole
+            row together (a hardcoded color here froze the count on hover). */}
+        <span className="font-medium normal-case tracking-normal">
           {count}
         </span>
         <ChevronDownIcon
