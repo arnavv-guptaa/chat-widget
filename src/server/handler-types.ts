@@ -255,11 +255,6 @@ export interface MemoryConfig {
 export interface ServerFollowUpConfig {
   /** Master switch. Default true when the object is provided. */
   enabled?: boolean;
-  /**
-   * Model for the suggestion call. Defaults to the conversation's resolved
-   * model; pin a fast/cheap one here to cut post-answer latency and cost.
-   */
-  model?: LanguageModel;
   /** Number of chips to emit, clamped to 1–5. Default 3. */
   max?: number;
   /** Timeout for the post-response generator. Default 6000ms. */
@@ -287,11 +282,6 @@ export interface ServerFollowUpConfig {
 export interface ServerTitleConfig {
   /** Master switch. Default true when the object is provided. */
   enabled?: boolean;
-  /**
-   * Model for the title call. Defaults to the conversation's resolved model;
-   * pin a fast/cheap one here to cut latency and cost.
-   */
-  model?: LanguageModel;
   /** Timeout for the post-response generator. Default 5000ms. */
   timeoutMs?: number;
 }

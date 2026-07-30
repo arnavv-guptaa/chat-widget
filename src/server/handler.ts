@@ -743,7 +743,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
       generateTitleThisTurn
         ? generateThreadTitle({
-            model: titleConfig!.model ?? model,
+            model,
             messages: toFollowUpMessages([lastUser!]),
             timeoutMs: titleConfig!.timeoutMs,
             // Deliberately NOT tied to request.signal: a user stopping the
@@ -864,7 +864,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 };
               }
               const generated = await generateFollowUpSuggestions({
-                model: followUpConfig!.model ?? model!,
+                model: model!,
                 messages: transcript,
                 max,
                 timeoutMs: followUpConfig!.timeoutMs,
