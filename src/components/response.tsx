@@ -12,6 +12,8 @@ import { CitationRef, CitationSourcesProvider, type CitationSource } from "./cit
 import { remarkCitations } from "../utils/citation-tokens";
 import { ChartCode } from "../charts/chart-code";
 import { isChartFenceLanguage } from "../charts/chart-spec";
+import { MermaidCode } from "./mermaid-block";
+import { MERMAID_FENCE_LANGUAGE } from "../generative/registry";
 
 // Override Streamdown's element rendering with our own components:
 //   - `code`     → chart fences (`mordn-chart` / `chart`) render the ChartCode
@@ -30,6 +32,11 @@ function codeRenderer(props: { inline?: boolean; className?: string; children?: 
   const language = /language-([\w-]+)/.exec(props.className ?? '')?.[1];
   if (!props.inline && isChartFenceLanguage(language)) {
     return <ChartCode {...props} />;
+  }
+  // Diagrams (generative registry: 'diagrams'). Previously mermaid fences fell
+  // through to plain code even though the renderer ships with streamdown.
+  if (!props.inline && language === MERMAID_FENCE_LANGUAGE) {
+    return <MermaidCode {...props} />;
   }
   return <CollapsibleCode {...props} />;
 }

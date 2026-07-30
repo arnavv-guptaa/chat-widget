@@ -73,6 +73,7 @@ import {
   resolveFollowUpCount,
 } from '../utils/follow-ups';
 import { generateThreadTitle } from './thread-title';
+import { buildRenderingSystem } from '../generative/registry';
 import { BOOTSTRAP_PROTOCOL_VERSION, isAgentConfig, type AgentConfig, type PublishedAgentConfig } from '../config';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -95,18 +96,10 @@ const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant.';
 // any operator prompt. Without it, models routinely "draw" tables as
 // ASCII/box-drawing art inside a code fence — which the widget renders as a
 // collapsed code pill instead of the styled GFM table it fully supports.
-const RENDERING_SYSTEM = [
-  'Formatting: replies render as GitHub-Flavored Markdown.',
-  'Present tabular data as GFM pipe tables (`| Col | Col |` with a `| --- |` separator row).',
-  'Never draw tables as ASCII or box-drawing art, and never put a table inside a code fence — fences are for code only.',
-  // Charts steer (PRD §7): one paragraph, same mechanism as the table steer.
-  // The model gets a hint + a shape, not a schema dump — keeping the prompt
-  // small. The fence language `mordn-chart` is distinctive enough that a normal
-  // `json` fence won't trigger the chart renderer. The widget validates the
-  // body and renders an error card on any mismatch, so an invalid spec never
-  // ships a misleading partial chart.
-  'When your answer would benefit from a chart, emit a fenced `mordn-chart` block whose body is a JSON object: { "schemaVersion": 2, "type": "bar"|"horizontal-bar"|"line"|"area"|"multi-line"|"stacked-bar"|"grouped-bar"|"pie"|"donut"|"scatter"|"sparkline", "title": string, "subtitle"?: string, "xLabel"?: string, "yLabel"?: string, "source"?: string, "legend"?: boolean, "valueLabels"?: boolean, "series": { "name"?: string, "points": [{ "label": string, "value": number }], "color"?: "#hex" } | [{ ... }], "whole"?: { "total": number, "tolerance"?: number }, "scatter"?: [{ "x": number, "y": number, "label"?: string }] }. Choose the chart kind to fit the data: bar to compare discrete categories, horizontal-bar when category names are long, line/area for a sequence over an ordered axis, multi-line to compare several series over the same axis, stacked-bar to show parts-of-a-whole across categories, grouped-bar to compare series side-by-side per category, pie/donut ONLY for parts summing to a single whole (set `whole.total`), scatter for two numeric variables, sparkline for a tiny inline trend. Always start numeric axes at zero for bar/area/stacked-bar. For pie/donut the slices must sum to the declared whole. Only chart data you are confident is accurate; if you are unsure of the numbers, say so in prose instead. Keep categorical charts to at most 20 points and line/scatter to at most 200.',
-].join(' ');
+// Assembled from the generative component registry — the same source of truth
+// the client fence router reads — so the vocabulary the model is taught and
+// the renderers that exist can never drift apart.
+const RENDERING_SYSTEM = buildRenderingSystem();
 
 // Hard cap on the raw chat request body. Enforced against the ACTUAL bytes read
 // off the stream (not the forgeable Content-Length), so a chunked / omitted-

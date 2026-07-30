@@ -509,6 +509,17 @@
   margin: 0.28em 0 0.2em;
 }
 
+/* Mermaid diagrams — same card discipline as charts: fit the column, scroll
+   sideways inside their own box rather than breaking the bubble. */
+.chat-widget-container .chat-mermaid {
+  margin: 10px 0;
+  overflow-x: auto;
+}
+.chat-widget-container .chat-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Media — never let an image/embed push past the column; scale it to fit. */
 .chat-widget-container .is-assistant .chat-message-content :is(img, video, canvas, svg) {
   max-width: 100%;
