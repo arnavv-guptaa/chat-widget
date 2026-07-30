@@ -740,6 +740,35 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let finalStepCount: number | undefined;
     let followUpWriter: UIMessageStreamWriter | null = null;
 
+    // Smart thread title — launched BEFORE the main stream, in parallel with
+    // it. The input is the user's OPENING MESSAGE only (the assistant's answer
+    // just restates the topic), so nothing here depends on the stream; by the
+    // time onFinish awaits this it has usually already settled, and the finish
+    // event isn't delayed by a second model call. The result is consumed in
+    // streamText.onFinish (rename + data part) so ordering guarantees hold.
+    const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle && !!lastUser;
+    const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
+      generateTitleThisTurn
+        ? generateThreadTitle({
+            model,
+            messages: toFollowUpMessages([lastUser!]),
+            timeoutMs: titleConfig!.timeoutMs,
+            // Deliberately NOT tied to request.signal: a user stopping the
+            // answer mid-stream still deserves a named thread. The call is
+            // bounded by its own timeout, so nothing dangles.
+          }).catch((err) => {
+            console.warn(
+              JSON.stringify({
+                event: 'title.generate_failed',
+                userId: ctx.userId,
+                conversationId,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+            return null;
+          })
+        : Promise.resolve(null);
+
     const result = streamText({
       model,
       system,
@@ -790,7 +819,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           }
         }
 
-        const generateTitleThisTurn = titleConfig !== null && conversationNeedsTitle;
         if (
           (!followUpConfig && !generateTitleThisTurn) ||
           finishReason === 'error' ||
@@ -810,30 +838,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           },
         ]);
 
-        // The two secondary calls are independent — run them concurrently so
-        // the slower one alone bounds how late the finish event lands. Each
-        // task catches its own failure and resolves null; usage/metadata merges
-        // happen after BOTH settle, on this callback's single thread.
-        const titleTask: Promise<Awaited<ReturnType<typeof generateThreadTitle>> | null> =
-          generateTitleThisTurn
-            ? generateThreadTitle({
-                model: model!,
-                messages: transcript,
-                timeoutMs: titleConfig!.timeoutMs,
-                abortSignal: request.signal,
-              }).catch((err) => {
-                console.warn(
-                  JSON.stringify({
-                    event: 'title.generate_failed',
-                    userId: ctx.userId,
-                    conversationId,
-                    error: err instanceof Error ? err.message : String(err),
-                  }),
-                );
-                return null;
-              })
-            : Promise.resolve(null);
-
+        // The title task (launched before the stream — see titleTask above) has
+        // usually already settled by now; follow-ups still need the answer text,
+        // so they start here. Awaiting both keeps usage/metadata merges on this
+        // callback's single thread.
         const followUpTask: Promise<{
           suggestions: string[];
           usage?: LanguageModelUsage;
@@ -1030,6 +1038,33 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 error: err instanceof Error ? err.message : String(err),
               }),
             );
+          }
+
+          // Stopped-but-kept turns still deserve a name. The normal rename +
+          // data-thread-title emission lives in streamText.onFinish, which the
+          // abort path never reaches — so consume the (already running,
+          // abort-immune) titleTask here for persisted aborts. Stream's gone:
+          // the open tab keeps its placeholder, but history/reload show the
+          // generated title. Title-call usage isn't merged on this path — the
+          // usage row above is already written; a rare stop costs one uncounted
+          // ~15-token call rather than a second usage row.
+          if (isAborted && generateTitleThisTurn) {
+            const generated = await titleTask;
+            if (generated?.title) {
+              try {
+                await store.renameConversation(conversationId, generated.title);
+              } catch (err) {
+                console.warn(
+                  JSON.stringify({
+                    event: 'title.rename_failed',
+                    userId: ctx.userId,
+                    conversationId,
+                    aborted: true,
+                    error: err instanceof Error ? err.message : String(err),
+                  }),
+                );
+              }
+            }
           }
         }
         if (onChatFinish) {
