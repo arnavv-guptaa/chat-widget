@@ -10,7 +10,7 @@ import {
   resolveFollowUpCount,
 } from '../utils/follow-ups';
 
-export const DEFAULT_FOLLOW_UP_TIMEOUT_MS = 6_000;
+export const DEFAULT_FOLLOW_UP_TIMEOUT_MS = 10_000;
 const MAX_TRANSCRIPT_MESSAGES = 12;
 const MAX_TRANSCRIPT_CHARS = 16_000;
 
@@ -78,7 +78,12 @@ export async function generateFollowUpSuggestions(args: {
       '</conversation>',
     ].join('\n'),
     temperature: 0.3,
-    maxOutputTokens: 256,
+    // Reasoning-by-default models (gemini-2.5-*, gpt-5-*) spend output budget
+    // on thinking tokens BEFORE the JSON: the original 256 cap left them
+    // nothing to answer with ("No object generated") and follow-ups silently
+    // never appeared. Same fix as the thread-title call: real headroom, with
+    // the timeout - not the cap - bounding runaway cost.
+    maxOutputTokens: 2_000,
     maxRetries: 1,
     timeout:
       typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0
