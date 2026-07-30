@@ -460,9 +460,10 @@
 .chat-widget-container .is-assistant .chat-message-content .chat-table tbody tr:hover td {
   background-color: hsl(var(--chat-hover-bg) / 0.5);
 }
-/* Copy-as-TSV — hover-reveal, floating over the header's right edge. Same
-   affordance language as .chat-code-copy. Backed by the surface tone so it
-   stays legible over a scrolled-under header. */
+/* Copy-as-TSV — always visible, floating over the header's right edge. Same
+   affordance language as .chat-code-copy (which is also always visible; copy
+   affordances shouldn't need a hover to discover). Backed by the surface tone
+   so it stays legible over a scrolled-under header. */
 .chat-widget-container .chat-table-copy {
   position: absolute;
   top: 0.3rem;
@@ -477,12 +478,7 @@
   border: none;
   cursor: pointer;
   color: hsl(var(--chat-text-muted));
-  opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-}
-.chat-widget-container .chat-table:hover .chat-table-copy,
-.chat-widget-container .chat-table-copy:focus-visible {
-  opacity: 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .chat-widget-container .chat-table-copy:hover {
   background-color: hsl(var(--chat-hover-bg));
