@@ -33,6 +33,15 @@ export function ChatErrorBanner({
 }: ChatErrorBannerProps) {
   if (!error) return null;
 
+  // A user-initiated Stop surfaces through useChat's error state as an
+  // AbortError. That is not a failure — the partial answer is already on
+  // screen and persisted — so rendering an alert banner for it (previously a
+  // softened "Stopped." with a warning icon and a Try again link) read as
+  // "the generation errored". Client-side aborts only come from the stop
+  // button or navigation; real server-side failures arrive as error chunks
+  // with their own messages and still render below.
+  if (/abort/i.test(error.message ?? "")) return null;
+
   // Default message kept short — the raw Error.message can be a wall of
   // text from the network layer. We only surface it on hover via title.
   const friendly = friendlyErrorMessage(error);
@@ -81,7 +90,6 @@ export function ChatErrorBanner({
 
 function friendlyErrorMessage(error: Error): string {
   const raw = error.message ?? "";
-  if (/abort/i.test(raw)) return "Stopped.";
   if (/network|fetch|disconnect|ECONN/i.test(raw)) {
     return "Connection issue. Check your network and try again.";
   }
