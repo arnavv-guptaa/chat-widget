@@ -2,6 +2,20 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.17.0 — 2026-07-31
+
+### Breaking
+- **`client.followUps` is removed from `AgentConfig`.** Follow-ups are generated and capped server-side only, via `runtime.followUps`. A stored config still carrying the client key now fails validation — move the setting to `runtime.followUps` (`{ enabled, max }`). The key existed in both planes, so one number was written in two places and the smaller one won invisibly.
+- **`ChatWidget`'s `followUps` prop and the `FollowUpConfig` type are removed**, along with the client-side `generate` fallback. It predated the server generator and only ever ran when the response carried no `data-follow-ups` part. Use `createChatHandler({ followUps: true })` or hosted `runtime.followUps`.
+
+### Changed
+- The client is a pure renderer of server-sent chips: it reads the `data-follow-ups` part and renders it, bounded by `MAX_FOLLOW_UP_COUNT` as untrusted-input hygiene rather than as a policy knob. How many chips to show is settled once, on the server.
+- README rewritten as an entry point (585 → ~110 lines): install, the smallest working setup, the one security invariant, and a linked map into the docs site. Everything it duplicated already had a dedicated docs page.
+
+### Notes
+- The rule this establishes: `runtime` holds anything that costs money, touches a credential, or shapes model behaviour; `client` holds pure presentation. **A key name may not appear in both planes.** Follow-ups trigger a paid second model call, so they are runtime.
+- 0.16.0–0.16.3 shipped without CHANGELOG entries (smart thread titles, reasoning-model output headroom, history-panel and citation fixes, generator perf). See `git log v0.15.1..v0.16.3`.
+
 ## 0.15.1 — 2026-07-26
 
 ### Added
