@@ -16,7 +16,6 @@ import ChatInterface from './components/interface';
 import type {
   ActionRenderer,
   ChatContext,
-  FollowUpConfig,
   InputPlugin,
   StarterPrompt,
   ToolRenderer,
@@ -57,7 +56,6 @@ export interface ChatWidgetProps {
   inputPlugins?: InputPlugin[];
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
-  followUps?: FollowUpConfig;
   onFeedback?: (feedback: import('./types').FeedbackEvent) => void;
 }
 
@@ -97,7 +95,6 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   inputPlugins,
   toolRenderers,
   actionRenderers,
-  followUps,
   onFeedback,
 }: ChatWidgetProps, ref) {
   const apiBase = apiBaseProp.replace(/\/+$/, '');
@@ -553,11 +550,10 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     inputPlugins,
     toolRenderers,
     actionRenderers,
-    followUps: followUps ?? client.followUps,
     feedback,
     streamingThrottleMs: client.streamingThrottleMs,
     onFeedback,
-  }), [apiBase, stableHeaders, requestCredentials, explicitConfig, greeting, subGreeting, assistantName, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, followUps, client.followUps, feedback, client.streamingThrottleMs, onFeedback]);
+  }), [apiBase, stableHeaders, requestCredentials, explicitConfig, greeting, subGreeting, assistantName, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, feedback, client.streamingThrottleMs, onFeedback]);
 
   // Default launcher position respects iOS safe areas (home indicator /
   // rounded corners) — a fixed 24px bottom put the FAB under the home

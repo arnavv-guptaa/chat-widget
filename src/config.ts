@@ -57,7 +57,6 @@ export interface AgentClientConfig {
   starterPrompts?: SerializableStarterPrompt[];
   capabilitiesPrompt?: string;
   feedback?: boolean;
-  followUps?: Pick<SerializableFollowUpConfig, 'enabled' | 'max'>;
   streamingThrottleMs?: number;
   persistState?: boolean;
   allowAutoReopen?: boolean;
@@ -121,10 +120,6 @@ export function mergeAgentClientConfig(
                 : undefined,
           }
         : undefined,
-    followUps:
-      published.followUps || explicit.followUps
-        ? { ...published.followUps, ...explicit.followUps }
-        : undefined,
   };
 }
 
@@ -186,7 +181,7 @@ function validRuntime(value: unknown): value is AgentRuntimeConfig {
 }
 
 function validClient(value: unknown): value is AgentClientConfig {
-  if (!isRecord(value) || !only(value, ['greeting', 'subGreeting', 'assistantName', 'theme', 'features', 'display', 'starterPrompts', 'capabilitiesPrompt', 'feedback', 'followUps', 'streamingThrottleMs', 'persistState', 'allowAutoReopen'])) return false;
+  if (!isRecord(value) || !only(value, ['greeting', 'subGreeting', 'assistantName', 'theme', 'features', 'display', 'starterPrompts', 'capabilitiesPrompt', 'feedback', 'streamingThrottleMs', 'persistState', 'allowAutoReopen'])) return false;
   if (!optional(value.greeting, str)) return false;
   if (!optional(value.subGreeting, str)) return false;
   if (!optional(value.assistantName, str)) return false;
@@ -203,7 +198,7 @@ function validClient(value: unknown): value is AgentClientConfig {
   })) return false;
   if (!optional(value.starterPrompts, (candidate) => Array.isArray(candidate) && candidate.every((prompt) => isRecord(prompt) && only(prompt, ['title', 'subtitle']) && str(prompt.title) && optional(prompt.subtitle, str)))) return false;
   return optional(value.capabilitiesPrompt, str) && optional(value.feedback, bool) &&
-    optional(value.followUps, (candidate) => isRecord(candidate) && only(candidate, ['enabled', 'max']) && optional(candidate.enabled, bool) && optional(candidate.max, (v) => integerInRange(v, 1, 5))) && optional(value.streamingThrottleMs, (v) => integerInRange(v, 0)) &&
+    optional(value.streamingThrottleMs, (v) => integerInRange(v, 0)) &&
     optional(value.persistState, bool) && optional(value.allowAutoReopen, bool);
 }
 

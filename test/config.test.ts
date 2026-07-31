@@ -69,4 +69,14 @@ describe('canonical AgentConfig', () => {
       },
     });
   });
+
+  it('rejects a client key that is not in the schema', () => {
+    expect(isAgentConfig({ ...config, client: { ...config.client, bogusKey: 1 } })).toBe(false);
+  });
+
+  it('rejects client.followUps — follow-ups are runtime-only (they cost a model call)', () => {
+    expect(
+      isAgentConfig({ ...config, client: { ...config.client, followUps: { enabled: true } } }),
+    ).toBe(false);
+  });
 });

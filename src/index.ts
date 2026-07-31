@@ -35,7 +35,6 @@ export type {
   ActionResult,
   ActionResultStatus,
   ActionResultField,
-  FollowUpConfig,
   FollowUpMessage,
   FeedbackEvent,
 } from './types';
