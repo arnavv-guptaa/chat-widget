@@ -1,297 +1,76 @@
 # @mordn/chat-widget
 
-A secure-by-default AI chat widget for React/Next.js with one canonical,
-JSON-serializable agent configuration and an authenticated bootstrap flow.
+A secure-by-default AI chat widget for React/Next.js: one component, one route, one agent config.
 
-## Hosted quick start
+**[Docs](https://mordn.com/docs)** · [Quickstart](https://mordn.com/docs/quickstart) · [Security](https://mordn.com/docs/security) · [API](https://mordn.com/docs/api/create-chat-handler)
 
-Install the widget and its required AI SDK peers (no Tailwind setup is needed):
+## Install
 
 ```bash
 npm install @mordn/chat-widget ai @ai-sdk/react
 ```
 
-Add server-only credentials to `.env.local`:
+Styles are prebuilt and scoped to `.chat-widget-container`. No Tailwind needed.
 
-```env
-MORDN_CHAT_KEY="..."       # published config + hosted persistence
-AI_GATEWAY_API_KEY="..."  # executes runtime.model gateway strings locally
-```
+## Setup
 
-`createMordnHandler` resolves the published config and uses hosted
-conversation/attachment storage, but **model execution remains in your route
-process**. The route therefore needs its own model credential. If you do not use
-the AI SDK gateway, install a provider package (for example
-`@ai-sdk/anthropic`), set that provider's server-only key (for example
-`ANTHROPIC_API_KEY`), and pass the provider model as the code-level `model`
-option. Never expose any of these keys with `NEXT_PUBLIC_`.
-
-Mount one authenticated catch-all route. Browser identity and agent identifiers
-are not widget props:
+The route owns identity, persistence, and model execution. The component is only the surface.
 
 ```ts
 // app/api/chat/[[...chat]]/route.ts
 import { createMordnHandler } from '@mordn/chat-widget/server';
 import { auth } from '@clerk/nextjs/server';
 
-const handler = createMordnHandler({
+export const { GET, POST, DELETE, OPTIONS } = createMordnHandler({
   apiKey: process.env.MORDN_CHAT_KEY!,
   getUserId: async () => (await auth()).userId,
-  // Advanced createChatHandler options stay flat:
-  // buildTools, retrieval, memory, CORS, hooks, etc.
-  // buildTools MERGES with the agent's hosted MCP tools (code wins on a name
-  // clash); passing it does not disable dashboard-connected integrations.
 });
-
-export const { GET, POST, DELETE, OPTIONS } = handler;
 ```
 
-The client requires no `userId`, `agentId`, `widgetId`, model, prompt, or
-configuration headers:
-
 ```tsx
+// components/assistant.tsx
 'use client';
 
 import { ChatWidget } from '@mordn/chat-widget';
 import '@mordn/chat-widget/styles.css';
 
 export default function Assistant() {
-  return <ChatWidget />; // apiBase defaults to /api/chat
+  return <ChatWidget apiBase="/api/chat" />; // must match the route path, defaults to /api/chat
 }
 ```
 
-The stylesheet is prebuilt and scoped to `.chat-widget-container`; consuming
-apps do not need Tailwind. Keep the CSS import in a client entry/layout that is
-included on every page where the widget can mount.
+```env
+AI_GATEWAY_API_KEY="..."  # runs runtime.model gateway strings
+MORDN_CHAT_KEY="..."      # published config + hosted persistence
+```
 
-`getUserId` is the authorization boundary: derive it from a verified server
-session (Clerk, Auth.js, Supabase Auth, etc.) and return `null` for an
-unauthenticated request. Never read identity from a request header, query, or
-body field.
+Models execute in your route, so the route needs its own credential. Without the AI SDK gateway, install a provider package, set its key, and pass `model` in code.
 
-On mount the widget calls `GET /api/chat/bootstrap`. The handler authenticates
-with `getUserId`, loads the published canonical config, and returns only
-`{ protocolVersion, agent, revision, client, storageScope }`. `protocolVersion`
-tracks the bootstrap envelope itself and is independent of the config document's
-`schemaVersion`. `storageScope` is an opaque server-derived value (a digest of
-the server-resolved agent + verified user — never the API key, so key rotation
-does not change it) used for browser chat and panel persistence.
+For your own database and storage, swap `createMordnHandler` for `createChatHandler` with a `store`, optional `storage`, and a code `model`. See [backends](https://mordn.com/docs/backends/overview).
 
-## Canonical `AgentConfig`
+## The one rule
 
-The same versioned object is used by the control plane, handler, and preview
-transport. It contains data only: no React nodes, functions, credentials, or
-infrastructure endpoint URLs. Provider credentials and endpoints stay in
-server-only handler options and environment variables.
+`getUserId` is the authorization boundary. Derive it from a verified server session; return `null` when unauthenticated. Never read identity from a header, query param, or body.
+
+Store and storage factories are constructed per request with the server-verified id, so cross-user access is unrepresentable rather than merely checked. The client sends no `userId`, `agentId`, model, prompt, or config headers: the widget calls `GET /api/chat/bootstrap` on mount and gets back only what the browser may see. See [SECURITY.md](./SECURITY.md).
+
+## Config
+
+`AgentConfig` is versioned, JSON-serializable, and shared by control plane, handler, and preview transport. Data only: no React nodes, functions, credentials, or endpoint URLs.
 
 ```ts
 import type { AgentConfig } from '@mordn/chat-widget';
 
 const config: AgentConfig = {
   schemaVersion: 1,
-  runtime: {
-    model: 'anthropic/claude-sonnet-4-5',
-    systemPrompt: 'Answer clearly and cite sources.',
-    temperature: 0.3,
-    maxOutputTokens: 8192,
-    followUps: { enabled: true, max: 3 },
-    memory: { enabled: true, inject: true, extract: true, limit: 6 },
-  },
-  client: {
-    greeting: 'How can I help?',
-    theme: {
-      backgroundColor: '#ffffff',
-      textColor: '#262626',
-      primaryColor: '#171717',
-    },
-    features: { fileUpload: true },
-    display: { layout: 'popup', size: 'default', resizable: true },
-    starterPrompts: [{ title: 'What can you help me with?' }],
-  },
+  runtime: { model: 'anthropic/claude-sonnet-4-5', temperature: 0.3 },
+  client: { greeting: 'How can I help?', display: { layout: 'popup' } },
 };
 ```
 
-A caller may pass `config` to override published **client** fields locally and
-to send a complete draft with chat requests from an owner-authenticated preview:
+Production handlers ignore request config. Owner previews opt in via `resolvePreviewConfig`.
 
-```tsx
-<ChatWidget apiBase="/api/owner/preview-chat" config={config} />
-```
-
-Production handlers ignore request config. A preview route must opt in with a
-server-side resolver; the handler validates the full schema-v1 config before the
-resolver runs, and an accepted config replaces the published config as one unit:
-
-```ts
-createChatHandler({
-  getUserId,
-  store,
-  storage,
-  getHostedConfig,
-  resolvePreviewConfig: async (candidate, ctx) => {
-    await requireAgentOwner(ctx.userId);
-    return candidate;
-  },
-});
-```
-
-There are no per-field model/prompt/temperature headers. Use the optional
-`headers` prop only for genuine generic transport metadata such as CSRF tokens.
-
-## Bring your own infrastructure
-
-Use `createChatHandler` directly with a `store`, optional `storage`, and either a
-code model or canonical `getHostedConfig`. The same handler exposes chat,
-bootstrap, upload, history, memory, and feedback subroutes.
-
-## Page context (`context`)
-
-Give the assistant awareness of what the user is looking at with the `context`
-prop. It is sent alongside every message and resolved **fresh on each send**, so
-on a docs SPA the next question always reflects the page the user navigated to.
-
-The fastest path is built-in page capture — one line, no wiring:
-
-```tsx
-// Snapshots a SAFE page shape from the browser on every send:
-//   url   → origin + pathname (no query string, no fragment)
-//   path  → pathname
-//   title → document.title
-//   hash  → only when it's a plain docs anchor (e.g. #installation)
-<ChatWidget userId={userId} context="auto" />
-```
-
-**What `'auto'` sends by default — and what it deliberately drops.** The query
-string and non-anchor fragments are **excluded**, because in the wild they
-routinely carry password-reset tokens, OAuth `state`/`code`, signed-URL
-signatures, tenant ids, and PII in search params. Once a host enables
-`trustClientContext` those values would flow straight to the model provider, so
-the default capture never includes them. A fragment is kept **only** when it
-looks like a plain in-page anchor (`#installation`, `#step-2.1`); anything
-containing `=`, `&`, `?`, or `/` (i.e. `#access_token=…&state=…` or a
-`#/app/users/42` hash-router path) is dropped. `'auto'` also captures **no
-identity data** — never cookies, `document.referrer`, or `navigator.userAgent`.
-
-Pass an object when you assemble the shape yourself, or a function to **compose**
-the auto fields with your own (the function may be async and runs per send):
-
-```tsx
-import { ChatWidget, buildAutoPageContext } from '@mordn/chat-widget';
-
-<ChatWidget
-  userId={userId}
-  context={() => ({
-    ...buildAutoPageContext(),        // safe: url (origin+path) / path / title / anchor-only hash
-    docsVersion: getActiveDocsVersion(), // your own fields
-  })}
-/>
-```
-
-**Opting into more of the URL.** If — and only if — you have confirmed the
-query string / fragment on your pages is free of tokens and PII, the **function
-form** can capture more. The bare `'auto'` string always uses the safe
-defaults; richer capture goes through `buildAutoPageContext(options)`:
-
-```tsx
-// includeQuery: append ?search to `url` AND add a separate `query` field.
-// includeHash:  take the fragment verbatim, bypassing the anchor heuristic.
-context={() => buildAutoPageContext({ includeQuery: true, includeHash: true })}
-```
-
-`'auto'` is SSR-safe (during a server render there is no page to read, so it
-contributes nothing and the real values are captured on the client at send
-time — no hydration mismatch) and works in the script-tag embed
-(`data-config='{"context":"auto"}'`). A function that throws never blocks the
-message; the turn just sends without context.
-
-> **Trust boundary (unchanged by `'auto'`).** `context` is browser-controlled,
-> so the server treats it as **untrusted** input and ignores it unless the
-> handler opts in — either a server-side `getContext` (authoritative; can
-> validate/merge/override) or `trustClientContext: true`. Choosing `'auto'`
-> saves you the wiring; it does **not** make the value trusted, and the safe
-> default is exactly why the query string / non-anchor fragment are stripped.
-> `includeQuery` / `includeHash` ship more of the URL — enable them only after
-> confirming those parts hold no tokens or PII. Never put secrets in `context`.
-
-## Suggested follow-ups
-
-Turn on contextual next-step chips with one server-side option:
-
-```ts
-export const { GET, POST, DELETE } = createChatHandler({
-  getUserId: getChatUserId,
-  model: anthropic('claude-sonnet-4-5'),
-  store: createDrizzleChatStore(),
-  followUps: true,
-});
-```
-
-After the main answer finishes streaming, the handler makes a small structured
-second call with the same resolved model and appends up to three suggestions as
-a `data-follow-ups` part on the assistant message. The widget renders them
-automatically; clicking one sends it as the next user message. They are also
-persisted with the message, so history reloads do not need to regenerate them.
-The second call is included in the turn's usage/cost totals.
-
-Tune the count and generation timeout:
-
-```ts
-followUps: { max: 4, timeoutMs: 5_000 }
-```
-
-For a fully custom server generator, pass `generate(messages, ctx)`. The
-existing client-side `ChatWidget` `followUps.generate` remains available as a
-BYO-transport fallback, but the server option is recommended because provider
-credentials never reach the browser. Set `followUps: false` in the handler to
-force-disable a hosted dashboard setting. (There is deliberately no static
-suggestion list: the same chips after every reply are noise — fixed prompts
-belong in `starterPrompts`.)
-
----
-
-## Opening the widget from your site (Ask-AI buttons & shortcuts)
-
-The widget can be opened from your OWN page chrome — a nav "Ask AI" button, a
-search bar affordance, a keyboard shortcut — with no React ref and no JS at
-all for the button case. All three routes are equivalent to calling the
-`ChatWidgetHandle` ref's `open()` / `close()` / `toggle()`: same
-`allowAutoReopen` gate, same controlled-mode `onOpenChange` behaviour, same
-`persistState` persistence.
-
-**1. Keyboard shortcut** — set `display.keyboardShortcut`. Off by default; the
-widget never hijacks a host page's keybindings unless you opt in.
-
-```tsx
-<ChatWidget config={{ schemaVersion: 1, runtime: { model: 'preview/only' }, client: { display: { keyboardShortcut: 'mod+i' } } }} />
-```
-
-**2. Data-attribute buttons** — add `data-mordn-chat-open` (or `-toggle` /
-`-close`) to any element, anywhere in your markup, including static or
-markdown-generated docs pages. No shortcut config needed; this always works.
-
-```html
-<button data-mordn-chat-open>Ask AI</button>
-```
-
-**3. CustomEvent API** — the programmatic equivalent, for a search bar, a
-command palette, or any other trigger you already have wired up.
-
-```js
-document.dispatchEvent(new CustomEvent('mordn-chat:open'));
-```
-
-`mordn-chat:close` and `mordn-chat:toggle` work the same way. See the
-`keyboardShortcut` JSDoc in `DisplayConfig` for the full combo syntax
-(`"mod+k"`, `"ctrl+shift+/"`, a bare `"/"`, …), the typing guard for bare
-keys, and multi-instance behaviour.
-
----
-
-## Script-tag embed (any site)
-
-The standalone bundle uses the same bootstrap architecture. The only declarative
-shortcuts are transport/mount settings; identity and agent selection remain
-server-side.
+## Script-tag embed
 
 ```html
 <script
@@ -300,286 +79,26 @@ server-side.
 ></script>
 ```
 
-Or initialise imperatively with the same public props:
+Same bootstrap flow: identity and agent selection stay server-side.
 
-```html
-<script src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"></script>
-<script>
-  const chat = MordnChat.init({
-    apiBase: 'https://your-app.com/api/chat',
-  });
-</script>
-```
+## Docs
 
-For owner previews, `data-config` may contain the full `MordnChatConfig`, whose
-`config` field is a canonical schema-v1 `AgentConfig`. Production handlers ignore
-that request config unless `resolvePreviewConfig` is installed.
+| | |
+| --- | --- |
+| [Quickstart](https://mordn.com/docs/quickstart) | Scaffold the backend, mount the widget |
+| [Security](https://mordn.com/docs/security) | The identity boundary and its guarantees |
+| [Backends](https://mordn.com/docs/backends/overview) | Hosted, Drizzle, Supabase, custom |
+| [Theming](https://mordn.com/docs/guides/theming) · [Context](https://mordn.com/docs/guides/context) | Appearance, page awareness |
+| [Models & tools](https://mordn.com/docs/guides/models-and-tools) · [MCP](https://mordn.com/docs/guides/mcp) | Model selection, tool wiring |
+| [Actions](https://mordn.com/docs/guides/build-actions) · [Templates](https://mordn.com/docs/guides/action-templates) | Doing things, not just answering |
+| [Knowledge](https://mordn.com/docs/guides/knowledge) | RAG ingestion, retrieval, CI evals |
+| [Attachments](https://mordn.com/docs/guides/attachments) · [Persistence](https://mordn.com/docs/guides/persistence) · [Memory](https://mordn.com/docs/guides/memory) | State |
+| [Production](https://mordn.com/docs/guides/production-readiness) | Ship checklist |
+| [ChatWidget](https://mordn.com/docs/api/chat-widget) · [Handler](https://mordn.com/docs/api/create-chat-handler) · [Exports](https://mordn.com/docs/api/exports) | Every option |
+| [CLI](https://mordn.com/docs/api/cli) | `npx @mordn/chat-widget`: scaffold, ingest, eval |
 
-For cross-origin embeds, explicitly allow the embedding origin and export the
-`OPTIONS` handler:
-
-```ts
-const handler = createMordnHandler({
-  apiKey: process.env.MORDN_CHAT_KEY!,
-  getUserId,
-  cors: {
-    allowOrigins: ['https://docs.example.com'],
-    allowCredentials: true, // only when getUserId authenticates with cookies
-  },
-});
-export const { GET, POST, DELETE, OPTIONS } = handler;
-```
-
-Set `requestCredentials: 'include'` on `ChatWidget` only for cross-origin cookie
-authentication. Same-origin mounts need no CORS option. Generic `headers` remain
-available for real transport metadata and may trigger a preflight; they are not
-a config or identity transport.
-
-## Bring your own database / storage
-
-The default `createDrizzleChatStore()` and `createSupabaseStorage()` are just
-implementations of two interfaces. To use your own database, ORM, or object
-store, implement the interface and pass it instead — same handler, same
-security guarantees:
-
-```ts
-import type { ChatStore, StorageAdapter } from '@mordn/chat-widget/server';
-
-const myStore = (userId: string): ChatStore => ({ /* ... */ });
-const myStorage = (userId: string): StorageAdapter => ({ /* ... */ });
-
-createChatHandler({ getUserId, model, store: myStore, storage: myStorage });
-```
-
-Both factories are constructed per request with the **server-verified** user id,
-so a store/adapter instance can only ever touch that user's data — cross-user
-access (IDOR) is unrepresentable. See `SECURITY.md` for the full model.
-
-### File uploads & the storage bucket
-
-`createSupabaseStorage()` expects a **private** `chat-attachments` bucket and
-the service-role key:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"   # server-only, never NEXT_PUBLIC
-```
-
-Create the bucket as **Private** — the adapter never relies on public read; it
-mints short-lived signed URLs and re-signs them on history load. A public
-bucket would defeat the security model. Omit the `storage` option entirely to
-disable uploads.
-
----
-
-## Handler options (`createChatHandler`)
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `getUserId(req)` | **yes** | Return the user id from your verified server session, or `null` (→ 401). The security boundary. |
-| `model` | no* | A `LanguageModel`, or `(ctx) => LanguageModel`. *Required only when canonical hosted config does not supply `runtime.model`.* |
-| `store` | yes* | A `ChatStoreFactory` for direct `createChatHandler` use. *`createMordnHandler` supplies the hosted store.* |
-| `storage` | no | A `StorageAdapterFactory` (e.g. `createSupabaseStorage()`). Omit to disable uploads. |
-| `buildTools(ctx)` | no | `async (ctx) => ({ tools, cleanup? })`. `cleanup` is called exactly once per turn (finish/error/abort) — use it to close per-request resources like an MCP client. |
-| `buildSystemPrompt(ctx)` | no | Returns the system prompt; receives the request context to personalise. |
-| `transformMessages(msgs, ctx)` | no | Last-chance rewrite of model messages (e.g. image part handling). |
-| `onChatFinish(info)` | no | Post-persist hook for telemetry/usage. |
-| `onError(err)` | no | Map a stream error to the user-facing string. |
-| `stopWhen` | no | AI SDK stop condition for tool-call loops (default: bounded step count). |
-| `upload` | no | `{ allowedMediaTypes?, maxBytes? }` — server-side upload policy. |
-| `maxHistoryMessages` | no | Sliding-window size sent to the model (default 30). |
-
-The widget exposes only these seams. Ownership checks, idempotent persistence,
-history pagination, attachment re-signing, and socket teardown are owned by the
-handler and are not configurable — getting them wrong is a bug, not a setting.
-
----
-
-## Knowledge base (RAG) & ingestion
-
-The optional knowledge module (`@mordn/chat-widget/server/knowledge`) ingests
-docs into a vector store and retrieves them at chat time. Ingestion is
-**docs-aware** by default:
-
-- **Markdown-first extraction.** HTML pages are converted to structure-preserving
-  markdown (headings, code fences with language, lists) instead of flat prose;
-  `.md`/`.mdx` pages and `text/markdown` responses pass through as-is.
-- **Heading-aware chunking.** Chunks are packed within a section, a fenced code
-  block is never split, and each chunk is prefixed with its breadcrumb
-  (`Guide › Persistence › Sliding window`) and stamped with `anchor` +
-  `headingPath` metadata.
-- **Deep-link citations.** Web citations get a `#anchor` fragment so a source
-  links to the exact section that answered, not the top of the page.
-- **`llms.txt` support.** Point ingestion at a site's `llms.txt` index and it
-  fetches every linked doc; `sitemap`/`crawl` sources auto-discover and prefer a
-  site's `llms.txt` when one exists.
-
-```ts
-import { ingest } from '@mordn/chat-widget/server/knowledge';
-import { createKnowledgeDrizzleStore } from '@mordn/chat-widget/server/knowledge/drizzle';
-
-const store = createKnowledgeDrizzleStore({ embedder });
-
-await ingest({
-  store: store('agent:my-agent'),
-  namespace: 'agent:my-agent',
-  sources: [
-    { type: 'llms', url: 'https://docs.example.com/llms.txt' },
-    { type: 'url', url: 'https://docs.example.com/guide.md' },
-  ],
-  // docsMode: true,       // default — set false for the legacy plain path
-  // preferLlmsTxt: true,  // default — sitemap/crawl auto-discover llms.txt
-});
-```
-
-From the CLI (see the command list in `chat-widget --help`):
-
-```bash
-npx @mordn/chat-widget ingest --llms https://docs.example.com/llms.txt
-```
-
-`chunkMarkdown` and `htmlToMarkdown` are exported too, for bring-your-own
-ingestion pipelines that want the same structure-aware chunking and anchors.
-
----
-
-## Test your docs bot in CI
-
-If you use the knowledge base to answer questions from your docs, retrieval can
-silently regress when you re-crawl or restructure them. Write down the questions
-your bot must answer and check them on every push — no LLM calls, so it is free
-to run in CI.
-
-Create an `evals.json` (versioned; each case asserts what retrieval should
-surface):
-
-```json
-{
-  "version": 1,
-  "defaults": { "topK": 5, "minScore": 0.2 },
-  "cases": [
-    {
-      "id": "install-pnpm",
-      "question": "How do I install with pnpm?",
-      "expect": {
-        "sourceIncludes": "docs.example.com/install",
-        "anchor": "pnpm",
-        "minScore": 0.4,
-        "notSourceIncludes": "legacy"
-      }
-    }
-  ]
-}
-```
-
-Each case runs the question through your retriever (built from the same
-`chat-widget.config` as `ingest`) and passes when every check passes:
-
-- `sourceIncludes` — a retrieved chunk's citation URL or source contains this string (string or array; any match).
-- `notSourceIncludes` — no retrieved chunk matches (guards against a wrong/legacy page returning).
-- `minScore` — the top retrieved score is at least this.
-- `anchor` — a retrieved chunk's heading anchor contains this (populated by docs-aware ingestion).
-
-Run it. The command exits `0` when all cases pass and `1` on any failure:
-
-```bash
-npx @mordn/chat-widget eval --file evals.json
-```
-
-Add `--json` for the full result object (per-case checks + retrieved chunks),
-handy for custom reporting. Drop it into GitHub Actions:
-
-```yaml
-- run: npm ci
-- run: npx @mordn/chat-widget eval --file evals.json
-  env:
-    DATABASE_URL: ${{ secrets.DATABASE_URL }}
-    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-```
-
-You can also run the suite programmatically with `runEvals` from
-`@mordn/chat-widget/server/knowledge`.
-
----
-
-## Keep your index fresh (re-sync on deploy)
-
-When your docs ship, the index should follow shortly after the new page is
-**actually live** — typically fresh within about a minute of the trigger for
-changed-page workloads (measure your own pipeline before quoting an SLO).
-Put sources on a `daily`/`weekly` cadence, or re-index the moment a docs deploy
-**goes live** — trigger on the deploy, not on the push, so the crawler never
-races your host's build and indexes the old page.
-
-This repo ships an official composite GitHub Action —
-`arnavv-guptaa/chat-widget/actions/sync`. Trigger it on a genuine post-deploy
-signal — here, the completion of your deploy workflow:
-
-```yaml
-# .github/workflows/resync-docs.yml
-name: Re-sync docs
-on:
-  workflow_run:
-    workflows: ["Deploy docs"]     # the name: of your deploy workflow
-    types: [completed]
-jobs:
-  resync:
-    runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    steps:
-      # Pin to an immutable commit SHA (never @main while a key is passed).
-      # Resolve it with: git ls-remote https://github.com/arnavv-guptaa/chat-widget <ref>
-      - uses: arnavv-guptaa/chat-widget/actions/sync@REPLACE_WITH_40_CHAR_COMMIT_SHA
-        with:
-          api-key: ${{ secrets.MORDN_SYNC_KEY }}   # prefer a sync-scoped key
-          wait: 'true'   # poll jobs (incl. any coalesced rerun) and fail on error
-```
-
-`wait: 'true'` gates the workflow on freshness (a failed re-index goes red in
-CI) and covers the coalesced rerun when deploys overlap. Pin the `uses:` ref to a
-full 40-char commit SHA — never `@main` — since a credential is passed (a release
-tag will be published; pin it by SHA per GitHub's hardening guidance). The full
-freshness ladder, other deployment-gated triggers (`deployment_status`, a
-deploy-gated `push` job), Vercel / Netlify / Cloudflare Pages deploy-hook recipes,
-overlap/coalesce semantics, and secret-hygiene guidance are in
-**[docs/keep-your-index-fresh.md](./docs/keep-your-index-fresh.md)**.
-
----
-
-## Exports
-
-```ts
-// Client component + styles
-import { ChatWidget, type AgentConfig } from '@mordn/chat-widget';
-import '@mordn/chat-widget/styles.css';
-
-// Server handler + the pluggable contracts (server-only)
-import {
-  createChatHandler, createMordnHandler,
-  type ChatStore, type ChatStoreFactory,
-  type StorageAdapter, type StorageAdapterFactory,
-  ConversationOwnershipError,
-} from '@mordn/chat-widget/server';
-
-// Default Postgres/Drizzle store (server-only)
-import { createDrizzleChatStore, schema } from '@mordn/chat-widget/server/drizzle';
-
-// Default Supabase storage adapter (server-only)
-import { createSupabaseStorage } from '@mordn/chat-widget/server/supabase';
-
-// Knowledge base / RAG: ingestion, retrieval, docs-aware helpers, and the CI eval suite (server-only)
-import {
-  ingest,
-  chunkMarkdown, htmlToMarkdown,
-  createSearchKnowledgeTool, citationUrl,
-  runEvals, type EvalFile,
-  type IngestSource, type IngestOptions,
-} from '@mordn/chat-widget/server/knowledge';
-```
-
----
+In-repo: [index freshness](./docs/keep-your-index-fresh.md), [action templates](./docs/action-templates.md), [SECURITY.md](./SECURITY.md), [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
 MIT
-

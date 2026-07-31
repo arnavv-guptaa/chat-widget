@@ -248,9 +248,9 @@ export interface MemoryConfig {
  * (a small structured second call using the same resolved model), or an object
  * to tune/override it. Off by default.
  *
- * Unlike the client `ChatWidgetProps.followUps.generate` escape hatch, this
- * never exposes provider credentials in the browser and works for React and the
- * script-tag embed through the same response stream.
+ * This is the only place follow-ups are generated or capped: the client renders
+ * whatever it is served. Works for React and the script-tag embed through the
+ * same response stream.
  */
 export interface ServerFollowUpConfig {
   /** Master switch. Default true when the object is provided. */

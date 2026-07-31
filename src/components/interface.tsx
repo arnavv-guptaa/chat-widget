@@ -35,7 +35,7 @@ import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, PaperclipIcon, SquarePenIcon, XIcon } from 'lucide-react';
 import { cn } from '../utils/cn';
-import { normalizeFollowUpSuggestions, resolveFollowUpCount } from '../utils/follow-ups';
+import { MAX_FOLLOW_UP_COUNT, normalizeFollowUpSuggestions } from '../utils/follow-ups';
 import { resolveChatContext } from '../utils/page-context';
 import {
   hasRenderableAssistantContent,
@@ -73,7 +73,7 @@ import { FollowUpSuggestions } from './follow-up-suggestions';
 import { StarterMessages } from './suggestion2';
 import { MessageItem } from './message-item';
 import { useChatStorageKey } from '../contexts/chat-storage-context';
-import type { StarterPrompt, FollowUpMessage, ChatContext } from '../types';
+import type { StarterPrompt, ChatContext } from '../types';
 
 type Conversation = {
   id: string;
@@ -1169,16 +1169,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     );
   }, [messages, status, activeTabId]);
 
-  // Follow-up chips (#134): the handler appends a persistent data part after
-  // the assistant's text settles. Prefer that one-toggle, server-safe path; keep
-  // the original host generator/static list as a backwards-compatible fallback.
-  // Chips clear as soon as a new turn starts, so stale suggestions never sit
-  // above an in-flight response.
+  // Follow-up chips (#134): the handler appends a `data-follow-ups` part after
+  // the assistant's text settles, already filtered and capped server-side. The
+  // client just renders what it is served. Chips clear as soon as a new turn
+  // starts, so stale suggestions never sit above an in-flight response.
   useEffect(() => {
-    const fu = config?.followUps;
     const last = messages[messages.length - 1];
     const settledAssistant = status === 'ready' && !!last && last.role === 'assistant';
-    if (!settledAssistant || fu?.enabled === false) {
+    if (!settledAssistant) {
       if (followUpsForRef.current !== null) {
         followUpsForRef.current = null;
         setFollowUps([]);
@@ -1189,54 +1187,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const dataPart = (last.parts ?? []).find(
       (part) => (part as { type?: string }).type === 'data-follow-ups',
     ) as { data?: { suggestions?: unknown } } | undefined;
-    const serverSuggestions = normalizeFollowUpSuggestions(
+    // MAX_FOLLOW_UP_COUNT is a structural bound on untrusted parsed data, not a
+    // policy knob: how many to show is settled by runtime.followUps.max.
+    const suggestions = normalizeFollowUpSuggestions(
       dataPart?.data?.suggestions,
-      fu?.max ?? 5,
+      MAX_FOLLOW_UP_COUNT,
     );
-    if (serverSuggestions.length > 0) {
-      followUpsForRef.current = last.id;
-      setFollowUps(serverSuggestions);
-      return;
-    }
-
-    // No server data part: use the legacy client-supplied generator/static list.
-    if (!fu) {
-      if (followUpsForRef.current !== null) setFollowUps([]);
-      followUpsForRef.current = null;
-      return;
-    }
-    if (followUpsForRef.current === last.id) return; // already computed this turn
-    followUpsForRef.current = last.id;
-    const max = resolveFollowUpCount(fu.max);
-    if (typeof fu.generate === 'function') {
-      const textOf = (m: { role: string; parts?: Array<{ type: string; text?: string }> }): FollowUpMessage => ({
-        role: m.role,
-        content: (m.parts ?? [])
-          .filter((part) => part.type === 'text' && typeof part.text === 'string')
-          .map((part) => part.text as string)
-          .join('\n\n'),
-      });
-      const simplified = messages.map(textOf);
-      let cancelled = false;
-      Promise.resolve()
-        .then(() => fu.generate!(simplified))
-        .then((suggestions) => {
-          if (!cancelled) {
-            setFollowUps(normalizeFollowUpSuggestions(suggestions, max));
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setFollowUps([]);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-    // No server data and no client generator → nothing to show. (Static
-    // per-reply suggestion lists were removed: the same chips after every
-    // answer are noise — fixed prompts belong in starterPrompts.)
-    setFollowUps([]);
-  }, [messages, status, config?.followUps]);
+    followUpsForRef.current = suggestions.length > 0 ? last.id : null;
+    setFollowUps(suggestions);
+  }, [messages, status]);
 
   const handleSelectConversation = async (selectedConversationId: string, conversationTitle: string) => {
     try {

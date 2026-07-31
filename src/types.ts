@@ -67,33 +67,13 @@ export interface ActionResult {
 export type ActionRenderer = (part: ToolPartLike) => ActionResult | null;
 
 /**
- * Simplified message handed to a follow-up generator — no AI SDK types to
- * import. `content` is the concatenated text of the message's text parts.
+ * Simplified message shape used by the server follow-up generator - no AI SDK
+ * types to import. `content` is the concatenated text of the message's text
+ * parts.
  */
 export interface FollowUpMessage {
   role: string;
   content: string;
-}
-
-/**
- * Client-side override/fallback for follow-up chips (#134). Prefer the secure
- * server generator: `createChatHandler({ followUps: true })`.
- */
-export interface FollowUpConfig {
-  /**
-   * Client display switch. Set `false` to hide server-emitted suggestions too.
-   * Otherwise server data is shown automatically; `generate` is used only when
-   * the response contains no `data-follow-ups` part.
-   */
-  enabled?: boolean;
-  /**
-   * BYO client generator fallback. Runs after the assistant reply finishes and
-   * never blocks the main response, but provider credentials must stay out of
-   * the browser — call your own authenticated backend from here if needed.
-   */
-  generate?: (messages: FollowUpMessage[]) => string[] | Promise<string[]>;
-  /** Max chips to show, clamped to 1–5. Default 3 for client fallbacks. */
-  max?: number;
 }
 
 /**
