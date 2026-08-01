@@ -11,7 +11,12 @@ export default defineConfig({
     },
   },
   test: {
+    // Default to node (most tests are server/pure-logic). Component tests opt
+    // into a DOM with a `@vitest-environment jsdom` docblock — cheaper than
+    // paying for jsdom setup on every server test.
     environment: 'node',
-    include: ['test/**/*.test.ts'],
+    // `.tsx` was missing here, so component tests silently never ran:
+    // chart-render.test.tsx had been collected zero times since it was written.
+    include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
   },
 });

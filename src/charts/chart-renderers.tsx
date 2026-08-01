@@ -284,20 +284,35 @@ export function GroupedBarChart({ spec }: { spec: ChartSpec }): ReactElement {
 }
 
 // ── pie / donut ────────────────────────────────────────────────────────────────
-export function PieChart({ spec, donut = false }: { spec: ChartSpec; donut?: boolean }): ReactElement {
-  const series = asSeriesArray(spec)[0];
-  const points = series.points;
+
+/**
+ * Honesty guard: pie/donut slices must sum to ~the declared whole (default 100).
+ * A pie that doesn't sum to a whole is the single most misleading chart there is.
+ *
+ * This is a PLAIN FUNCTION, called by renderChartSvg BEFORE the element is
+ * created, and that placement is load-bearing. It used to throw from inside the
+ * PieChart component body — but `renderChartSvg` only *creates* elements, so
+ * ChartBlock's try/catch wrapped element creation, not the component call.
+ * React invoked PieChart later, during its own render, and the throw sailed past
+ * the catch and blanked the whole message bubble. Validating here puts the throw
+ * back inside the try where ChartBlock has always expected it.
+ */
+function assertPieSumsToWhole(spec: ChartSpec): void {
+  const points = asSeriesArray(spec)[0].points;
   const total = points.reduce((acc, p) => acc + p.value, 0);
-  // Honesty: slices must sum to ~the declared whole. Default whole = 100.
   const whole = spec.whole ?? { total: 100, tolerance: 0.02 };
   const tolerance = whole.total * whole.tolerance;
   if (Math.abs(total - whole.total) > tolerance) {
-    // Refuse — the caller (ChartBlock) catches a thrown Error and renders the
-    // error card. A pie that doesn't sum to a whole is the #1 misleading pie.
     throw new Error(
       `The ${spec.type} slices sum to ${formatTick(total)}, which is outside the declared whole of ${formatTick(whole.total)} (±${formatTick(tolerance)}). A pie/donut must represent parts of a single whole.`,
     );
   }
+}
+
+export function PieChart({ spec, donut = false }: { spec: ChartSpec; donut?: boolean }): ReactElement {
+  const series = asSeriesArray(spec)[0];
+  const points = series.points;
+  const total = points.reduce((acc, p) => acc + p.value, 0);
   const cx = VIEW_W / 2;
   const cy = VIEW_H / 2;
   const r = Math.min(PLOT_W, PLOT_H) / 2 + 8;
@@ -427,8 +442,12 @@ export function renderChartSvg(spec: ChartSpec): ReactElement {
     case 'multi-line': return <LineChart spec={spec} />;
     case 'stacked-bar': return <StackedBarChart spec={spec} />;
     case 'grouped-bar': return <GroupedBarChart spec={spec} />;
-    case 'pie': return <PieChart spec={spec} />;
-    case 'donut': return <PieChart spec={spec} donut />;
+    // Validate BEFORE creating the element: a throw here is inside ChartBlock's
+    // try/catch and degrades to the error card. A throw from the component body
+    // would escape it (React calls the component after this function returns)
+    // and crash the message bubble.
+    case 'pie': assertPieSumsToWhole(spec); return <PieChart spec={spec} />;
+    case 'donut': assertPieSumsToWhole(spec); return <PieChart spec={spec} donut />;
     case 'scatter': return <ScatterChart spec={spec} />;
     case 'sparkline': return <Sparkline spec={spec} />;
     default: throw new Error(`Unsupported chart type: ${(spec as { type: string }).type}`);
