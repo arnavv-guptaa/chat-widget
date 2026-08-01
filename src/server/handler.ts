@@ -80,7 +80,13 @@ import { BOOTSTRAP_PROTOCOL_VERSION, isAgentConfig, type AgentConfig, type Publi
 
 const DEFAULT_MAX_HISTORY_MESSAGES = 30;
 const DEFAULT_MAX_MESSAGE_CHARS = 4000;
-const DEFAULT_STEP_BUDGET = 10;
+// Steps are model turns, not tool calls: a knowledge-grounded answer can spend
+// several on retrieval before it writes a word. At 10 an agent that searches
+// aggressively exhausts the budget mid-loop and `stopWhen` halts generation
+// BEFORE any text is produced — the client renders a finished turn with sources
+// and zero content. 100 leaves room for deep multi-tool reasoning; the
+// empty-text fallback below covers whatever still runs out.
+const DEFAULT_STEP_BUDGET = 100;
 const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const DEFAULT_ALLOWED_MEDIA_TYPES = [
   'image/png',
@@ -781,6 +787,24 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         finalProviderMetadata = providerMetadata;
         finalFinishReason = typeof finishReason === 'string' ? finishReason : undefined;
         finalStepCount = Array.isArray(steps) ? steps.length : undefined;
+
+        // A turn can finish with NO text: the model spends every step on tool
+        // calls and `stopWhen` halts the loop before it ever writes an answer.
+        // The transcript then shows tool activity, a Sources card, and nothing
+        // else — indistinguishable from a broken product. Emit a plain-text
+        // part so the turn always ends in words. Written before the finish
+        // event below so it lands inside the same message.
+        if (!text?.trim() && finishReason !== 'error' && !request.signal.aborted) {
+          const id = 'empty-turn-fallback';
+          followUpWriter?.write({ type: 'text-start', id });
+          followUpWriter?.write({
+            type: 'text-delta',
+            id,
+            delta:
+              "I looked into that but ran out of room before I could answer. Try asking again, or narrow the question a little.",
+          });
+          followUpWriter?.write({ type: 'text-end', id });
+        }
 
         // We suppress the inner stream's finish chunk and emit it here AFTER the
         // optional data part, keeping the UI-message protocol's finish event

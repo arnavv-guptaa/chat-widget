@@ -2,6 +2,12 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.17.3 — 2026-08-01
+
+### Fixed
+- **A turn could finish with no answer at all.** `DEFAULT_STEP_BUDGET` was 10, and steps are model turns, not tool calls. A knowledge-grounded agent that searched aggressively spent every step on retrieval, `stopWhen` halted the loop before the model wrote a word, and the client rendered a *completed* turn — tool activity, a Sources card, feedback buttons — with zero text. Indistinguishable from a broken product, and silent: HTTP 200, no error. The budget is now 100.
+- **Empty turns now say something.** Whatever still exhausts the budget emits a plain-text fallback instead of nothing, so a turn always ends in words rather than an empty bubble.
+
 ## 0.17.2 — 2026-08-01
 
 ### Fixed
