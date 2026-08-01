@@ -2,6 +2,16 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.17.1 — 2026-08-01
+
+### Fixed
+- **Switching tabs mid-answer no longer throws the response away.** Each tab now owns its own `Chat` instance, so a background tab keeps streaming into its own message list; switch back and it is still going. Previously one `useChat` was re-keyed per tab, which forced an abort on every activation to stop the old tab's stream appending into the newly-active conversation. That abort was pure loss: the handler passes no `abortSignal` to `streamText` unless the host sets `streamTimeoutMs`, so the server kept generating and persisted the turn regardless — the tokens were paid for, the UI just discarded them until a refresh.
+- **Re-entering a tab no longer refetches its history.** A tab's messages live in its own instance, so `loadConversation` skips a tab that is already loaded or streaming. Removes a network round-trip (and its loading state) from every tab switch.
+
+### Notes
+- Closing a tab still stops its stream and releases the instance — that is the one place abandoning a stream is right, and the server still finishes and persists, so reopening from history shows the completed answer.
+- Refreshing mid-stream still loses the live view (the answer is persisted and appears once complete). Reattaching to an in-flight stream needs `resume: true` plus a server-side resumable-stream endpoint.
+
 ## 0.17.0 — 2026-07-31
 
 ### Breaking
