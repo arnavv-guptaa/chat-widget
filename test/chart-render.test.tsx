@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * Renderer honesty-default tests (PRD §3 Rule 3) + the v2 y-axis fix.
  *
  * The line-chart bug in v1 was an orphan `8.1` tick clipped at the baseline,
