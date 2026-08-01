@@ -2,6 +2,15 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.17.2 — 2026-08-01
+
+### Fixed
+- **Mermaid no longer leaves a "Syntax error" graphic on the host page.** mermaid needs a live element to measure layout and, given none, creates one on `document.body` — outside `.chat-widget-container`. On a syntax error it painted its bomb graphic there, threw, and left the node attached: the widget degraded correctly to the code view while the embedding site was left with a full-width error graphic. Model output is untrusted parser input, so invalid diagrams are the expected case; the fix layers `suppressErrorRendering`, a `parse()` gate before any DOM work, and an owned offscreen container removed on every exit path.
+- **An invalid pie/donut no longer blanks the message bubble.** `PieChart` threw from its component body when slices did not sum to the declared whole. `ChartBlock`'s try/catch wraps `renderChartSvg`, which only *creates* elements — React called the component afterwards, so the throw escaped and crashed the message. The check now runs before the element is created, so it degrades to the intended error card.
+
+### Internal
+- Component tests had never run: `vitest.config.ts` matched only `*.test.ts`, so `chart-render.test.tsx` was collected zero times since it was written, and neither jsdom nor `@testing-library/react` was installed. Fixed the include pattern and added the DOM toolchain — which is what surfaced the pie bug. 142 tests across 18 files, up from 125 across 16.
+
 ## 0.17.1 — 2026-08-01
 
 ### Fixed
