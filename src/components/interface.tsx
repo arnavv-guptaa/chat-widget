@@ -44,8 +44,8 @@ import {
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Fragment } from 'react';
-import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
+import { Chat, useChat } from '@ai-sdk/react';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from 'ai';
 import { Response } from './response';
 import { GlobeIcon, RefreshCcwIcon, CopyIcon } from 'lucide-react';
 import {
@@ -358,9 +358,29 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     requestConfigRef.current = config?.requestConfig;
   }, [config?.requestConfig]);
 
-  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
-    id: activeTabId || 'temp-id',
-    transport: new DefaultChatTransport({
+  // ── One Chat instance per tab ────────────────────────────────────────────
+  //
+  // Each conversation owns its own Chat (its own stream and its own message
+  // list), and `useChat` renders whichever one is active. A background tab's
+  // stream keeps running and keeps writing into ITS list, so switching away
+  // mid-answer no longer throws the response away — switch back and it is
+  // still streaming.
+  //
+  // This replaces a single instance re-keyed by `id: activeTabId`. That shape
+  // forced an abort on every activation (`stopIfStreaming`), because the old
+  // tab's still-open stream would otherwise append into whatever conversation
+  // had just become current. Separate instances make that contamination
+  // unrepresentable rather than guarded against.
+  //
+  // The registry is a ref, not state: creating a Chat must not schedule a
+  // render, and instances must survive re-renders. `getChat` is idempotent —
+  // the same tab id always returns the same instance, which is what lets a
+  // background stream keep its identity across switches.
+  const chatsRef = useRef<Map<string, Chat<UIMessage>>>(new Map());
+
+  const buildTransport = useCallback(
+    () =>
+      new DefaultChatTransport({
       api: apiBase || '/',
       // Resolved PER REQUEST (see headersRef above) so host-injected headers
       // are never stale — a static object froze the mount-time values.
@@ -398,12 +418,38 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           },
         };
       },
-    }),
-    // Human-in-the-loop tool approval: once the user has answered all pending
-    // approval requests on the last assistant message, automatically send the
-    // responses back so the SDK resumes (runs or skips the tool). Without this
-    // the approve/deny clicks wouldn't continue the turn.
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+      }),
+    [apiBase, config?.requestCredentials],
+  );
+
+  /**
+   * The Chat for a tab, created on first use and reused forever after. Reusing
+   * the instance is the whole point: it is what carries an in-flight stream
+   * across a tab switch.
+   */
+  const getChat = useCallback(
+    (tabId: string): Chat<UIMessage> => {
+      const existing = chatsRef.current.get(tabId);
+      if (existing) return existing;
+      const created = new Chat<UIMessage>({
+        id: tabId,
+        transport: buildTransport(),
+        // Human-in-the-loop tool approval: once the user has answered all
+        // pending approval requests on the last assistant message, send the
+        // responses back so the SDK resumes (runs or skips the tool). Without
+        // this the approve/deny clicks wouldn't continue the turn.
+        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+      });
+      chatsRef.current.set(tabId, created);
+      return created;
+    },
+    [buildTransport],
+  );
+
+  const activeChat = getChat(activeTabId || 'temp-id');
+
+  const { messages, sendMessage, status, setMessages, stop, regenerate, error, clearError, addToolApprovalResponse } = useChat({
+    chat: activeChat,
     // Throttle UI updates while streaming. Default 50ms (~20Hz) for snappy
     // streaming — safe because rendering is targeted (only the active message
     // bubble re-renders per tick; see message-item.tsx). Host-tunable.
@@ -424,20 +470,12 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     setActiveTabId(tabId);
   };
 
-  // Abort an in-flight stream before the active conversation changes. Without
-  // this, the previous tab's still-open stream keeps writing into whatever
-  // chat instance is current — contaminating the newly-activated conversation
-  // on screen AND in what gets persisted on finish. Reads the status mirror so
-  // stale-closure callers (memoised callbacks) still see the live value.
-  const stopIfStreaming = () => {
-    if (statusRef.current === 'submitted' || statusRef.current === 'streaming') {
-      try {
-        stop();
-      } catch {
-        /* stop() is best-effort — never let an abort failure block a tab switch */
-      }
-    }
-  };
+  // (There is deliberately no abort-on-activation here. Each tab owns its own
+  // Chat instance, so a background stream writes into its own message list and
+  // cannot contaminate the tab you switched to — the reason the abort existed.
+  // Streams now survive a tab switch, which is the point: the server never
+  // cancelled them anyway, so aborting only threw away an answer the user had
+  // already paid for.)
 
   // Approve / deny a paused tool (human-in-the-loop). Passed down to the tool
   // renderer; the SDK auto-resumes via sendAutomaticallyWhen above.
@@ -579,6 +617,17 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
   // Centralized function to load a conversation's messages
   const loadConversation = async (conversationId: string) => {
+    // A tab's Chat outlives every switch away from it, so re-entering a tab is
+    // NOT a reason to refetch: its messages are already in its own instance.
+    // Refetching would overwrite them — and if the tab is mid-answer, it would
+    // replace a live streaming message with the last persisted state, which is
+    // exactly the "switch back and the answer is gone" bug this change fixes
+    // (the server has not written the assistant turn yet).
+    const chat = chatsRef.current.get(conversationId);
+    if (chat && (chat.messages.length > 0 || chat.status === 'submitted' || chat.status === 'streaming')) {
+      return;
+    }
+
     // Staleness guard: this load only gets to write state while it is BOTH the
     // latest load started (gen) and loading the tab that is still active
     // (activeTabIdRef). Otherwise a slow fetch for a previously-viewed tab
@@ -714,8 +763,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       return;
     }
 
-    // A new tab must never inherit the previous tab's in-flight stream.
-    stopIfStreaming();
+    // A new tab gets its own Chat instance, so it cannot inherit the previous
+    // tab's in-flight stream — that stream keeps running in its own tab.
 
     // Generate a unique ID for the new tab
     const newTabId = generateUniqueTabId();
@@ -774,10 +823,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     const targetTab = tabs.find(tab => tab.id === tabId);
     if (!targetTab) return;
 
-    // Abort any in-flight stream BEFORE re-keying useChat — otherwise the
-    // previous tab's open stream keeps appending into the current chat
-    // instance, i.e. into the tab we're switching to.
-    stopIfStreaming();
+    // No abort here: the tab we are leaving keeps streaming into its own Chat.
+    // Come back mid-answer and it is still going.
 
     // Update active tab (metadata only)
     setTabs(prevTabs =>
@@ -805,6 +852,23 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     // A closed tab's draft goes with it.
     const closedDraftKey = draftKey(tabId);
     if (closedDraftKey) safeSession.remove(closedDraftKey);
+
+    // …and so does its Chat instance, or the registry would grow for the life
+    // of the session. Closing a tab IS the one place a stream should be
+    // abandoned: the user has dismissed the conversation. The server still
+    // finishes and persists the turn, so reopening from history shows the
+    // completed answer.
+    const closedChat = chatsRef.current.get(tabId);
+    if (closedChat) {
+      if (closedChat.status === 'submitted' || closedChat.status === 'streaming') {
+        try {
+          closedChat.stop();
+        } catch {
+          /* best-effort — a failed abort must never block closing a tab */
+        }
+      }
+      chatsRef.current.delete(tabId);
+    }
 
     const filteredTabs = tabs.filter(tab => tab.id !== tabId);
 
@@ -1210,8 +1274,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
       }
 
       // Opening a conversation from history is an activation like any other —
-      // abort any stream still writing into the current chat instance first.
-      stopIfStreaming();
+      // and like any other, the tab being left keeps its stream.
 
       // Create a new tab with the loaded conversation metadata
       const newTab: ChatTab = {
