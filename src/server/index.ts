@@ -23,6 +23,12 @@ export type {
 export type { ChatStore, ChatStoreFactory } from './chat-store';
 export { ConversationOwnershipError } from './chat-store';
 
+// Error taxonomy. `classifyError` is exported so a host can reuse the exact
+// classification the handler applies — in its own retry wrapper, a background
+// job, or a non-chat call path — instead of writing a second, divergent one.
+export type { ChatErrorKind, ClassifiedChatError } from './errors';
+export { classifyError, isAbortError, messageForErrorKind } from './errors';
+
 export type {
   StorageAdapter,
   StorageAdapterFactory,
