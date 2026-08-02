@@ -66,6 +66,7 @@ function toStoredMessage(row: MessageRow): StoredMessage {
     parts: row.parts,
     text: row.text,
     model: row.model ?? undefined,
+    sequence: row.sequence,
     createdAt: row.createdAt,
   };
 }
@@ -178,11 +179,24 @@ class DrizzleChatStore implements ChatStore {
 
     // Fetch newest-first for the limit, then reverse to chronological order so
     // the UI renders oldest → newest without holding the whole history.
+    //
+    // Sorted by `(created_at, sequence)`, not `created_at` alone. `created_at`
+    // comes from the database clock, so there is no skew between writers — but
+    // there IS finite resolution, and two tabs answering the same conversation
+    // can land inside the same tick. Ordering was then whatever the planner
+    // happened to return, and a transcript could render with the reply above
+    // the question. `sequence` is a strict per-conversation ordinal, so the
+    // composite sort is total.
+    //
+    // The composite is deliberate rather than sorting on `sequence` alone:
+    // rows backfilled by the migration and rows written before this change
+    // both order correctly under `(created_at, sequence)`, so no cutover
+    // window exists where old and new rows interleave wrongly.
     const rows = await this.db
       .select()
       .from(messages)
       .where(where)
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.createdAt), desc(messages.sequence))
       .limit(limit);
 
     return rows.reverse().map(toStoredMessage);
@@ -206,13 +220,34 @@ class DrizzleChatStore implements ChatStore {
     // mint one rather than inserting it. Multiple id-less messages would
     // otherwise all collide on the '' primary key and silently vanish — the
     // exact bug an empty assistant id caused before generateMessageId was set.
-    const values = turnMessages.map((m) => ({
+    // ── Reserve a contiguous block of ordinals ────────────────────────────
+    // One atomic statement: increment the conversation's counter by the number
+    // of messages in this turn and read back the new value. Postgres holds a
+    // row lock for the duration of the UPDATE, so concurrent turns on the same
+    // conversation serialise here — each gets a disjoint block, and neither can
+    // observe a stale counter the way a SELECT-then-UPDATE pair could.
+    //
+    // The returned value is the ordinal of the LAST message in the block, so
+    // the block starts at `nextSequence - turnMessages.length + 1`.
+    //
+    // Ordinals are allocated even if the insert below dedupes some rows away.
+    // Gaps in the sequence are harmless — it is an ordering key, not a count —
+    // and burning an ordinal is far cheaper than reusing one.
+    const [counter] = await this.db
+      .update(conversations)
+      .set({ seqCounter: sql`${conversations.seqCounter} + ${turnMessages.length}` })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, this.userId)))
+      .returning({ seqCounter: conversations.seqCounter });
+    const blockStart = (counter?.seqCounter ?? turnMessages.length) - turnMessages.length + 1;
+
+    const values = turnMessages.map((m, i) => ({
       id: m.id && m.id.length > 0 ? m.id : generateId(),
       conversationId,
       role: m.role as 'user' | 'assistant' | 'system',
       parts: m.parts,
       text: textFromParts(m.parts),
       model: m.role === 'assistant' ? model ?? null : null,
+      sequence: blockStart + i,
     }));
 
     // The PK is `id` alone, so onConflictDoNothing's dedup is GLOBAL, not
@@ -247,7 +282,10 @@ class DrizzleChatStore implements ChatStore {
     // default is load-bearing — it is the handler's "still needs a title" signal,
     // so a failed generation retries naturally on the thread's next turn.
 
-    // Bump updatedAt so the conversation surfaces at the top of the history list.
+    // Bump updatedAt so the conversation surfaces at the top of the history
+    // list. (Kept separate from the counter reservation above: that one must
+    // happen BEFORE the insert to mint ordinals, this one must happen after so
+    // it reflects a turn that actually landed.)
     await this.db
       .update(conversations)
       .set({ updatedAt: new Date() })

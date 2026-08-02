@@ -94,6 +94,16 @@ export interface StoredMessage {
   text: string;
   /** Which model produced this message, when known (assistant turns). */
   model?: string;
+  /**
+   * Strict per-conversation ordinal, when the store maintains one.
+   *
+   * Optional because it is a property of the *implementation*, not of the
+   * contract: a BYO store that already guarantees ordering some other way is
+   * free to omit it. Where present, `(createdAt, sequence)` is a total order
+   * over a conversation's messages — `createdAt` alone is not, because two
+   * concurrent writers can land in the same clock tick.
+   */
+  sequence?: number;
   createdAt: Date;
 }
 
