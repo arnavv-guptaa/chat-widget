@@ -24,7 +24,7 @@
  * installs upgrade without data loss (see migrations/).
  */
 
-import { pgTable, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, index, integer } from 'drizzle-orm/pg-core';
 import type { UIMessage } from 'ai';
 
 export const conversations = pgTable(
@@ -35,6 +35,18 @@ export const conversations = pgTable(
     title: text('title').notNull().default('New Chat'),
     /** Free-form host-app metadata. Never read by the core. */
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    /**
+     * Monotonic per-conversation message counter.
+     *
+     * This is the allocator behind `chat_messages.sequence`. `saveTurn` reserves
+     * a block of ordinals with a single atomic
+     * `UPDATE … SET seq_counter = seq_counter + n RETURNING seq_counter`, which
+     * takes a row lock for the duration of the statement — so two browser tabs
+     * writing the same conversation at the same instant serialise here and can
+     * never be handed the same ordinal. No advisory lock, no SELECT-then-UPDATE
+     * race, no extra round trip.
+     */
+    seqCounter: integer('seq_counter').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -58,11 +70,32 @@ export const messages = pgTable(
     text: text('text').notNull().default(''),
     /** Model that produced this message (assistant turns). */
     model: text('model'),
+    /**
+     * Strict per-conversation ordinal, minted from `conversations.seq_counter`.
+     *
+     * `created_at` alone was the ordering key, which left message order at the
+     * mercy of clock resolution: two tabs writing in the same millisecond could
+     * render in either order, and nothing in the schema said which was right.
+     * `sequence` is the tiebreak that makes the order a fact rather than a
+     * coincidence.
+     *
+     * Ordering is `(created_at, sequence)`, not `sequence` alone — see
+     * `listMessages`. Legacy rows backfilled by the migration keep a sequence
+     * consistent with their existing `created_at` order, so the composite sort
+     * is stable across the upgrade boundary.
+     */
+    sequence: integer('sequence').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // Drives history load (WHERE conversation_id = ? ORDER BY created_at).
-    index('chat_messages_conversation_created_idx').on(table.conversationId, table.createdAt),
+    // Drives history load (WHERE conversation_id = ? ORDER BY created_at, sequence).
+    // Both sort columns are in the index so the ordered page is an index scan,
+    // not a scan + sort.
+    index('chat_messages_conversation_created_idx').on(
+      table.conversationId,
+      table.createdAt,
+      table.sequence,
+    ),
   ],
 );
 
