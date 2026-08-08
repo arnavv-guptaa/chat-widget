@@ -582,12 +582,38 @@ export interface CreateChatHandlerOptions {
    * Optional overall wall-clock timeout (ms) for the streamed model response. A
    * hung or stalled upstream (bad gateway, wedged tool call) otherwise holds the
    * connection and server resources open until the platform kills it. When set,
-   * the handler aborts the stream after this many ms (in addition to honouring
-   * client-abort). OFF by default, so long but legitimate tool-using turns are
-   * never cut short — set it to a ceiling comfortably above your slowest expected
-   * answer and at/below your platform's function timeout.
+   * the handler aborts the stream after this many ms. OFF by default, so long
+   * but legitimate tool-using turns are never cut short — set it to a ceiling
+   * comfortably above your slowest expected answer and at/below your platform's
+   * function timeout.
+   *
+   * Note: this is now purely an ADDITIONAL ceiling. Client-abort propagation no
+   * longer depends on it — see `propagateClientAbort`, which is on by default.
    */
   streamTimeoutMs?: number;
+
+  /**
+   * Abort the upstream model call when the client disconnects. **On by default.**
+   *
+   * When the user hits Stop, closes the tab, or navigates away, the request's
+   * `AbortSignal` fires. With this enabled (the default) that signal is
+   * forwarded into the model call, so generation — and therefore metered spend —
+   * stops with it.
+   *
+   * This defaults to `true` because the alternative is a silent cost leak: a
+   * Stop button that visually stops the answer while the provider keeps
+   * generating and billing every remaining token. Partial-turn persistence is
+   * unaffected — a stopped turn is still saved with whatever it produced, and
+   * still gets a generated thread title.
+   *
+   * Set `false` only when a turn should deliberately outlive its client — e.g.
+   * driving a background completion whose result is read later from history
+   * rather than from the live stream. `streamTimeoutMs`, if set, still applies
+   * as a wall-clock cap either way.
+   *
+   * Default: `true`.
+   */
+  propagateClientAbort?: boolean;
 
   /**
    * Context compaction. When a conversation grows past `maxHistoryMessages`, the
