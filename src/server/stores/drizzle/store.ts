@@ -159,7 +159,19 @@ class DrizzleChatStore implements ChatStore {
     const owned = await this.getConversation(conversationId);
     if (!owned) return [];
 
-    const limit = Math.min(Math.max(opts?.limit ?? MAX_PAGE, 1), MAX_PAGE);
+    // Ceiling is MAX_PAGE + 1, not MAX_PAGE.
+    //
+    // The router asks for `limit + 1` to detect whether an older page exists
+    // without paying for a second COUNT query. Clamping at exactly MAX_PAGE
+    // silently ate that probe row at the maximum page size: a caller asking for
+    // 100 got 101 clamped back to 100, `page.length > limit` was never true,
+    // `hasMore` was always false, and the conversation appeared to end at
+    // message 100 with no way to scroll further (#55).
+    //
+    // One row of headroom keeps the probe working while the ceiling still does
+    // its real job — bounding what a hostile or careless caller can pull in a
+    // single query.
+    const limit = Math.min(Math.max(opts?.limit ?? MAX_PAGE, 1), MAX_PAGE + 1);
     const where = opts?.before
       ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, opts.before))
       : eq(messages.conversationId, conversationId);
