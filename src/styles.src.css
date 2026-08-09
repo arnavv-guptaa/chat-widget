@@ -428,8 +428,51 @@
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* Edge fades — the only cue that a wide table continues past the card edge.
+   `data-overflow` is set by MarkdownTable from the live scroll position, so a
+   fade shows only on a side that actually has more content (and neither side
+   on a table that fits). The card's overflow:hidden clips them to its radius. */
+.chat-widget-container .is-assistant .chat-message-content .chat-table::before,
+.chat-widget-container .is-assistant .chat-message-content .chat-table::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.75rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: 1;
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table::before {
+  left: 0;
+  background: linear-gradient(to right, hsl(var(--chat-background)), transparent);
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table::after {
+  right: 0;
+  background: linear-gradient(to left, hsl(var(--chat-background)), transparent);
+}
+.chat-widget-container .is-assistant .chat-message-content .chat-table[data-overflow="start"]::before,
+.chat-widget-container .is-assistant .chat-message-content .chat-table[data-overflow="both"]::before,
+.chat-widget-container .is-assistant .chat-message-content .chat-table[data-overflow="end"]::after,
+.chat-widget-container .is-assistant .chat-message-content .chat-table[data-overflow="both"]::after {
+  opacity: 1;
+}
+/* The scroll region is focusable when it overflows (keyboard users need to be
+   able to reach and pan it); keep the focus ring inside the card's radius. */
+.chat-widget-container .is-assistant .chat-message-content .chat-table-scroll:focus-visible {
+  outline: 2px solid hsl(var(--chat-primary) / 0.5);
+  outline-offset: -2px;
+  border-radius: 9px;
+}
+/* Columns size to their content, not to the widget. `width: 100%` forced every
+   column into the bubble's width, so a 6-column table in a 380px widget was
+   compressed until cells shredded ("Homi Bhab / ha Canc / er"). `max-content`
+   lets the table take the width it actually needs and scroll; `min-width: 100%`
+   keeps a narrow 2-column table filling the card instead of stranding it. */
 .chat-widget-container .is-assistant .chat-message-content .chat-table table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   margin: 0;
   border-collapse: collapse;
   font-size: 13px;
@@ -439,6 +482,14 @@
   padding: 0.5em 0.75em;
   text-align: left; /* GFM column alignment (:---:) overrides via inline style */
   font-variant-numeric: tabular-nums;
+  /* Cells opt out of the bubble's `overflow-wrap: anywhere`. That value counts
+     EVERY character as a wrap opportunity when the browser computes a column's
+     min-content width, so the auto table layout was free to crush a column to
+     one character per line — the real cause of the shredded cells. `break-word`
+     still rescues an unbreakable token (a long URL) but leaves min-content at
+     the longest word, which is the width the column algorithm needs to see. */
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .chat-widget-container .is-assistant .chat-message-content .chat-table th {
   background-color: hsl(var(--chat-background));
@@ -452,6 +503,10 @@
 }
 .chat-widget-container .is-assistant .chat-message-content .chat-table td {
   color: hsl(var(--chat-text-body));
+  /* A prose column can't run away and push every other column off-screen. Kept
+     off `th` on purpose: headers are nowrap, so a cap there would spill a long
+     header out of its cell instead of widening the column. */
+  max-width: 20rem;
 }
 /* Hairline between body rows (not above the first — the header rule covers it). */
 .chat-widget-container .is-assistant .chat-message-content .chat-table tbody tr + tr td {
@@ -460,14 +515,16 @@
 .chat-widget-container .is-assistant .chat-message-content .chat-table tbody tr:hover td {
   background-color: hsl(var(--chat-hover-bg) / 0.5);
 }
-/* Copy-as-TSV — always visible, floating over the header's right edge. Same
-   affordance language as .chat-code-copy (which is also always visible; copy
-   affordances shouldn't need a hover to discover). Backed by the surface tone
-   so it stays legible over a scrolled-under header. */
+/* Copy-as-TSV — revealed on hover. It floats over the header's right edge, and
+   a wide table needs that row intact: parked there permanently it sat on top of
+   a column label. Backed by the surface tone so it stays legible over a
+   scrolled-under header. Diverges from .chat-code-copy (always visible) because
+   a code block has a chrome bar to park in and a table does not. */
 .chat-widget-container .chat-table-copy {
   position: absolute;
   top: 0.3rem;
   right: 0.3rem;
+  z-index: 2; /* above the .chat-table edge fades */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -478,11 +535,26 @@
   border: none;
   cursor: pointer;
   color: hsl(var(--chat-text-muted));
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .chat-widget-container .chat-table-copy:hover {
   background-color: hsl(var(--chat-hover-bg));
   color: hsl(var(--chat-text));
+}
+/* The hide is scoped to pointers that can actually hover — on touch there is no
+   hover state, so an unscoped rule would make the button permanently invisible.
+   Keyboard focus reveals it too (otherwise it is unreachable without a mouse),
+   and it stays up while showing the copied ✓ so the confirmation isn't yanked
+   away when the pointer leaves. */
+@media (hover: hover) {
+  .chat-widget-container .chat-table-copy {
+    opacity: 0;
+  }
+  .chat-widget-container .chat-table:hover .chat-table-copy,
+  .chat-widget-container .chat-table-copy:focus-visible,
+  .chat-widget-container .chat-table-copy[data-copied] {
+    opacity: 1;
+  }
 }
 
 /* Horizontal rule — a quiet divider. */
