@@ -36,6 +36,10 @@ export type { ChatLogger, ChatLogEvent, ChatLogFields, LogLevel, TurnLogger } fr
 export {
   createConsoleLogger,
   createTurnLogger,
+  // The same error→fields normaliser the handler uses. Exported so a host
+  // writing a ChatLogger adapter emits `error`/`stack` in exactly the shape the
+  // built-in lines use, instead of inventing a second, divergent one.
+  errorFields,
   newTraceId,
   noopLogger,
   resolveTraceId,

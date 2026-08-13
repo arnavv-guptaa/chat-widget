@@ -72,10 +72,18 @@ export type ChatLogEvent =
   | 'save.failed'
   /** Thread-title generation or rename failed (degrades to a placeholder). */
   | 'title.failed'
-  /** Memory extraction failed (best-effort, post-response). */
+  /** Memory recall/extraction/consent failed. Carries a `phase` discriminant. */
   | 'memory.failed'
   /** Knowledge retrieval failed (the turn continues, ungrounded). */
   | 'retrieval.failed'
+  /** The host's `getContext` threw (the turn continues, uninjected). */
+  | 'context.failed'
+  /** Context injection was skipped — carries a `reason` (e.g. over budget). */
+  | 'context.skipped'
+  /** Follow-up suggestion generation failed (best-effort, non-fatal). */
+  | 'followups.failed'
+  /** A host lifecycle hook threw — carries `hook`. Never fails the turn. */
+  | 'hook.failed'
   /** History summarization failed (the turn continues, uncompacted). */
   | 'summarize.failed'
   /** Per-request tool resource teardown failed — a resource may have leaked. */
