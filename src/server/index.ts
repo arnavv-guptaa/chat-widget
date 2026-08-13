@@ -29,6 +29,23 @@ export { ConversationOwnershipError } from './chat-store';
 export type { ChatErrorKind, ClassifiedChatError } from './errors';
 export { classifyError, isAbortError, messageForErrorKind } from './errors';
 
+// Observability. `ChatLogger` is the seam for routing chat telemetry into an
+// existing logging stack; the rest is exported so an adapter (OTel, Pino,
+// Datadog) can be written against the same vocabulary the handler emits.
+export type { ChatLogger, ChatLogEvent, ChatLogFields, LogLevel, TurnLogger } from './observability';
+export {
+  createConsoleLogger,
+  createTurnLogger,
+  // The same error→fields normaliser the handler uses. Exported so a host
+  // writing a ChatLogger adapter emits `error`/`stack` in exactly the shape the
+  // built-in lines use, instead of inventing a second, divergent one.
+  errorFields,
+  newTraceId,
+  noopLogger,
+  resolveTraceId,
+  TRACE_HEADER,
+} from './observability';
+
 export type {
   StorageAdapter,
   StorageAdapterFactory,
