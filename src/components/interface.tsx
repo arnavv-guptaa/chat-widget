@@ -855,9 +855,15 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
     // …and so does its Chat instance, or the registry would grow for the life
     // of the session. Closing a tab IS the one place a stream should be
-    // abandoned: the user has dismissed the conversation. The server still
-    // finishes and persists the turn, so reopening from history shows the
-    // completed answer.
+    // abandoned: the user has dismissed the conversation.
+    //
+    // Note the server-side consequence changed: the handler now forwards the
+    // client abort to the model by default (`propagateClientAbort`), so the turn
+    // stops generating rather than running to completion, and history shows the
+    // *partial* answer it had produced. That is the deliberate trade — a
+    // dismissed conversation should not keep billing tokens nobody will read.
+    // Hosts that need the old finish-in-background behaviour opt out with
+    // `propagateClientAbort: false`.
     const closedChat = chatsRef.current.get(tabId);
     if (closedChat) {
       if (closedChat.status === 'submitted' || closedChat.status === 'streaming') {
