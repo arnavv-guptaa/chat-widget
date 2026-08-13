@@ -102,13 +102,32 @@ WHERE c.id = sub.conversation_id;
 -- transaction. On a very large chat_messages table, run the CONCURRENTLY
 -- variant outside a transaction instead — see the commented block at the end.
 
-CREATE INDEX IF NOT EXISTS chat_messages_conversation_created_seq_idx
-  ON chat_messages (conversation_id, created_at, sequence);
+-- Wrapped in an existence check so a re-run is a genuine no-op. Without it the
+-- three statements are individually guarded but collectively not: run 1 renames
+-- `_seq_idx` away, so on run 2 the `IF NOT EXISTS` guard no longer matches and
+-- the migration rebuilds the whole index from scratch, drops the good one and
+-- renames again — a full index build under ACCESS EXCLUSIVE every time. Correct
+-- end state, wrong cost, and it contradicts the idempotency this file claims.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+     WHERE c.relname = 'chat_messages_conversation_created_idx'
+       AND i.indnatts = 3
+  ) THEN
+    RAISE NOTICE 'chat_messages_conversation_created_idx already covers (conversation_id, created_at, sequence) — skipping index rebuild';
+  ELSE
+    CREATE INDEX IF NOT EXISTS chat_messages_conversation_created_seq_idx
+      ON chat_messages (conversation_id, created_at, sequence);
 
-DROP INDEX IF EXISTS chat_messages_conversation_created_idx;
+    DROP INDEX IF EXISTS chat_messages_conversation_created_idx;
 
-ALTER INDEX chat_messages_conversation_created_seq_idx
-  RENAME TO chat_messages_conversation_created_idx;
+    ALTER INDEX chat_messages_conversation_created_seq_idx
+      RENAME TO chat_messages_conversation_created_idx;
+  END IF;
+END $$;
 
 COMMIT;
 

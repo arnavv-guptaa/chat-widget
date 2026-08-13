@@ -86,6 +86,14 @@ class DrizzleChatStore implements ChatStore {
         metadata: conversations.metadata,
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
+        // Selected only to keep the row assignable to `ConversationRow` below.
+        // `seq_counter` is NOT NULL, so it is a REQUIRED field of
+        // `$inferSelect` — omit it and the `as ConversationRow` cast stops
+        // being a narrowing (neither type would contain the other: the row
+        // would lack `seqCounter`, `ConversationRow` lacks `messageCount`) and
+        // tsc fails with TS2352. Any future NOT NULL column added to
+        // `chat_conversations` has to be added here too.
+        seqCounter: conversations.seqCounter,
         messageCount: sql<number>`(
           SELECT COUNT(*)::int FROM ${messages}
           WHERE ${messages.conversationId} = ${conversations.id}
