@@ -1215,7 +1215,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const limitParam = Number(url.searchParams.get('limit'));
     const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 30;
     const beforeParam = url.searchParams.get('before');
-    const before = beforeParam ? new Date(beforeParam) : undefined;
+    // Validate before this reaches a store. Now that the hosted store actually
+    // honours `before` (it used to drop `_opts` on the floor), an unparseable
+    // value becomes an Invalid Date whose `toISOString()` throws RangeError —
+    // making `?before=garbage` a client-triggerable 500. The Drizzle path has the
+    // same hazard via `lt()`. Treat a junk cursor as no cursor: the caller gets
+    // the most-recent page, which is the sane reading of a malformed request and
+    // is exactly what they got before this param was wired up at all.
+    const parsedBefore = beforeParam ? new Date(beforeParam) : undefined;
+    const before =
+      parsedBefore && !Number.isNaN(parsedBefore.getTime()) ? parsedBefore : undefined;
 
     // The store fetches newest-first then reverses → returns CHRONOLOGICAL
     // (oldest→newest). We over-fetch by one to detect an older page; with
@@ -1715,7 +1724,14 @@ async function readJsonWithLimit(
  */
 async function collectAttachmentPaths(store: ChatStore, conversationId: string): Promise<string[]> {
   const paths: string[] = [];
-  const pageSize = 200;
+  // Must not exceed the stores' MAX_PAGE clamp (100). This loop uses
+  // `page.length < pageSize` as its "that was the last page" signal, so a
+  // pageSize above the clamp makes the very first page look short and the purge
+  // stops after one page — silently orphaning every attachment older than the
+  // newest `pageSize` messages, which is both a storage leak and an erasure gap.
+  // That was latent on the Drizzle path and this branch extends the clamp to the
+  // hosted path, so pin the two together here.
+  const pageSize = 100;
   let before: Date | undefined;
   for (let i = 0; i < 100; i++) {
     const page = await store.listMessages(conversationId, { limit: pageSize, before });
