@@ -481,11 +481,29 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // (setup-throw / on-error / on-finish / client-abort).
     let streamAbort: AbortController | undefined;
     let streamTimer: ReturnType<typeof setTimeout> | undefined;
+    // Set by the wall-clock timer itself. The timeout-vs-client-abort branch in
+    // `mapStreamError` must not *infer* which one fired from
+    // `request.signal.aborted`: that reports a provider-side abort as a timeout
+    // when no timeout is even configured, and reports a real timeout as a client
+    // abort whenever the user happens to disconnect a few ms after the timer
+    // fires. Only the timer knows the timer fired.
+    let streamTimedOut = false;
     let cleanedUp = false;
     const runCleanup = async (reason: string) => {
+      // Disarming the wall-clock ceiling is correct for every path that truly
+      // ends the turn. The one deliberate exception is a client disconnect on a
+      // host that set `propagateClientAbort: false`: that turn is *meant* to
+      // outlive its client, so clearing the timer here would silently void the
+      // "streamTimeoutMs still applies as a wall-clock cap either way" guarantee
+      // documented on the option, leaving the turn unbounded — exactly the
+      // runaway the ceiling exists to prevent. A later on-finish/on-error pass
+      // still clears it, which is why this sits outside the idempotency guard.
+      if (streamTimer && !(reason === 'client-abort' && !propagateClientAbort)) {
+        clearTimeout(streamTimer);
+        streamTimer = undefined;
+      }
       if (cleanedUp) return;
       cleanedUp = true;
-      if (streamTimer) clearTimeout(streamTimer);
       if (built.cleanup) {
         try {
           await built.cleanup();
@@ -737,7 +755,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
     if (streamTimeoutMs && streamTimeoutMs > 0) {
-      streamTimer = setTimeout(() => streamAbort!.abort(), streamTimeoutMs);
+      streamTimer = setTimeout(() => {
+        streamTimedOut = true;
+        streamAbort!.abort();
+      }, streamTimeoutMs);
     }
 
     // ── Setup-failure teardown ───────────────────────────────────────────────
@@ -1020,8 +1041,16 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // error strip under text the user already has. That string coupling is
       // load-bearing today and is replaced by a typed error kind on the wire
       // in the error-taxonomy work that follows this PR.
-      if (isAbortError(err)) {
-        const timedOut = !request.signal.aborted;
+      // Gated on our own controller having actually fired. `isAbortError` alone
+      // is a shape probe, and its message fallback matches any error whose text
+      // contains "aborted" — including genuine upstream failures like
+      // "the request was aborted by the upstream gateway". Swallowing one of
+      // those would be total silence: no log, no `onError`, and a user-facing
+      // string the client's banner hides, so the user sees a truncated answer
+      // with no indication anything broke. If we never aborted, it is not our
+      // abort, and it belongs on the real error path below.
+      if (streamAbort?.signal.aborted && isAbortError(err)) {
+        const timedOut = streamTimedOut;
         if (logErrors && timedOut) {
           console.warn(
             JSON.stringify({
