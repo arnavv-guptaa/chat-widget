@@ -23,13 +23,10 @@ flowchart LR
   end
 
   subgraph mordn[mordn control plane]
-    config[Published config]
-    knowledge[Knowledge and memory]
-    persistence[Persistence and attachments]
-    operations[Feedback and observability]
+    control[Config · knowledge · memory<br/>persistence · attachments · observability]
   end
 
-  route <--> mordn
+  route <--> control
 ```
 
 The browser never asserts a user id, model, prompt, or agent configuration. Your route resolves identity from a verified server session and runs inference and tool calls in your deployment. mordn supplies the published configuration and the operational plumbing around each conversation.
