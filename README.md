@@ -10,24 +10,7 @@
 
 ## The split
 
-```mermaid
-flowchart LR
-  subgraph app[Your application]
-    browser[ChatWidget]
-    route[Next.js route]
-    auth[Verified session]
-    runtime[Your model and tools]
-    browser --> route
-    auth --> route
-    route --> runtime
-  end
-
-  subgraph mordn[mordn control plane]
-    control[Config · knowledge · memory<br/>persistence · attachments · observability]
-  end
-
-  route <--> control
-```
+![Architecture split between the developer application and the mordn control plane](./docs/assets/architecture.svg)
 
 The browser never asserts a user id, model, prompt, or agent configuration. Your route resolves identity from a verified server session and runs inference and tool calls in your deployment. mordn supplies the published configuration and the operational plumbing around each conversation.
 
