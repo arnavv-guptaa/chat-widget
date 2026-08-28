@@ -1,9 +1,11 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatErrorBanner } from '../src/components/chat-error-banner';
+
+afterEach(cleanup);
 
 describe('ChatErrorBanner taxonomy messages', () => {
   it('preserves package-owned safe guidance', () => {
