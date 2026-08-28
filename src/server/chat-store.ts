@@ -129,9 +129,11 @@ export interface ChatStore {
    *
    * Honours `ListMessagesOptions` for pagination. Implementations MUST:
    *
-   *  - Apply `before` as a STRICT inequality (`createdAt < before`), so
-   *    repeated "load older" calls cannot loop on a boundary message.
-   *  - Return CHRONOLOGICAL order (oldest → newest), ready to render.
+   *  - Apply `before` as a strict composite cursor when `beforeId` is present:
+   *    `(createdAt < before) OR (createdAt = before AND id < beforeId)`.
+   *    Timestamp-only callers retain strict `createdAt < before` behavior.
+   *  - Return CHRONOLOGICAL order (oldest → newest), with `id` as the stable
+   *    tiebreaker for equal timestamps.
    *  - Clamp `limit` so a hostile client cannot request an unbounded page —
    *    but clamp to **101, not 100**. The router asks for `limit + 1` to detect
    *    whether an older page exists without a second COUNT query; a ceiling of

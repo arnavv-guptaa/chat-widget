@@ -1206,33 +1206,45 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const conversation = await store.getConversation(conversationId);
     if (!conversation) return json({ error: 'Conversation not found' }, 404);
 
-    // Pagination for reverse-scroll history loading. `limit` = page size (the
-    // store clamps it); `before` = an ISO timestamp — return only messages
-    // OLDER than it, for "load earlier messages" when the user scrolls up. Omit
-    // `before` for the initial (most-recent) page. We fetch limit+1 to detect
-    // whether an older page exists (`hasMore`) without a second query.
+    // Reverse-scroll pagination uses an opaque composite cursor containing the
+    // oldest visible message's timestamp + id. Timestamp alone is insufficient:
+    // equal timestamps at a page boundary otherwise create permanent gaps.
     const url = new URL(request.url);
     const limitParam = Number(url.searchParams.get('limit'));
     const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 30;
-    const beforeParam = url.searchParams.get('before');
-    // Validate before this reaches a store. Now that the hosted store actually
-    // honours `before` (it used to drop `_opts` on the floor), an unparseable
-    // value becomes an Invalid Date whose `toISOString()` throws RangeError —
-    // making `?before=garbage` a client-triggerable 500. The Drizzle path has the
-    // same hazard via `lt()`. Treat a junk cursor as no cursor: the caller gets
-    // the most-recent page, which is the sane reading of a malformed request and
-    // is exactly what they got before this param was wired up at all.
-    const parsedBefore = beforeParam ? new Date(beforeParam) : undefined;
-    const before =
-      parsedBefore && !Number.isNaN(parsedBefore.getTime()) ? parsedBefore : undefined;
+    const cursorParam = url.searchParams.get('cursor');
+    const legacyBeforeParam = url.searchParams.get('before');
+    let before: Date | undefined;
+    let beforeId: string | undefined;
 
-    // The store fetches newest-first then reverses → returns CHRONOLOGICAL
-    // (oldest→newest). We over-fetch by one to detect an older page; with
-    // chronological order, the overflow (oldest) message is at the FRONT, so we
-    // drop the first element and keep the newest `limit`.
-    const page = await store.listMessages(conversationId, { limit: limit + 1, before });
+    if (cursorParam) {
+      try {
+        const parsed = JSON.parse(cursorParam) as { createdAt?: unknown; id?: unknown };
+        if (typeof parsed.createdAt !== 'string' || typeof parsed.id !== 'string' || !parsed.id) {
+          return json({ error: 'Invalid history cursor' }, 400);
+        }
+        before = new Date(parsed.createdAt);
+        beforeId = parsed.id;
+        if (Number.isNaN(before.getTime())) return json({ error: 'Invalid history cursor' }, 400);
+      } catch {
+        return json({ error: 'Invalid history cursor' }, 400);
+      }
+    } else if (legacyBeforeParam) {
+      before = new Date(legacyBeforeParam);
+      if (Number.isNaN(before.getTime())) return json({ error: 'Invalid history cursor' }, 400);
+    }
+
+    const page = await store.listMessages(conversationId, {
+      limit: limit + 1,
+      before,
+      beforeId,
+    });
     const hasMore = page.length > limit;
     const ordered = hasMore ? page.slice(page.length - limit) : page;
+    const oldest = ordered[0];
+    const nextCursor = oldest
+      ? JSON.stringify({ createdAt: oldest.createdAt.toISOString(), id: oldest.id })
+      : null;
 
     // Re-sign attachment URLs so reopened conversations show live thumbnails.
     const rehydrated = storage
@@ -1246,6 +1258,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         metadata: conversation.metadata,
       },
       hasMore,
+      nextCursor,
       messages: rehydrated.map((m) => ({
         id: m.id,
         role: m.role,
@@ -1733,8 +1746,9 @@ async function collectAttachmentPaths(store: ChatStore, conversationId: string):
   // hosted path, so pin the two together here.
   const pageSize = 100;
   let before: Date | undefined;
+  let beforeId: string | undefined;
   for (let i = 0; i < 100; i++) {
-    const page = await store.listMessages(conversationId, { limit: pageSize, before });
+    const page = await store.listMessages(conversationId, { limit: pageSize, before, beforeId });
     if (!page.length) break;
     for (const m of page) {
       if (!Array.isArray(m.parts)) continue;
@@ -1749,6 +1763,7 @@ async function collectAttachmentPaths(store: ChatStore, conversationId: string):
     const oldest = page[0]; // store returns chronological (oldest→newest)
     if (!oldest?.createdAt) break;
     before = oldest.createdAt;
+    beforeId = oldest.id;
   }
   return paths;
 }

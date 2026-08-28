@@ -183,6 +183,27 @@ describe('handler — dispatch routing', () => {
     expect((await res.json()).conversations).toHaveLength(1);
   });
 
+  it('rejects a malformed history cursor instead of rewinding to the newest page', async () => {
+    const { handler, store } = setup();
+    const res = await handler.GET(req('/api/chat/history/c1?cursor=not-json'));
+    expect(res.status).toBe(400);
+    expect(store.listMessages).not.toHaveBeenCalled();
+  });
+
+  it('passes the timestamp and id from a composite history cursor to the store', async () => {
+    const { handler, store } = setup();
+    const cursor = encodeURIComponent(
+      JSON.stringify({ createdAt: '2026-01-01T00:00:00.000Z', id: 'm-7' }),
+    );
+    const res = await handler.GET(req(`/api/chat/history/c1?limit=30&cursor=${cursor}`));
+    expect(res.status).toBe(200);
+    expect(store.listMessages).toHaveBeenCalledWith('c1', {
+      limit: 31,
+      before: new Date('2026-01-01T00:00:00.000Z'),
+      beforeId: 'm-7',
+    });
+  });
+
   it('routes DELETE /history/:id and returns 204', async () => {
     const { handler, store } = setup();
     const res = await handler.DELETE(req('/api/chat/history/c1', { method: 'DELETE' }));

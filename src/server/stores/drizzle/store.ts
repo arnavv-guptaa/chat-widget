@@ -17,7 +17,7 @@
  */
 
 import 'server-only';
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { generateId, type UIMessage } from 'ai';
 
 import {
@@ -172,17 +172,27 @@ class DrizzleChatStore implements ChatStore {
     // its real job — bounding what a hostile or careless caller can pull in a
     // single query.
     const limit = Math.min(Math.max(opts?.limit ?? MAX_PAGE, 1), MAX_PAGE + 1);
-    const where = opts?.before
-      ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, opts.before))
+    const cursor =
+      opts?.before && opts.beforeId
+        ? or(
+            lt(messages.createdAt, opts.before),
+            and(eq(messages.createdAt, opts.before), lt(messages.id, opts.beforeId)),
+          )
+        : opts?.before
+          ? lt(messages.createdAt, opts.before)
+          : undefined;
+    const where = cursor
+      ? and(eq(messages.conversationId, conversationId), cursor)
       : eq(messages.conversationId, conversationId);
 
-    // Fetch newest-first for the limit, then reverse to chronological order so
-    // the UI renders oldest → newest without holding the whole history.
+    // Fetch newest-first with a stable id tiebreaker, then reverse to
+    // chronological order. The same tuple defines the cursor, so rows sharing a
+    // timestamp cannot move or disappear at a page boundary.
     const rows = await this.db
       .select()
       .from(messages)
       .where(where)
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
       .limit(limit);
 
     return rows.reverse().map(toStoredMessage);

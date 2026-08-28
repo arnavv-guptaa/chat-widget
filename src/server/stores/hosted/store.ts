@@ -71,14 +71,16 @@ function normaliseConversation(raw: any): StoredConversation {
   };
 }
 
-function normaliseMessage(raw: any): StoredMessage {
+function normaliseMessage(raw: any): StoredMessage | null {
+  const createdAt = new Date(raw.created_at ?? raw.createdAt);
+  if (!raw?.id || Number.isNaN(createdAt.getTime())) return null;
   return {
-    id: raw.id,
+    id: String(raw.id),
     role: raw.role,
     parts: raw.parts ?? [],
     text: raw.content ?? raw.text ?? '',
     model: raw.model ?? undefined,
-    createdAt: new Date(raw.created_at ?? raw.createdAt),
+    createdAt,
   };
 }
 
@@ -188,31 +190,46 @@ class HostedChatStore implements ChatStore {
     // +1 of headroom for the router's `hasMore` probe — see the matching
     // comment in the Drizzle store.
     const limit = Math.min(Math.max(opts?.limit ?? MAX_PAGE, 1), MAX_PAGE + 1);
-    const query = new URLSearchParams({ limit: String(limit) });
-    if (opts?.before) query.set('before', opts.before.toISOString());
+
+    // A deployed hosted API may understand the legacy timestamp-only window or
+    // ignore it entirely. Never forward a composite cursor as timestamp-only:
+    // an intermediate API could discard equal-timestamp rows before this client
+    // gets the chance to apply the id tiebreaker. Composite pages therefore
+    // fetch the conversation and window locally until chat-api supports the same
+    // cursor contract end-to-end.
+    const query = new URLSearchParams();
+    if (!opts?.beforeId) {
+      query.set('limit', String(limit));
+      if (opts?.before) query.set('before', opts.before.toISOString());
+    }
+    const queryString = query.toString();
+    const suffix = queryString ? `?${queryString}` : '';
 
     const res = await this.req(
-      `/conversations/${encodeURIComponent(conversationId)}?${query.toString()}`,
+      `/conversations/${encodeURIComponent(conversationId)}${suffix}`,
       { headers: this.headers() },
     );
     if (!res.ok) return [];
-    // See listConversations: a malformed 200 body must not throw.
     const data = (await res.json().catch(() => null)) as { messages?: any[] } | null;
-    const messages = (data?.messages ?? []).map(normaliseMessage);
+    const messages = (data?.messages ?? [])
+      .map(normaliseMessage)
+      .filter((message): message is StoredMessage => message !== null);
 
-    // Normalise ordering before windowing. The contract is chronological
-    // (oldest → newest); we sort rather than trust the API's order, so a change
-    // on either side can never silently reverse a transcript. Rows with an
-    // unparseable timestamp sort as 0 and land at the front — the safe place,
-    // since they then cannot displace real messages off the newest page.
-    messages.sort((a, b) => msSinceEpoch(a.createdAt) - msSinceEpoch(b.createdAt));
+    messages.sort((a, b) => {
+      const byTime = msSinceEpoch(a.createdAt) - msSinceEpoch(b.createdAt);
+      return byTime !== 0 ? byTime : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
 
     const before = opts?.before?.getTime();
+    const beforeId = opts?.beforeId;
     const windowed =
-      before !== undefined ? messages.filter((m) => msSinceEpoch(m.createdAt) < before) : messages;
+      before !== undefined
+        ? messages.filter((message) => {
+            const time = msSinceEpoch(message.createdAt);
+            return time < before || (time === before && !!beforeId && message.id < beforeId);
+          })
+        : messages;
 
-    // Take the NEWEST `limit` — matching the Drizzle store, which selects
-    // newest-first then reverses. In chronological order that is the tail.
     return windowed.length > limit ? windowed.slice(windowed.length - limit) : windowed;
   }
 

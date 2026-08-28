@@ -59,6 +59,16 @@ describe('HostedChatStore.listMessages — forwarding', () => {
     expect(api.calls[0].searchParams.get('before')).toBe('2026-01-01T00:07:00.000Z');
   });
 
+  it('does not downgrade a composite cursor to a timestamp-only hosted query', async () => {
+    const api = fakeApi({ total: 10, honoursQuery: true });
+    await storeFor(api.fetchImpl).listMessages('c-1', {
+      limit: 5,
+      before: new Date('2026-01-01T00:07:00.000Z'),
+      beforeId: 'm-7',
+    });
+    expect(api.calls[0].search).toBe('');
+  });
+
   it('omits before on the first page', async () => {
     const api = fakeApi({ total: 10, honoursQuery: true });
     await storeFor(api.fetchImpl).listMessages('c-1', { limit: 5 });
@@ -131,7 +141,7 @@ describe('HostedChatStore.listMessages — resilience', () => {
     expect(page.map((m) => m.id)).toEqual(['a', 'b']);
   });
 
-  it('does not throw on an unparseable timestamp', async () => {
+  it('drops rows with unparseable timestamps so they cannot stall the cursor', async () => {
     const bad = (async () =>
       new Response(
         JSON.stringify({
@@ -143,9 +153,38 @@ describe('HostedChatStore.listMessages — resilience', () => {
         { status: 200 },
       )) as unknown as typeof fetch;
     const page = await storeFor(bad).listMessages('c-1', { limit: 10 });
-    // Undated rows sort to the front so they can never displace real messages
-    // off the newest page.
-    expect(page.map((m) => m.id)).toEqual(['bad', 'ok']);
+    expect(page.map((m) => m.id)).toEqual(['ok']);
+  });
+
+  it('pages through equal timestamps without gaps or duplicates', async () => {
+    const timestamp = '2026-01-01T00:01:00.000Z';
+    const tied = (async () =>
+      new Response(
+        JSON.stringify({
+          messages: Array.from({ length: 12 }, (_, index) => ({
+            id: `m-${String(index).padStart(2, '0')}`,
+            role: 'user',
+            parts: [],
+            created_at: timestamp,
+          })),
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const store = storeFor(tied);
+    const first = await store.listMessages('c-1', { limit: 5 });
+    const second = await store.listMessages('c-1', {
+      limit: 5,
+      before: first[0].createdAt,
+      beforeId: first[0].id,
+    });
+    const third = await store.listMessages('c-1', {
+      limit: 5,
+      before: second[0].createdAt,
+      beforeId: second[0].id,
+    });
+    const ids = [...third, ...second, ...first].map((message) => message.id);
+    expect(ids).toEqual(Array.from({ length: 12 }, (_, index) => `m-${String(index).padStart(2, '0')}`));
+    expect(new Set(ids).size).toBe(12);
   });
 
   it('soft-fails to [] on a non-OK response rather than throwing', async () => {
