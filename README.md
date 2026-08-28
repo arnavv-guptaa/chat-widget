@@ -6,19 +6,13 @@
 [![npm](https://img.shields.io/npm/dm/@mordn/chat-widget)](https://www.npmjs.com/package/@mordn/chat-widget)
 [![license](https://img.shields.io/npm/l/@mordn/chat-widget)](./LICENSE)
 
-[Start building](https://mordn.com/sign-up) · [Quickstart](https://mordn.com/docs/quickstart) · [Live showcase](https://mordn.com/showcase) · [Documentation](https://mordn.com/docs)
+[Start building](https://mordn.com/sign-up) · [Quickstart](https://mordn.com/docs/quickstart) · [Documentation](https://mordn.com/docs)
 
 ## The split
 
 ![Architecture split between the developer application and the mordn control plane](./docs/assets/architecture.svg)
 
 The browser never asserts a user id, model, prompt, or agent configuration. Your route resolves identity from a verified server session and runs inference and tool calls in your deployment. mordn supplies the published configuration and the operational plumbing around each conversation.
-
-## See it working
-
-**[Open the live showcase →](https://mordn.com/showcase)**
-
-Try real docs, ecommerce, and travel assistants backed by real server routes—not canned recordings.
 
 ## Hosted quickstart
 
