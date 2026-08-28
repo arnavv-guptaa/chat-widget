@@ -30,6 +30,7 @@
 
 import type { LanguageModel, ModelMessage, ToolSet, UIMessage, StopCondition } from 'ai';
 import type { ChatStoreFactory } from './chat-store';
+import type { ClassifiedChatError } from './errors';
 import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
@@ -467,13 +468,40 @@ export interface CreateChatHandlerOptions {
    * Map a stream error to the user-facing string the widget shows. Lets you
    * downgrade benign post-finish teardown noise and localise messages.
    *
+   * The second argument is the handler's own classification of the failure —
+   * a discriminated `kind` (`rate_limit`, `auth`, `transient`,
+   * `content_policy`, `prompt`, `model`, `tool`, `abort`, `unknown`) plus
+   * `retryable`, a `retryAfterMs` hint parsed from the provider's rate-limit
+   * headers, and the upstream `status`/`code`. Branch on that instead of
+   * regexing provider prose:
+   *
+   * ```ts
+   * onError: (error, { kind, retryAfterMs }) => {
+   *   if (kind === 'rate_limit') {
+   *     scheduleRetry(retryAfterMs ?? 5_000);
+   *     return 'One moment — retrying.';
+   *   }
+   *   if (kind === 'auth') { pageOncall(error); }
+   *   return undefined as never; // fall through to the built-in copy
+   * }
+   * ```
+   *
+   * Return an empty string to fall back to the category's built-in copy, which
+   * is already category-specific — you only need this hook to localise, to
+   * override tone, or to fire a side effect.
+   *
+   * Additive and backward compatible: an existing `(error) => string` handler
+   * keeps working untouched.
+   *
    * Note: providing this does NOT silence the server-side error log. Stream
    * errors are logged by default (see `logErrors`) so a production failure
    * (bad key, rate limit, wrong URL) never disappears into empty logs — the
    * #1 documented streaming pitfall. This hook only controls the user-facing
    * copy; use `logErrors: false` to opt out of the log.
+   *
+   * Not called for aborts: a user pressing Stop is not a failure.
    */
-  onError?: (error: unknown) => string;
+  onError?: (error: unknown, classified: ClassifiedChatError) => string;
 
   /**
    * Inject first-class, per-turn context into the system prompt (#162). Called
