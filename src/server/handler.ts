@@ -404,7 +404,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Every line for this turn carries the same traceId + userId +
     // conversationId from here on, so one grep reconstructs the whole turn.
     const turnLog = loggerFor(request, { userId: ctx.userId, conversationId });
-    const turnStartedAt = Date.now();
 
     // Resolve the complete runtime config before persistence or resource
     // allocation. Production ignores body.config; preview trust is explicit.
@@ -849,7 +848,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         : Promise.resolve(null);
 
     // The opening line of the turn. Everything after this shares its traceId,
-    // so `turn.start` → … → `turn.finish` is the span boundary a reader walks.
+    // so `turn.start` → … → `turn.finish` is the measured lifecycle boundary.
+    // It includes generation, post-response work, and persistence.
+    const turnStartedAt = Date.now();
     turnLog.info('turn.start', {
       ...(typeof modelLabel === 'string' ? { model: modelLabel } : {}),
       messageCount: incoming.length,
@@ -1186,6 +1187,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // assistant bubble into history.
         const shouldPersist =
           finalMessages.length > 0 && hasAssistantContent(finalMessages);
+        let persisted = false;
         if (shouldPersist) {
           // Normalise token usage + gateway cost for this turn (best-effort —
           // returns null when there's nothing worth recording, and never throws).
@@ -1207,6 +1209,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           // but never thrown, because the user already has their answer.
           try {
             await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel, usage });
+            persisted = true;
           } catch (err) {
             // The loudest line in this file: the user has an answer on
             // screen that is NOT in the database, so it vanishes on reload.
@@ -1232,16 +1235,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             }
           }
         }
-        // The closing line of the turn. `durationMs` here is end-to-end
-        // (request received → stream settled), which is the number a user
-        // actually experiences — not just the model's own latency.
+        // The closing line of the measured turn lifecycle. `durationMs`
+        // covers turn.start through generation, post-response work, and
+        // persistence; it is not HTTP request latency or provider latency.
         turnLog.info('turn.finish', {
           durationMs: Date.now() - turnStartedAt,
           ...(typeof modelLabel === 'string' ? { model: modelLabel } : {}),
           ...(finalFinishReason ? { finishReason: finalFinishReason } : {}),
           ...(finalStepCount !== undefined ? { stepCount: finalStepCount } : {}),
           aborted: isAborted,
-          persisted: shouldPersist,
+          persistenceAttempted: shouldPersist,
+          persisted,
           messageCount: finalMessages.length,
         });
 
@@ -1594,6 +1598,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     if (cors.allowCredentials) {
       response.headers.set('Access-Control-Allow-Credentials', 'true');
     }
+    if (!preflight) {
+      const existing = response.headers.get('Access-Control-Expose-Headers');
+      const exposed = new Set(
+        (existing ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      exposed.add(TRACE_HEADER);
+      response.headers.set('Access-Control-Expose-Headers', [...exposed].join(', '));
+    }
     if (preflight) {
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       // Reflect whatever generic transport headers the browser asked to send
@@ -1616,25 +1631,28 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
    * CORS headers — the browser then fails the request exactly as it does
    * today, and same-origin traffic never sends OPTIONS at all.
    */
+  function withTraceHeader(request: Request, response: Response): Response {
+    const headers = new Headers(response.headers);
+    headers.set(TRACE_HEADER, traceFor(request));
+    // Re-wrap rather than mutate: streamed/cached Responses can expose immutable
+    // headers on edge runtimes. The body stream itself is passed through.
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
   async function preflight(request: Request): Promise<Response> {
-    return applyCors(request, new Response(null, { status: 204 }), true);
+    return applyCors(
+      request,
+      withTraceHeader(request, new Response(null, { status: 204 })),
+      true,
+    );
   }
 
   async function dispatch(request: Request): Promise<Response> {
-    const response = await dispatchInner(request);
-    // Echo the trace id back. This is the single highest-leverage line in the
-    // observability change: a user reporting "the assistant broke" can hand
-    // over one id from their network tab (or an error boundary can attach it to
-    // a support ticket) and it pins the exact turn in the logs — instead of
-    // grepping a timestamp range across every tenant.
-    //
-    // Set on a clone of the headers because a streamed Response's headers are
-    // immutable once constructed on some runtimes.
-    try {
-      response.headers.set(TRACE_HEADER, traceFor(request));
-    } catch {
-      /* immutable headers (a cached/redirect Response) — the log lines still carry it */
-    }
+    const response = withTraceHeader(request, await dispatchInner(request));
     // Actual (non-preflight) responses need Allow-Origin too — a passed
     // preflight only permits the request; each response must still opt in.
     return applyCors(request, response);

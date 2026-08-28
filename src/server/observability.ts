@@ -136,7 +136,7 @@ export interface ChatLogFields {
  * Must not throw and must not block. See the module doc.
  */
 export interface ChatLogger {
-  log(level: LogLevel, fields: ChatLogFields): void;
+  log(level: LogLevel, fields: ChatLogFields): void | PromiseLike<void>;
 }
 
 /** Discards everything. Used when `logErrors: false`. */
@@ -194,16 +194,25 @@ export function resolveTraceId(request: { headers: Headers }): string {
     return cleaned.length >= 8 ? cleaned : undefined;
   };
 
-  const traceparent = request.headers.get('traceparent');
+  const traceparent = request.headers.get('traceparent')?.trim();
   if (traceparent) {
-    // version-traceid-spanid-flags → field 1 is the 32-hex trace id.
-    const traceId = traceparent.split('-')[1];
-    if (traceId && /^[0-9a-f]{32}$/i.test(traceId) && !/^0+$/.test(traceId)) return traceId;
+    // Version 00 has exactly four fields. Validate the complete shape, including
+    // non-zero trace/span ids and legal flags, before adopting the trace id.
+    const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i.exec(traceparent);
+    if (match && !/^0+$/.test(match[1]) && !/^0+$/.test(match[2])) return match[1].toLowerCase();
   }
-  for (const header of ['x-request-id', 'x-correlation-id', 'x-amzn-trace-id']) {
+
+  for (const header of ['x-request-id', 'x-correlation-id']) {
     const adopted = sanitize(request.headers.get(header));
     if (adopted) return adopted;
   }
+
+  // AWS X-Ray is a compound header. Adopt only its Root value so logs correlate
+  // with the host trace instead of concatenating Root/Parent/Sampled fields.
+  const amazon = request.headers.get('x-amzn-trace-id');
+  const root = amazon?.match(/(?:^|;)\s*Root=(1-[0-9a-f]{8}-[0-9a-f]{24})(?:;|$)/i)?.[1];
+  if (root) return root.toLowerCase();
+
   return newTraceId();
 }
 
@@ -244,7 +253,18 @@ export interface TurnLogger {
 export function createTurnLogger(logger: ChatLogger, base: Partial<ChatLogFields> & { traceId: string }): TurnLogger {
   const emit = (level: LogLevel, event: ChatLogEvent, fields?: Partial<ChatLogFields>) => {
     try {
-      logger.log(level, { ...base, ...fields, traceId: base.traceId, event } as ChatLogFields);
+      const result = logger.log(level, {
+        ...base,
+        ...fields,
+        traceId: base.traceId,
+        event,
+      } as ChatLogFields);
+      // Async logger implementations are permitted for adapters that enqueue or
+      // flush out of band. Never await them on the hot path, but always consume
+      // rejection so a broken sink cannot become an unhandled rejection.
+      if (result && typeof result.then === 'function') {
+        void Promise.resolve(result).catch(() => {});
+      }
     } catch {
       /* a logger that throws must not break the turn */
     }
@@ -261,10 +281,26 @@ export function createTurnLogger(logger: ChatLogger, base: Partial<ChatLogFields
 
 /** Normalise a thrown value into the `error` / `stack` log fields. */
 export function errorFields(err: unknown): { error: string; stack?: string } {
-  if (err instanceof Error) {
-    return { error: err.message, ...(err.stack ? { stack: err.stack } : {}) };
+  try {
+    if (err instanceof Error) {
+      return {
+        error: safeErrorText(err.message),
+        ...(err.stack ? { stack: safeErrorText(err.stack, 8_000) } : {}),
+      };
+    }
+    return { error: safeErrorText(typeof err === 'string' ? err : String(err)) };
+  } catch {
+    return { error: 'Unserializable error' };
   }
-  return { error: typeof err === 'string' ? err : String(err) };
+}
+
+function safeErrorText(value: string, max = 2_000): string {
+  return value
+    // Common provider/server-key forms. Logs should identify the failure, not
+    // retain a credential or a full prompt echoed by an upstream.
+    .replace(/\b(?:sk|mck)_[A-Za-z0-9_-]{8,}\b/g, '[redacted]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~-]{8,}\b/gi, 'Bearer [redacted]')
+    .slice(0, max);
 }
 
 /** Header carrying the trace id back to the caller. */

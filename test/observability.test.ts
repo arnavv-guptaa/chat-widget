@@ -38,6 +38,28 @@ describe('resolveTraceId', () => {
     expect(traceId).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it('rejects malformed W3C versions, zero span ids, and extra fields', () => {
+    for (const traceparent of [
+      'zz-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+      '00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01',
+      '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra',
+    ]) {
+      expect(resolveTraceId(req({ traceparent }))).toMatch(/^[0-9a-f]{32}$/);
+      expect(resolveTraceId(req({ traceparent }))).not.toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+    }
+  });
+
+  it('extracts the AWS X-Ray Root trace instead of concatenating the compound header', () => {
+    expect(
+      resolveTraceId(
+        req({
+          'x-amzn-trace-id':
+            'Root=1-67891233-abcdef012345678912345678;Parent=53995c3f42cd8ad8;Sampled=1',
+        }),
+      ),
+    ).toBe('1-67891233-abcdef012345678912345678');
+  });
+
   it('adopts the common gateway correlation headers', () => {
     expect(resolveTraceId(req({ 'x-request-id': 'abc123def456' }))).toBe('abc123def456');
     expect(resolveTraceId(req({ 'x-correlation-id': 'corr-9876-xyz' }))).toBe('corr-9876-xyz');
@@ -114,6 +136,16 @@ describe('createTurnLogger', () => {
       },
     };
     expect(() => createTurnLogger(exploding, { traceId: 't-2' }).error('turn.error')).not.toThrow();
+  });
+
+  it('consumes a rejected async logger without creating an unhandled rejection', async () => {
+    const exploding: ChatLogger = {
+      log: async () => {
+        throw new Error('async logger exploded');
+      },
+    };
+    createTurnLogger(exploding, { traceId: 't-3' }).error('turn.error');
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });
 
@@ -204,6 +236,13 @@ describe('errorFields', () => {
     expect(errorFields('plain')).toEqual({ error: 'plain' });
     expect(errorFields({ a: 1 }).error).toBe('[object Object]');
     expect(errorFields(null).error).toBe('null');
+  });
+
+  it('never throws for hostile values and redacts common credentials', () => {
+    const hostile = new Proxy({}, { get: () => { throw new Error('trap'); } });
+    expect(() => errorFields(hostile)).not.toThrow();
+    expect(errorFields('failed with sk_live_abcdefghijklmnop').error).not.toContain('sk_live_');
+    expect(errorFields('Authorization: Bearer abcdefghijklmnop').error).toContain('Bearer [redacted]');
   });
 });
 
