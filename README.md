@@ -16,9 +16,9 @@ The browser never asserts a user id, model, prompt, or agent configuration. Your
 
 ## See it working
 
-[![A mordn docs assistant answering a product-security question with cited sources](./docs/assets/product-demo.svg)](https://mordn.com/showcase)
+**[Open the live showcase →](https://mordn.com/showcase)**
 
-The [live showcase](https://mordn.com/showcase) runs real docs, ecommerce, and travel assistants against real server routes—not canned recordings.
+Try real docs, ecommerce, and travel assistants backed by real server routes—not canned recordings.
 
 ## Hosted quickstart
 
