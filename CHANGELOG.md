@@ -2,6 +2,27 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.18.0 — 2026-08-28
+
+### Added
+- **Actionable stream error taxonomy.** `classifyError()` maps SDK, raw-provider, and transport failures to `abort`, `rate_limit`, `auth`, `transient`, `content_policy`, `prompt`, `model`, `tool`, or `unknown`, with conservative `retryable`, `retryAfterMs`, status, code, and safe user-facing guidance. `onError(error, classified)` receives the result as an additive second argument; existing one-argument handlers remain valid. The classifier and its public types are exported from `@mordn/chat-widget/server`.
+- **Structured turn observability.** Hosts can provide a `ChatLogger`; the default emits correlated JSON events for turn start/finish/abort/error, persistence, retrieval, memory, titles, follow-ups, cleanup, and request failures. Each request adopts a valid W3C, request/correlation, or AWS X-Ray trace when present—or mints one—and returns it as `X-Mordn-Trace-Id`. Allowed cross-origin callers can read the header.
+
+### Fixed
+- **Stop and disconnect now cancel upstream generation and billing by default.** The request abort signal always reaches `streamText`; timeout aborts remain separately classified. Cleanup is single-owner and idempotent, client-abort listeners are removed, partial replies still persist, and `buildTools` runs exactly once. Work that must outlive its requester belongs on a background job rather than this live SSE handler.
+- **History pagination no longer stops at 100 messages or loses equal-timestamp rows.** Both built-in store paths allow the router's 101st probe row, and reverse paging uses a deterministic `(createdAt, messageId)` cursor. Malformed cursors return `400`; invalid hosted timestamps are dropped instead of stalling pagination; attachment purge traversal uses the same composite cursor.
+- **Error handling avoids unsafe retry loops.** Hard quota exhaustion is non-retryable, multiple provider reset headers choose the latest safe window, raw Anthropic/Google/OpenAI shapes are recognized, upstream failures containing the word “aborted” are not hidden, and the client does not offer blind retries for auth, policy, prompt, or model failures.
+- **Trace and logger failure paths are contained.** W3C and AWS trace headers are validated and parsed correctly, async logger rejections cannot become unhandled rejections, error fields never throw and redact common credential forms, streamed responses are re-wrapped with mutable trace headers, and persistence logs report actual success rather than intent.
+
+### Changed
+- The history response now includes an opaque `nextCursor`, which the bundled client sends back as `cursor`. The legacy timestamp-only `before` query remains accepted for compatibility.
+- `ListMessagesOptions.beforeId` is an optional deterministic tiebreaker. Custom stores that implement pagination should apply `(createdAt < before) OR (createdAt = before AND id < beforeId)` and order equal timestamps by message ID.
+- With the built-in logger enabled, `logErrors` now controls structured lifecycle events as well as errors. Pass an explicit `logger` to route telemetry to an existing sink.
+
+### Verification
+- Final reviewed PRs passed the repository's Typecheck · Lint · Build job and the strict-ESM Next.js consumer smoke job.
+- The npm release remains tag-driven through GitHub OIDC Trusted Publishing; no `NPM_TOKEN` or manual `npm publish` is required.
+
 ## 0.17.4 — 2026-08-09
 
 ### Fixed
