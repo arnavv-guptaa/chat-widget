@@ -587,33 +587,12 @@ export interface CreateChatHandlerOptions {
    * comfortably above your slowest expected answer and at/below your platform's
    * function timeout.
    *
-   * Note: this is now purely an ADDITIONAL ceiling. Client-abort propagation no
-   * longer depends on it — see `propagateClientAbort`, which is on by default.
+   * Note: this is now purely an ADDITIONAL ceiling. Client disconnects are
+   * always propagated to the upstream model call so generation and billing stop
+   * when the live SSE request ends. Work that must outlive its requester belongs
+   * on a background job/queue surface rather than this request handler.
    */
   streamTimeoutMs?: number;
-
-  /**
-   * Abort the upstream model call when the client disconnects. **On by default.**
-   *
-   * When the user hits Stop, closes the tab, or navigates away, the request's
-   * `AbortSignal` fires. With this enabled (the default) that signal is
-   * forwarded into the model call, so generation — and therefore metered spend —
-   * stops with it.
-   *
-   * This defaults to `true` because the alternative is a silent cost leak: a
-   * Stop button that visually stops the answer while the provider keeps
-   * generating and billing every remaining token. Partial-turn persistence is
-   * unaffected — a stopped turn is still saved with whatever it produced, and
-   * still gets a generated thread title.
-   *
-   * Set `false` only when a turn should deliberately outlive its client — e.g.
-   * driving a background completion whose result is read later from history
-   * rather than from the live stream. `streamTimeoutMs`, if set, still applies
-   * as a wall-clock cap either way.
-   *
-   * Default: `true`.
-   */
-  propagateClientAbort?: boolean;
 
   /**
    * Context compaction. When a conversation grows past `maxHistoryMessages`, the

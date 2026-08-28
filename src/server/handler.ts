@@ -49,6 +49,7 @@ import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { normalizeUsage } from './usage';
 import type { StorageAdapter } from './storage-adapter';
 import type {
+  BuiltTools,
   ChatRequestContext,
   CreateChatHandlerOptions,
   ServerFollowUpConfig,
@@ -224,7 +225,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     cors,
     maxRequestBytes = DEFAULT_MAX_REQUEST_BYTES,
     streamTimeoutMs,
-    propagateClientAbort = true,
     retrieval,
     memory,
     onFeedback,
@@ -443,10 +443,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
 
-    // Build tools (with their per-request resource). Retrieval tools (when
-    // configured) are merged in later, after namespaces are resolved.
-    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
-
     // ── Hoisted setup state: declared here (before the try), assigned inside it ──
     // These are the setup-region values that the post-try streamText({...}) call
     // and the uiStream onFinish block must read. Declaring them OUTSIDE the try
@@ -465,43 +461,30 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let memoryOrgId: string | undefined;
     let system = '';
     let tools: ToolSet = {};
+    let built: BuiltTools = { tools: {} };
 
-    // ── Teardown guard: wired the instant the per-request resource exists ──
-    // `buildTools` may allocate a resource that needs cleanup (an MCP socket,
-    // a DB transaction, a temp scope). The single guarded teardown below MUST
-    // be registered before any subsequent awaited call that can throw, so a
-    // setup-time failure (resolveModel / buildSystemPrompt / getContext /
-    // retrieval / memory) still tears the resource down instead of leaking it
-    // through the dispatch catch → 500 path.
-    //
-    // `streamTimer` / `streamAbort` are assigned by the optional stream-timeout
-    // block further down and captured by closure; they are `undefined` until
-    // then, so the `if (streamTimer)` guard below is a no-op until then.
-    // `cleanedUp` makes this idempotent across every completion path
-    // (setup-throw / on-error / on-finish / client-abort).
+    // ── Teardown guard ──────────────────────────────────────────────────────
+    // The handler owns one model-abort controller, one optional wall-clock
+    // timer, and one client-abort listener. Cleanup detaches the listener and is
+    // idempotent across finish, error, timeout, and client-disconnect paths.
     let streamAbort: AbortController | undefined;
     let streamTimer: ReturnType<typeof setTimeout> | undefined;
-    // Set by the wall-clock timer itself. The timeout-vs-client-abort branch in
-    // `mapStreamError` must not *infer* which one fired from
-    // `request.signal.aborted`: that reports a provider-side abort as a timeout
-    // when no timeout is even configured, and reports a real timeout as a client
-    // abort whenever the user happens to disconnect a few ms after the timer
-    // fires. Only the timer knows the timer fired.
+    let clientAbortListener: (() => void) | undefined;
+    // Set by the wall-clock timer itself. Timeout classification must use this
+    // flag rather than infer causality from request.signal.
     let streamTimedOut = false;
     let cleanedUp = false;
+    const detachClientAbortListener = () => {
+      if (!clientAbortListener) return;
+      request.signal.removeEventListener('abort', clientAbortListener);
+      clientAbortListener = undefined;
+    };
     const runCleanup = async (reason: string) => {
-      // Disarming the wall-clock ceiling is correct for every path that truly
-      // ends the turn. The one deliberate exception is a client disconnect on a
-      // host that set `propagateClientAbort: false`: that turn is *meant* to
-      // outlive its client, so clearing the timer here would silently void the
-      // "streamTimeoutMs still applies as a wall-clock cap either way" guarantee
-      // documented on the option, leaving the turn unbounded — exactly the
-      // runaway the ceiling exists to prevent. A later on-finish/on-error pass
-      // still clears it, which is why this sits outside the idempotency guard.
-      if (streamTimer && !(reason === 'client-abort' && !propagateClientAbort)) {
+      if (streamTimer) {
         clearTimeout(streamTimer);
         streamTimer = undefined;
       }
+      detachClientAbortListener();
       if (cleanedUp) return;
       cleanedUp = true;
       if (built.cleanup) {
@@ -512,9 +495,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       }
     };
-    // Client-abort during setup (e.g. the user hits Stop before the first
-    // token) must still release the tool resource — register the listener now.
-    request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
 
     // From here through the `system` join + `tools` merge (and the optional
     // streamTimeoutMs assignment), several awaited calls can throw — resolveModel
@@ -717,7 +697,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // Build host tools only after config/retrieval/memory resolution,
     // so an earlier failure cannot leak per-request resources before cleanup is armed.
-    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
+    built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     tools = { ...retrievalTools, ...(built.tools ?? {}) };
 
@@ -737,22 +717,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     //
     // `streamTimeoutMs` keeps its exact original meaning and is now purely
     // ADDITIVE: an optional wall-clock ceiling layered on top of the always-on
-    // client-abort wiring. Hosts that genuinely want a turn to outlive its
-    // client (fire-and-forget background completion) opt out with
-    // `propagateClientAbort: false`; the wall-clock cap still applies.
+    // client-abort wiring. Background work that deliberately outlives its
+    // requester belongs on a job/queue surface, not on this live SSE handler.
     //
-    // `streamAbort` / `streamTimer` are declared alongside `runCleanup` above
-    // (the teardown guard must exist before any setup-time throw).
+    // Use one named listener so normal completion can remove it. The listener
+    // aborts the model before beginning resource cleanup; Stop is therefore a
+    // real upstream cancellation, not merely a client-side visual state.
     streamAbort = new AbortController();
-    if (propagateClientAbort) {
-      // Already gone before we reached this line (disconnect during setup):
-      // abort immediately rather than waiting for an 'abort' event that has
-      // already fired and will never fire again.
-      if (request.signal.aborted) {
-        streamAbort.abort();
-      } else {
-        request.signal.addEventListener('abort', () => streamAbort!.abort());
-      }
+    clientAbortListener = () => {
+      streamAbort?.abort();
+      void runCleanup('client-abort');
+    };
+    if (request.signal.aborted) {
+      clientAbortListener();
+    } else {
+      request.signal.addEventListener('abort', clientAbortListener, { once: true });
     }
     if (streamTimeoutMs && streamTimeoutMs > 0) {
       streamTimer = setTimeout(() => {
@@ -819,8 +798,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       system,
       messages: modelMessages,
       tools,
-      // Client-abort (always, unless `propagateClientAbort: false`) plus the
-      // optional `streamTimeoutMs` wall-clock cap — see `streamAbort` above.
+      // Client-abort plus the optional `streamTimeoutMs` wall-clock cap — see
+      // `streamAbort` above.
       // Passing this is what makes Stop actually stop the upstream spend.
       ...(streamAbort ? { abortSignal: streamAbort.signal } : {}),
       // The model's real output limit (from the catalog via /v1/config), so long
