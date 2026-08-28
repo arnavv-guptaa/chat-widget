@@ -48,8 +48,12 @@ describe('isAbortError', () => {
     expect(isAbortError(outer)).toBe(true);
   });
 
-  it('recognises a name-less abort by message (runtimes that lose the name)', () => {
-    expect(isAbortError(new Error('The operation was aborted'))).toBe(true);
+  it('recognises Node aborts by standard code', () => {
+    expect(isAbortError(Object.assign(new Error('cancelled'), { code: 'ABORT_ERR' }))).toBe(true);
+  });
+
+  it('does not suppress a real upstream failure merely because its message says aborted', () => {
+    expect(isAbortError(new Error('request was aborted by the upstream gateway'))).toBe(false);
   });
 
   it('does NOT treat an ordinary failure as an abort', () => {
@@ -134,6 +138,20 @@ describe('classifyError — rate limits', () => {
     expect(result.retryAfterMs).toBe(360_000);
   });
 
+  it('uses the latest reset when independent request and token buckets are reported', () => {
+    const result = classifyError(
+      apiCallError({
+        statusCode: 429,
+        responseBody: {},
+        responseHeaders: {
+          'x-ratelimit-reset-requests': '1s',
+          'x-ratelimit-reset-tokens': '6m0s',
+        },
+      }),
+    );
+    expect(result.retryAfterMs).toBe(360_000);
+  });
+
   it('reads headers from a real Headers instance', () => {
     const result = classifyError(
       apiCallError({ statusCode: 429, responseBody: {}, responseHeaders: new Headers({ 'retry-after': '12' }) as never }),
@@ -167,6 +185,15 @@ describe('classifyError — auth', () => {
     expect(classifyError(err).kind).toBe('auth');
   });
 
+  it('classifies hard quota exhaustion as operator-actionable and non-retryable', () => {
+    const result = classifyError({
+      statusCode: 429,
+      error: { type: 'insufficient_quota' },
+    });
+    expect(result.kind).toBe('auth');
+    expect(result.retryable).toBe(false);
+  });
+
   it('never marks auth retryable — retrying a bad key just burns quota', () => {
     expect(classifyError(apiCallError({ statusCode: 403, responseBody: {} })).retryable).toBe(false);
   });
@@ -179,6 +206,14 @@ describe('classifyError — transient', () => {
     );
     expect(result.kind).toBe('transient');
     expect(result.retryable).toBe(true);
+  });
+
+  it('classifies raw Anthropic error payloads without an SDK wrapper', () => {
+    expect(classifyError({ type: 'error', error: { type: 'overloaded_error' } }).kind).toBe('transient');
+  });
+
+  it('classifies raw Google error payloads without an SDK wrapper', () => {
+    expect(classifyError({ error: { status: 'RESOURCE_EXHAUSTED' } }).kind).toBe('rate_limit');
   });
 
   it('classifies a bare 503', () => {

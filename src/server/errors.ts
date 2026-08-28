@@ -123,7 +123,7 @@ const MESSAGES: Record<ChatErrorKind, string> = {
   transient: 'The assistant is temporarily unavailable. Please try again.',
   content_policy: "I can't help with that request.",
   prompt: "That request couldn't be processed. Try rephrasing or shortening your message.",
-  model: 'This conversation has grown too long for the model. Start a new chat to continue.',
+  model: 'The configured model could not complete this request. Try a different request or contact support.',
   tool: 'A tool the assistant was using failed. Please try again.',
   unknown: 'An error occurred while generating the response.',
 };
@@ -161,9 +161,9 @@ function causeChain(err: unknown, max = 5): unknown[] {
  *
  * Aborts arrive in several shapes depending on runtime and provider: a
  * DOMException named `AbortError` (undici / browsers), a plain Error with that
- * name, an SDK-wrapped abort, or — on some runtimes — a bare
- * `Error('The operation was aborted')` that lost its name across an async
- * boundary. Name first (reliable), narrow message probe last (a fallback).
+ * name, an SDK-wrapped abort, or Node's standard `ABORT_ERR` code. We do not
+ * classify by message text because upstream gateways also use "aborted" for
+ * real failures that must remain visible.
  *
  * Conservative by design: a false negative logs one extra error, a false
  * positive silently swallows a genuine outage.
@@ -174,7 +174,10 @@ export function isAbortError(err: unknown): boolean {
     if (!rec) continue;
     const name = str(rec.name);
     if (name === 'AbortError' || name === 'TimeoutError') return true;
-    if (/\baborted\b/i.test(str(rec.message))) return true;
+    // Node/undici may preserve only the standard abort code. Do not classify
+    // free text containing "aborted": upstream gateways use that word for real
+    // transport failures, and a false positive would silently suppress them.
+    if (str(rec.code).toUpperCase() === 'ABORT_ERR') return true;
   }
   return false;
 }
@@ -210,24 +213,39 @@ function extractCode(err: unknown): string | undefined {
     const rec = asRecord(link);
     if (!rec) continue;
 
-    const direct = str(rec.code);
-    if (direct) return direct;
+    // Prefer nested provider errors over envelope discriminants such as
+    // Anthropic's outer `{ type: "error" }`.
+    const nested: Array<Record<string, unknown>> = [];
+    const direct: Array<Record<string, unknown>> = [rec];
+    const directError = asRecord(rec.error);
+    if (directError) nested.push(directError);
+    const data = asRecord(rec.data);
+    if (data) {
+      direct.push(data);
+      const dataError = asRecord(data.error);
+      if (dataError) nested.push(dataError);
+    }
 
-    // The SDK parks the parsed provider payload on `data`, and the raw text on
-    // `responseBody`. Try structured first, then a JSON parse of the raw body.
-    const candidates: Array<Record<string, unknown> | null> = [asRecord(rec.data)];
     const body = rec.responseBody;
     if (typeof body === 'string' && body.length > 0 && body.length < 100_000) {
       try {
-        candidates.push(asRecord(JSON.parse(body)));
+        const parsed = asRecord(JSON.parse(body));
+        if (parsed) {
+          direct.push(parsed);
+          const parsedError = asRecord(parsed.error);
+          if (parsedError) nested.push(parsedError);
+        }
       } catch {
         /* not JSON — fine, the text probe below still sees it */
       }
     }
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      const inner = asRecord(candidate.error) ?? candidate;
-      const code = str(inner.code) || str(inner.type) || str(inner.status) || str(inner.reason);
+
+    for (const candidate of [...nested, ...direct]) {
+      const code =
+        str(candidate.code) ||
+        str(candidate.type) ||
+        str(candidate.status) ||
+        str(candidate.reason);
       if (code) return code;
     }
   }
@@ -302,6 +320,11 @@ function extractRetryAfterMs(err: unknown): number | undefined {
     if (Number.isFinite(at)) return clamp(at - Date.now());
   }
 
+  // A provider can report independent request and token buckets. When it does
+  // not identify which bucket was exhausted, the only safe retry is after the
+  // latest applicable reset; choosing the first/shortest can immediately earn
+  // another 429.
+  const resets: number[] = [];
   for (const header of [
     'anthropic-ratelimit-requests-reset',
     'anthropic-ratelimit-tokens-reset',
@@ -311,16 +334,22 @@ function extractRetryAfterMs(err: unknown): number | undefined {
   ]) {
     const raw = readHeader(err, header);
     if (!raw) continue;
-    // OpenAI uses a duration ("1s", "6m0s", "120ms"); Anthropic an ISO date.
     const duration = parseDuration(raw);
-    if (duration !== undefined) return clamp(duration);
+    if (duration !== undefined) {
+      resets.push(clamp(duration));
+      continue;
+    }
     const at = Date.parse(raw);
-    if (Number.isFinite(at)) return clamp(at - Date.now());
+    if (Number.isFinite(at)) {
+      resets.push(clamp(at - Date.now()));
+      continue;
+    }
     const epoch = Number(raw);
-    // A bare number here is a unix timestamp (seconds) on some gateways.
-    if (Number.isFinite(epoch) && epoch > 1_000_000_000) return clamp(epoch * 1000 - Date.now());
+    if (Number.isFinite(epoch) && epoch > 1_000_000_000) {
+      resets.push(clamp(epoch * 1000 - Date.now()));
+    }
   }
-  return undefined;
+  return resets.length > 0 ? Math.max(...resets) : undefined;
 }
 
 /** Parse OpenAI-style compound durations: `120ms`, `1s`, `6m0s`, `1h2m3s`. */
@@ -340,8 +369,10 @@ function parseDuration(raw: string): number | undefined {
 // the extracted `code` first (precise), then against free text (last resort).
 
 const CODES: Array<[ChatErrorKind, readonly string[]]> = [
-  ['rate_limit', ['rate_limit_exceeded', 'rate_limit_error', 'resource_exhausted', 'insufficient_quota', 'quota_exceeded', 'too_many_requests', 'throttlingexception']],
-  ['auth', ['invalid_api_key', 'authentication_error', 'invalid_authentication', 'permission_denied', 'unauthenticated', 'permission_error', 'account_deactivated', 'ai_loadapikeyerror']],
+  ['rate_limit', ['rate_limit_exceeded', 'rate_limit_error', 'resource_exhausted', 'too_many_requests', 'throttlingexception']],
+  // Hard quota/billing exhaustion requires operator action; retrying the same
+  // request cannot succeed and risks a paid retry loop.
+  ['auth', ['invalid_api_key', 'authentication_error', 'invalid_authentication', 'permission_denied', 'unauthenticated', 'permission_error', 'account_deactivated', 'insufficient_quota', 'quota_exceeded', 'ai_loadapikeyerror']],
   ['content_policy', ['content_filter', 'content_policy_violation', 'safety', 'blocked', 'prohibited_content', 'recitation']],
   ['model', ['context_length_exceeded', 'string_above_max_length', 'model_not_found', 'ai_nosuchmodelerror', 'ai_unsupportedfunctionalityerror', 'ai_toomanyembeddingvaluesforcallerror']],
   ['prompt', ['invalid_request_error', 'invalid_argument', 'ai_invalidprompterror', 'ai_invalidargumenterror', 'ai_typevalidationerror', 'ai_invalidmessageroleerror', 'ai_messageconversionerror', 'failed_precondition']],
