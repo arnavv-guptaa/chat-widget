@@ -17,6 +17,7 @@ interface SetupOpts {
   withPublishedConfig?: boolean;
   trustPreview?: boolean;
   storageScope?: string;
+  cors?: { allowOrigins: string[]; allowCredentials?: boolean };
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -57,6 +58,7 @@ function setup(opts: SetupOpts = {}) {
       : {}),
     ...(opts.trustPreview ? { resolvePreviewConfig: async (config: any) => config } : {}),
     ...(opts.storageScope ? { resolveStorageScope: async () => opts.storageScope! } : {}),
+    ...(opts.cors ? { cors: opts.cors } : {}),
     ...(opts.withStorage
       ? {
           storage: () => ({
@@ -227,6 +229,32 @@ describe('handler — dispatch routing', () => {
   it('503s memory routes when memory is not configured', async () => {
     const { handler } = setup();
     expect((await handler.GET(req('/api/chat/memory'))).status).toBe(503);
+  });
+});
+
+describe('handler — trace response contract', () => {
+  it('stamps and exposes the trace header on cross-origin responses', async () => {
+    const { handler } = setup({ cors: { allowOrigins: ['https://embed.example'] } });
+    const res = await handler.GET(
+      req('/api/chat/history', { headers: { origin: 'https://embed.example' } }),
+    );
+    expect(res.headers.get('x-mordn-trace-id')).toMatch(/^[0-9a-f]{32}$/);
+    expect(res.headers.get('access-control-expose-headers')).toContain('X-Mordn-Trace-Id');
+  });
+
+  it('stamps the trace header on preflight responses', async () => {
+    const { handler } = setup({ cors: { allowOrigins: ['https://embed.example'] } });
+    const res = await handler.OPTIONS(
+      req('/api/chat', {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://embed.example',
+          'access-control-request-headers': 'content-type',
+        },
+      }),
+    );
+    expect(res.status).toBe(204);
+    expect(res.headers.get('x-mordn-trace-id')).toMatch(/^[0-9a-f]{32}$/);
   });
 });
 

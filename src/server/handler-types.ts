@@ -31,6 +31,7 @@
 import type { LanguageModel, ModelMessage, ToolSet, UIMessage, StopCondition } from 'ai';
 import type { ChatStoreFactory } from './chat-store';
 import type { ClassifiedChatError } from './errors';
+import type { ChatLogger } from './observability';
 import type { StorageAdapterFactory } from './storage-adapter';
 import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/types';
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
@@ -546,9 +547,50 @@ export interface CreateChatHandlerOptions {
    * message. Set `false` only if you forward errors elsewhere and want to
    * suppress the built-in console log.
    *
+   * Note: this switches the BUILT-IN console logger on and off. If you pass an
+   * explicit `logger`, that always wins — a host that wired up Datadog should
+   * not have its telemetry silenced by a flag whose documented job is muting
+   * our console noise.
+   *
    * Default: `true`.
    */
   logErrors?: boolean;
+
+  /**
+   * Route chat telemetry into your own logging stack.
+   *
+   * The handler mints a `traceId` per request and stamps it on every line for
+   * that turn — `turn.start`, `turn.finish`, `turn.error`, `turn.abort`,
+   * `save.failed`, `title.failed`, `memory.failed`, `retrieval.failed`,
+   * `cleanup.failed`, `request.error` — so one grep reconstructs a whole
+   * conversation turn instead of leaving you to correlate timestamps across
+   * tenants. The same id is echoed to the caller on the `X-Mordn-Trace-Id`
+   * response header, so a user can hand you one string from their network tab
+   * and you can find the exact turn.
+   *
+   * ```ts
+   * logger: {
+   *   log: (level, fields) => pino[level]({ ...fields }),
+   * }
+   * ```
+   *
+   * The trace id ADOPTS an inbound `traceparent` (W3C Trace Context) or
+   * `x-request-id` / `x-correlation-id` / `x-amzn-trace-id` when present, so
+   * widget lines join your existing request logs rather than starting a
+   * competing trace.
+   *
+   * Implementations MUST NOT throw and MUST NOT block — this sits on the hot
+   * path of every turn. The handler wraps each call defensively, but buffer and
+   * flush out of band rather than awaiting a network write per line.
+   *
+   * Defaults to a JSON-per-line console logger (or nothing, when
+   * `logErrors: false`). This is deliberately NOT OpenTelemetry: pulling
+   * `@opentelemetry/*` into a widget package would push a heavy, version-
+   * fragile tree onto every consumer to serve the subset who want it. This is
+   * the seam an OTel adapter plugs into — implement `ChatLogger`, open a span
+   * per `traceId`.
+   */
+  logger?: ChatLogger;
 
   /**
    * When the model may chain tool calls, how long to let it run before it

@@ -47,6 +47,15 @@ import {
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { classifyError, isAbortError, messageForErrorKind } from './errors';
+import {
+  createConsoleLogger,
+  createTurnLogger,
+  errorFields,
+  noopLogger,
+  resolveTraceId,
+  TRACE_HEADER,
+  type TurnLogger,
+} from './observability';
 import { normalizeUsage } from './usage';
 import type { StorageAdapter } from './storage-adapter';
 import type {
@@ -226,6 +235,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     cors,
     maxRequestBytes = DEFAULT_MAX_REQUEST_BYTES,
     streamTimeoutMs,
+    logger: loggerOption,
     retrieval,
     memory,
     onFeedback,
@@ -238,6 +248,35 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   // authenticated chat request so the warning (if any) is logged once per
   // process, not on every turn. See maybeWarnProxyBuffering.
   let proxyDiagnosed = false;
+
+  // ── Observability ──────────────────────────────────────────────────────────
+  // `logger` is the seam; `logErrors` keeps its original meaning as the on/off
+  // switch for the BUILT-IN logger. An explicit `logger` always wins — a host
+  // that went to the trouble of wiring Datadog should not have its telemetry
+  // silenced by a flag whose documented job is muting our console noise.
+  const log = loggerOption ?? (logErrors ? createConsoleLogger() : noopLogger);
+
+  // Request-scoped trace id.
+  //
+  // Keyed on the `Request` object rather than threaded through every handler
+  // signature (8 of them) or held in `AsyncLocalStorage` — which is not
+  // available on every edge runtime this package targets. A WeakMap keyed on
+  // the request is portable, allocation-free once the request is collected, and
+  // cannot leak between concurrent requests the way a module-level variable
+  // would.
+  const traceIds = new WeakMap<Request, string>();
+  function traceFor(request: Request): string {
+    let traceId = traceIds.get(request);
+    if (!traceId) {
+      traceId = resolveTraceId(request);
+      traceIds.set(request, traceId);
+    }
+    return traceId;
+  }
+  /** A logger bound to this request's trace id, plus whatever else is known yet. */
+  function loggerFor(request: Request, fields?: Record<string, unknown>): TurnLogger {
+    return createTurnLogger(log, { traceId: traceFor(request), ...fields });
+  }
 
   // The hosted default store/storage are resolved lazily so a BYO consumer who
   // passes their own never triggers our default's env-var requirements.
@@ -362,6 +401,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const ctx = await authenticate(request, conversationId);
     if (!ctx) return new Response('Unauthorized', { status: 401 });
 
+    // Every line for this turn carries the same traceId + userId +
+    // conversationId from here on, so one grep reconstructs the whole turn.
+    const turnLog = loggerFor(request, { userId: ctx.userId, conversationId });
+
     // Resolve the complete runtime config before persistence or resource
     // allocation. Production ignores body.config; preview trust is explicit.
     const published = await loadPublishedConfig(ctx);
@@ -440,7 +483,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             summary;
         }
       } catch (err) {
-        console.error('[chat-widget] history summarization failed:', err instanceof Error ? err.message : err);
+        turnLog.warn('summarize.failed', errorFields(err));
       }
     }
 
@@ -492,7 +535,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         try {
           await built.cleanup();
         } catch (err) {
-          console.error(`[chat-widget] tool cleanup failed (${reason}):`, err);
+          turnLog.error('cleanup.failed', { reason, ...errorFields(err) });
         }
       }
     };
@@ -552,9 +595,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       const bodyBytes = requestBodyBytes; // real measured size, not the forgeable Content-Length
       if (bodyBytes > MAX_CONTEXT_BYTES) {
         if (body.context !== undefined) {
-          console.warn(
-            `[chat-widget] request body (${bodyBytes}B) exceeds the ${MAX_CONTEXT_BYTES}B context budget — context injection skipped.`,
-          );
+          turnLog.warn('context.skipped', {
+            reason: 'body_over_budget',
+            bodyBytes,
+            limitBytes: MAX_CONTEXT_BYTES,
+          });
         }
       } else {
         let injectedContext: Record<string, unknown> | null = null;
@@ -566,10 +611,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             injectedContext = body.context;
           }
         } catch (err) {
-          console.error(
-            '[chat-widget] getContext threw; continuing without injected context:',
-            err,
-          );
+          turnLog.error('context.failed', errorFields(err));
         }
         if (injectedContext) contextSystem = formatContextPreamble(injectedContext);
       }
@@ -619,7 +661,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       } catch (err) {
         // Retrieval is best-effort — a failure must never break the turn.
-        console.error('[chat-widget] retrieval failed:', err);
+        turnLog.warn('retrieval.failed', errorFields(err));
       }
     }
 
@@ -643,10 +685,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         try {
           memoryEnabled = await memory.isEnabledForUser(ctx);
         } catch (err) {
-          console.error(
-            '[chat-widget] memory.isEnabledForUser threw; disabling memory for this turn:',
-            err,
-          );
+          turnLog.error('memory.failed', { phase: 'consent', ...errorFields(err) });
           memoryEnabled = false;
         }
       }
@@ -782,17 +821,23 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             // answer mid-stream still deserves a named thread. The call is
             // bounded by its own timeout, so nothing dangles.
           }).catch((err) => {
-            console.warn(
-              JSON.stringify({
-                event: 'title.generate_failed',
-                userId: ctx.userId,
-                conversationId,
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+            turnLog.warn('title.failed', { phase: 'generate', ...errorFields(err) });
             return null;
           })
         : Promise.resolve(null);
+
+    // The opening line of the turn. Everything after this shares its traceId,
+    // so `turn.start` → … → `turn.finish` is the measured lifecycle boundary.
+    // It includes generation, post-response work, and persistence.
+    const turnStartedAt = Date.now();
+    turnLog.info('turn.start', {
+      ...(typeof modelLabel === 'string' ? { model: modelLabel } : {}),
+      messageCount: incoming.length,
+      promptMessageCount: modelMessages.length,
+      toolCount: Object.keys(tools).length,
+      hasRetrieval: citationChunks.length > 0,
+      memoryEnabled,
+    });
 
     const result = streamText({
       model,
@@ -927,14 +972,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 providerMetadata: generated.providerMetadata,
               };
             })().catch((err) => {
-              console.warn(
-                JSON.stringify({
-                  event: 'followups.generate_failed',
-                  userId: ctx.userId,
-                  conversationId,
-                  error: err instanceof Error ? err.message : String(err),
-                }),
-              );
+              turnLog.warn('followups.failed', errorFields(err));
               return null;
             })
           : Promise.resolve(null);
@@ -964,14 +1002,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
                 data: { title: generatedTitle.title },
               });
             } catch (err) {
-              console.warn(
-                JSON.stringify({
-                  event: 'title.rename_failed',
-                  userId: ctx.userId,
-                  conversationId,
-                  error: err instanceof Error ? err.message : String(err),
-                }),
-              );
+              turnLog.warn('title.failed', { phase: 'rename', ...errorFields(err) });
             }
           }
 
@@ -1019,8 +1050,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // banner suppresses abort-shaped messages (`chat-error-banner.tsx`), so
       // a stopped turn renders as the partial answer it is instead of a red
       // error strip under text the user already has. That string coupling is
-      // load-bearing today and is replaced by a typed error kind on the wire
-      // in the error-taxonomy work that follows this PR.
+      // load-bearing today. The error taxonomy this branch builds on now gives
+      // the server a real `kind`; putting that kind on the wire so the client
+      // branches on a discriminant instead of a message probe is the tracked
+      // follow-up, not something this branch does.
       // Gated on our own controller having actually fired. `isAbortError` alone
       // is a shape probe, and its message fallback matches any error whose text
       // contains "aborted" — including genuine upstream failures like
@@ -1030,17 +1063,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // with no indication anything broke. If we never aborted, it is not our
       // abort, and it belongs on the real error path below.
       if (streamAbort?.signal.aborted && isAbortError(err)) {
+        // `streamTimedOut` is set by the wall-clock timer itself rather than
+        // inferred from `request.signal.aborted`, which misreported both
+        // directions (see the abort-propagation branch).
         const timedOut = streamTimedOut;
-        if (logErrors && timedOut) {
-          console.warn(
-            JSON.stringify({
-              event: 'chat.stream_timeout',
-              userId: ctx.userId,
-              conversationId,
-              streamTimeoutMs,
-            }),
-          );
-        }
+        // Info, not error: a user pressing Stop is a normal outcome. The
+        // wall-clock variant warns because a stalled upstream IS operationally
+        // interesting. Either way `durationMs` tells you how far it got.
+        turnLog[timedOut ? 'warn' : 'info']('turn.abort', {
+          reason: timedOut ? 'stream_timeout' : 'client_disconnect',
+          durationMs: Date.now() - turnStartedAt,
+          ...(timedOut && streamTimeoutMs ? { streamTimeoutMs } : {}),
+        });
         mappedStreamError = timedOut
           ? STREAM_TIMEOUT_ABORT_MESSAGE
           : CLIENT_ABORT_MESSAGE;
@@ -1056,28 +1090,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // discriminated `kind` instead of regexing provider prose.
       const classified = classifyError(err);
 
-      if (logErrors) {
-        // Structured so it is greppable and aggregatable — a category and a
-        // retry hint are what you actually need at 3am, not just a stack.
-        console.error(
-          JSON.stringify({
-            event: 'chat.stream_error',
-            kind: classified.kind,
-            retryable: classified.retryable,
-            ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
-            ...(classified.status !== undefined ? { status: classified.status } : {}),
-            ...(classified.code ? { code: classified.code } : {}),
-            userId: ctx.userId,
-            conversationId,
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
-        // The stack stays on its own line: it is the thing a human reads, and
-        // folding a multi-line stack into the JSON above makes both unreadable.
-        if (err instanceof Error && err.stack) {
-          console.error('[chat-widget] stream error:', err.stack);
-        }
-      }
+      // A category and a retry hint are what you actually need at 3am, and the
+      // traceId ties this line to the turn.start / tool / save lines around it.
+      turnLog.error('turn.error', {
+        kind: classified.kind,
+        retryable: classified.retryable,
+        ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
+        ...(classified.status !== undefined ? { status: classified.status } : {}),
+        ...(classified.code ? { code: classified.code } : {}),
+        durationMs: Date.now() - turnStartedAt,
+        ...(typeof modelLabel === 'string' ? { model: modelLabel } : {}),
+        ...errorFields(err),
+      });
 
       // The host's hook wins when it returns a non-empty string; otherwise the
       // category's own copy is already far better than the old one-size
@@ -1142,6 +1166,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // assistant bubble into history.
         const shouldPersist =
           finalMessages.length > 0 && hasAssistantContent(finalMessages);
+        let persisted = false;
         if (shouldPersist) {
           // Normalise token usage + gateway cost for this turn (best-effort —
           // returns null when there's nothing worth recording, and never throws).
@@ -1163,16 +1188,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           // but never thrown, because the user already has their answer.
           try {
             await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel, usage });
+            persisted = true;
           } catch (err) {
-            console.error(
-              JSON.stringify({
-                event: 'chat.save_failed',
-                userId: ctx.userId,
-                conversationId,
-                aborted: isAborted,
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+            // The loudest line in this file: the user has an answer on
+            // screen that is NOT in the database, so it vanishes on reload.
+            turnLog.error('save.failed', { aborted: isAborted, ...errorFields(err) });
           }
 
           // Stopped-but-kept turns still deserve a name. The normal rename +
@@ -1189,19 +1209,25 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
               try {
                 await store.renameConversation(conversationId, generated.title);
               } catch (err) {
-                console.warn(
-                  JSON.stringify({
-                    event: 'title.rename_failed',
-                    userId: ctx.userId,
-                    conversationId,
-                    aborted: true,
-                    error: err instanceof Error ? err.message : String(err),
-                  }),
-                );
+                turnLog.warn('title.failed', { phase: 'rename', aborted: true, ...errorFields(err) });
               }
             }
           }
         }
+        // The closing line of the measured turn lifecycle. `durationMs`
+        // covers turn.start through generation, post-response work, and
+        // persistence; it is not HTTP request latency or provider latency.
+        turnLog.info('turn.finish', {
+          durationMs: Date.now() - turnStartedAt,
+          ...(typeof modelLabel === 'string' ? { model: modelLabel } : {}),
+          ...(finalFinishReason ? { finishReason: finalFinishReason } : {}),
+          ...(finalStepCount !== undefined ? { stepCount: finalStepCount } : {}),
+          aborted: isAborted,
+          persistenceAttempted: shouldPersist,
+          persisted,
+          messageCount: finalMessages.length,
+        });
+
         if (onChatFinish) {
           try {
             await onChatFinish({
@@ -1211,7 +1237,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
               providerMetadata: finalProviderMetadata,
             });
           } catch (err) {
-            console.error('[chat-widget] onChatFinish hook threw:', err);
+            turnLog.error('hook.failed', { hook: 'onChatFinish', ...errorFields(err) });
           }
         }
 
@@ -1231,14 +1257,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
               orgId: memoryOrgId,
             });
           } catch (err) {
-            console.error(
-              JSON.stringify({
-                event: 'memory.record_failed',
-                userId: ctx.userId,
-                conversationId,
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+            turnLog.warn('memory.failed', errorFields(err));
           }
         }
 
@@ -1580,6 +1599,17 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     if (cors.allowCredentials) {
       response.headers.set('Access-Control-Allow-Credentials', 'true');
     }
+    if (!preflight) {
+      const existing = response.headers.get('Access-Control-Expose-Headers');
+      const exposed = new Set(
+        (existing ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      exposed.add(TRACE_HEADER);
+      response.headers.set('Access-Control-Expose-Headers', [...exposed].join(', '));
+    }
     if (preflight) {
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       // Reflect whatever generic transport headers the browser asked to send
@@ -1602,12 +1632,28 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
    * CORS headers — the browser then fails the request exactly as it does
    * today, and same-origin traffic never sends OPTIONS at all.
    */
+  function withTraceHeader(request: Request, response: Response): Response {
+    const headers = new Headers(response.headers);
+    headers.set(TRACE_HEADER, traceFor(request));
+    // Re-wrap rather than mutate: streamed/cached Responses can expose immutable
+    // headers on edge runtimes. The body stream itself is passed through.
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
   async function preflight(request: Request): Promise<Response> {
-    return applyCors(request, new Response(null, { status: 204 }), true);
+    return applyCors(
+      request,
+      withTraceHeader(request, new Response(null, { status: 204 })),
+      true,
+    );
   }
 
   async function dispatch(request: Request): Promise<Response> {
-    const response = await dispatchInner(request);
+    const response = withTraceHeader(request, await dispatchInner(request));
     // Actual (non-preflight) responses need Allow-Origin too — a passed
     // preflight only permits the request; each response must still opt in.
     return applyCors(request, response);
@@ -1665,7 +1711,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
       return json({ error: 'Not found' }, 404);
     } catch (err) {
-      console.error('[chat-widget] handler error:', err);
+      // The last line of defence. Classified so an infrastructure blip is
+      // distinguishable from a genuine bug at a glance, and carrying the trace
+      // id so it joins the rest of the turn's lines.
+      const classified = classifyError(err);
+      loggerFor(request).error('request.error', {
+        kind: classified.kind,
+        retryable: classified.retryable,
+        ...(classified.status !== undefined ? { status: classified.status } : {}),
+        method,
+        path: segments.join('/'),
+        ...errorFields(err),
+      });
       return json({ error: 'Internal server error' }, 500);
     }
   }
