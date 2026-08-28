@@ -2,6 +2,15 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.17.4 — 2026-08-09
+
+### Fixed
+- **Tables no longer shred into one character per line.** Cells inherited `overflow-wrap: anywhere` from `.chat-message-content` — correct for wrapping a long URL in prose, wrong here, because `anywhere` makes the browser count every *character* as a wrap opportunity when it computes a column's min-content width. Paired with `width: 100%` on the table, the auto layout was simultaneously required to fit the widget and free to crush any column to a single character, so a six-column table in a ~380px widget rendered `Homi Bhab / ha Canc / er`. `white-space: nowrap` on `th` made it worse: headers claimed their full width as a hard minimum while the body columns absorbed all of the compression. Tables now take their content width (`max-content`, floored at `min-width: 100%` so a two-column table still fills the card) and scroll sideways instead; cells opt out with `break-word`, which still rescues an unbreakable token but leaves min-content at the longest word — the width the column algorithm needs to see. A `max-width` on `td` (deliberately not `th`, which is nowrap and would spill) stops one prose column pushing the rest off-screen.
+
+### Changed
+- **A wide table now reads as scrollable.** Since the fix above relies on horizontal scrolling, that scrolling had to become discoverable: edge fades appear only on a side that actually has more content, tracked from the live scroll position and re-measured as rows stream in. When a table overflows, its scroll region is focusable and labelled, so the hidden columns are reachable by keyboard and not mouse-only.
+- **The table copy button is revealed on hover** rather than parked permanently over a column label — a table has no chrome bar to park it in, unlike a code block, where `.chat-code-copy` stays visible. The hide is scoped to `@media (hover: hover)` so it stays visible on touch, `:focus-visible` reveals it for keyboard users, and it stays up through the copied ✓ so the confirmation isn't cut short when the pointer leaves.
+
 ## 0.17.3 — 2026-08-01
 
 ### Fixed

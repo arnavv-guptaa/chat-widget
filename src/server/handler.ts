@@ -49,6 +49,7 @@ import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { normalizeUsage } from './usage';
 import type { StorageAdapter } from './storage-adapter';
 import type {
+  BuiltTools,
   ChatRequestContext,
   CreateChatHandlerOptions,
   ServerFollowUpConfig,
@@ -442,10 +443,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
 
-    // Build tools (with their per-request resource). Retrieval tools (when
-    // configured) are merged in later, after namespaces are resolved.
-    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
-
     // ── Hoisted setup state: declared here (before the try), assigned inside it ──
     // These are the setup-region values that the post-try streamText({...}) call
     // and the uiStream onFinish block must read. Declaring them OUTSIDE the try
@@ -464,27 +461,32 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let memoryOrgId: string | undefined;
     let system = '';
     let tools: ToolSet = {};
+    let built: BuiltTools = { tools: {} };
 
-    // ── Teardown guard: wired the instant the per-request resource exists ──
-    // `buildTools` may allocate a resource that needs cleanup (an MCP socket,
-    // a DB transaction, a temp scope). The single guarded teardown below MUST
-    // be registered before any subsequent awaited call that can throw, so a
-    // setup-time failure (resolveModel / buildSystemPrompt / getContext /
-    // retrieval / memory) still tears the resource down instead of leaking it
-    // through the dispatch catch → 500 path.
-    //
-    // `streamTimer` / `streamAbort` are assigned by the optional stream-timeout
-    // block further down and captured by closure; they are `undefined` until
-    // then, so the `if (streamTimer)` guard below is a no-op until then.
-    // `cleanedUp` makes this idempotent across every completion path
-    // (setup-throw / on-error / on-finish / client-abort).
+    // ── Teardown guard ──────────────────────────────────────────────────────
+    // The handler owns one model-abort controller, one optional wall-clock
+    // timer, and one client-abort listener. Cleanup detaches the listener and is
+    // idempotent across finish, error, timeout, and client-disconnect paths.
     let streamAbort: AbortController | undefined;
     let streamTimer: ReturnType<typeof setTimeout> | undefined;
+    let clientAbortListener: (() => void) | undefined;
+    // Set by the wall-clock timer itself. Timeout classification must use this
+    // flag rather than infer causality from request.signal.
+    let streamTimedOut = false;
     let cleanedUp = false;
+    const detachClientAbortListener = () => {
+      if (!clientAbortListener) return;
+      request.signal.removeEventListener('abort', clientAbortListener);
+      clientAbortListener = undefined;
+    };
     const runCleanup = async (reason: string) => {
+      if (streamTimer) {
+        clearTimeout(streamTimer);
+        streamTimer = undefined;
+      }
+      detachClientAbortListener();
       if (cleanedUp) return;
       cleanedUp = true;
-      if (streamTimer) clearTimeout(streamTimer);
       if (built.cleanup) {
         try {
           await built.cleanup();
@@ -493,9 +495,6 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       }
     };
-    // Client-abort during setup (e.g. the user hits Stop before the first
-    // token) must still release the tool resource — register the listener now.
-    request.signal.addEventListener('abort', () => void runCleanup('client-abort'));
 
     // From here through the `system` join + `tools` merge (and the optional
     // streamTimeoutMs assignment), several awaited calls can throw — resolveModel
@@ -698,21 +697,47 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
 
     // Build host tools only after config/retrieval/memory resolution,
     // so an earlier failure cannot leak per-request resources before cleanup is armed.
-    const built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
+    built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
     // Merge retrieval tools into the host's tool set (host tools win on name clash).
     tools = { ...retrievalTools, ...(built.tools ?? {}) };
 
-    // Optional wall-clock timeout for the stream. When `streamTimeoutMs` is set,
-    // abort the stream after that budget (and on client-abort) so a hung/stalled
-    // upstream can't hold the connection + resources open indefinitely. OFF by
-    // default → no abortSignal is passed to streamText below and the stream
-    // lifecycle is exactly as before. `streamAbort` / `streamTimer` are declared
-    // alongside `runCleanup` above (the teardown guard must exist before any
-    // setup-time throw); this block only assigns them when the option is on.
+    // ── Abort propagation — ON by default ────────────────────────────────────
+    // `streamAbort` is the single abort surface for the model call, and it is
+    // now created on EVERY turn rather than only when `streamTimeoutMs` was
+    // configured. `request.signal` is wired into it, so a client disconnect
+    // (Stop button, tab close, navigation, tab-switch) aborts `streamText` —
+    // upstream generation stops, and so does upstream BILLING.
+    //
+    // Before this, the controller only existed when `streamTimeoutMs` was set.
+    // On the default config `request.signal` was never forwarded to
+    // `streamText`, so a disconnected client left the model generating and
+    // metering until it finished naturally or the platform killed the function.
+    // The Stop button looked like it worked (the browser stopped rendering) but
+    // was cosmetic on the wire — you paid for every token after the user left.
+    //
+    // `streamTimeoutMs` keeps its exact original meaning and is now purely
+    // ADDITIVE: an optional wall-clock ceiling layered on top of the always-on
+    // client-abort wiring. Background work that deliberately outlives its
+    // requester belongs on a job/queue surface, not on this live SSE handler.
+    //
+    // Use one named listener so normal completion can remove it. The listener
+    // aborts the model before beginning resource cleanup; Stop is therefore a
+    // real upstream cancellation, not merely a client-side visual state.
+    streamAbort = new AbortController();
+    clientAbortListener = () => {
+      streamAbort?.abort();
+      void runCleanup('client-abort');
+    };
+    if (request.signal.aborted) {
+      clientAbortListener();
+    } else {
+      request.signal.addEventListener('abort', clientAbortListener, { once: true });
+    }
     if (streamTimeoutMs && streamTimeoutMs > 0) {
-      streamAbort = new AbortController();
-      request.signal.addEventListener('abort', () => streamAbort!.abort());
-      streamTimer = setTimeout(() => streamAbort!.abort(), streamTimeoutMs);
+      streamTimer = setTimeout(() => {
+        streamTimedOut = true;
+        streamAbort!.abort();
+      }, streamTimeoutMs);
     }
 
     // ── Setup-failure teardown ───────────────────────────────────────────────
@@ -773,8 +798,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       system,
       messages: modelMessages,
       tools,
-      // Wall-clock timeout / client-abort when `streamTimeoutMs` is set (see
-      // streamAbort above); omitted otherwise so default behaviour is unchanged.
+      // Client-abort plus the optional `streamTimeoutMs` wall-clock cap — see
+      // `streamAbort` above.
+      // Passing this is what makes Stop actually stop the upstream spend.
       ...(streamAbort ? { abortSignal: streamAbort.signal } : {}),
       // The model's real output limit (from the catalog via /v1/config), so long
       // answers don't truncate at a low provider default. Omitted → provider default.
@@ -975,6 +1001,52 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // model stream maps it into an error chunk, once while the outer stream
       // consumes that chunk). Log/map/cleanup exactly once.
       if (mappedStreamError !== undefined) return mappedStreamError;
+
+      // ── An abort is not a failure ──────────────────────────────────────────
+      // Now that `abortSignal` is wired by default (see `streamAbort` above),
+      // every Stop-button press and every closed tab surfaces here as an
+      // AbortError. Treating those as errors would (a) fire the host's
+      // `onError` for a completely normal user action, and (b) bury real
+      // outages under a flood of false alarms in production logs — the precise
+      // opposite of what #163 made `logErrors` default-on to achieve.
+      //
+      // A wall-clock abort (`streamTimeoutMs` elapsed) IS operationally
+      // interesting — the upstream stalled past its budget — so it warns
+      // rather than going silent, but it still isn't routed to `onError`.
+      //
+      // The returned copy deliberately reads as an abort: the client's error
+      // banner suppresses abort-shaped messages (`chat-error-banner.tsx`), so
+      // a stopped turn renders as the partial answer it is instead of a red
+      // error strip under text the user already has. That string coupling is
+      // load-bearing today and is replaced by a typed error kind on the wire
+      // in the error-taxonomy work that follows this PR.
+      // Gated on our own controller having actually fired. `isAbortError` alone
+      // is a shape probe, and its message fallback matches any error whose text
+      // contains "aborted" — including genuine upstream failures like
+      // "the request was aborted by the upstream gateway". Swallowing one of
+      // those would be total silence: no log, no `onError`, and a user-facing
+      // string the client's banner hides, so the user sees a truncated answer
+      // with no indication anything broke. If we never aborted, it is not our
+      // abort, and it belongs on the real error path below.
+      if (streamAbort?.signal.aborted && isAbortError(err)) {
+        const timedOut = streamTimedOut;
+        if (logErrors && timedOut) {
+          console.warn(
+            JSON.stringify({
+              event: 'chat.stream_timeout',
+              userId: ctx.userId,
+              conversationId,
+              streamTimeoutMs,
+            }),
+          );
+        }
+        mappedStreamError = timedOut
+          ? STREAM_TIMEOUT_ABORT_MESSAGE
+          : CLIENT_ABORT_MESSAGE;
+        void runCleanup('on-abort');
+        return mappedStreamError;
+      }
+
       if (logErrors) {
         console.error(
           '[chat-widget] stream error:',
@@ -1620,6 +1692,37 @@ function formatContextPreamble(context: Record<string, unknown>): string {
 // User-facing fallback when a stream error isn't mapped by `onError`. Logging of
 // the underlying error is handled at the call site, gated by `logErrors` (#163).
 const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the response.';
+
+// Abort copy. Both strings intentionally contain "abort" — the client's error
+// banner hides abort-shaped messages so a stopped turn shows the partial answer
+// instead of an error strip. See `mapStreamError`.
+const CLIENT_ABORT_MESSAGE = 'The response was aborted.';
+const STREAM_TIMEOUT_ABORT_MESSAGE = 'The response timed out and was aborted.';
+
+/**
+ * Is this the AbortController firing, rather than a real failure?
+ *
+ * Aborts reach the stream's error channel in several shapes depending on
+ * runtime and provider: a DOMException named 'AbortError' (undici / browsers),
+ * a plain Error with `name === 'AbortError'`, the AI SDK's own
+ * `AI_ToolExecutionError`-wrapped abort, or — on some runtimes — a bare
+ * `Error('The operation was aborted')`. We check name first (the reliable
+ * signal) and fall back to a narrow message probe for the runtimes that lose
+ * the name across an async boundary.
+ *
+ * Deliberately conservative: a false negative just logs one extra error, while
+ * a false positive would silently swallow a genuine outage.
+ */
+function isAbortError(err: unknown): boolean {
+  if (!err) return false;
+  const name = (err as { name?: unknown }).name;
+  if (name === 'AbortError' || name === 'TimeoutError') return true;
+  // Nested cause (the SDK wraps provider errors).
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && cause !== err && isAbortError(cause)) return true;
+  const message = (err as { message?: unknown }).message;
+  return typeof message === 'string' && /\baborted\b/i.test(message);
+}
 
 async function readBodyWithLimit(
   request: Request,

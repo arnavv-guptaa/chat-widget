@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">mordn deployment architecture</title>
+  <desc id="desc">ChatWidget, the verified session, model, and tools run in the developer application. Configuration, knowledge, memory, persistence, attachments, feedback, and observability are provided by the mordn control plane.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L8 4L0 8Z" fill="#6b6875"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="360" rx="20" fill="#f7f7f8"/>
+  <rect x="34" y="34" width="688" height="292" rx="16" fill="#fff" stroke="#d9d8de"/>
+  <rect x="756" y="34" width="410" height="292" rx="16" fill="#fff7f0" stroke="#e3b894"/>
+
+  <text x="62" y="76" fill="#1d1d22" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">Your application</text>
+  <text x="62" y="100" fill="#77747f" font-family="Inter, Arial, sans-serif" font-size="14">identity, inference, and actions stay in your deployment</text>
+
+  <rect x="62" y="138" width="174" height="66" rx="11" fill="#f3f2ff" stroke="#b7b1ef"/>
+  <text x="149" y="178" text-anchor="middle" fill="#36314f" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">ChatWidget</text>
+
+  <rect x="62" y="232" width="174" height="66" rx="11" fill="#f7f7f9" stroke="#d4d2da"/>
+  <text x="149" y="261" text-anchor="middle" fill="#36353d" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Verified session</text>
+  <text x="149" y="282" text-anchor="middle" fill="#77747f" font-family="Inter, Arial, sans-serif" font-size="13">server-side identity</text>
+
+  <rect x="292" y="182" width="184" height="72" rx="11" fill="#1d1d22"/>
+  <text x="384" y="213" text-anchor="middle" fill="#fff" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">Next.js route</text>
+  <text x="384" y="235" text-anchor="middle" fill="#c9c7d0" font-family="Inter, Arial, sans-serif" font-size="13">createMordnHandler</text>
+
+  <rect x="532" y="138" width="162" height="66" rx="11" fill="#f3f2ff" stroke="#b7b1ef"/>
+  <text x="613" y="166" text-anchor="middle" fill="#36314f" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Your model</text>
+  <text x="613" y="187" text-anchor="middle" fill="#6f6b7b" font-family="Inter, Arial, sans-serif" font-size="13">AI SDK runtime</text>
+
+  <rect x="532" y="232" width="162" height="66" rx="11" fill="#f3f2ff" stroke="#b7b1ef"/>
+  <text x="613" y="261" text-anchor="middle" fill="#36314f" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">Your tools</text>
+  <text x="613" y="282" text-anchor="middle" fill="#6f6b7b" font-family="Inter, Arial, sans-serif" font-size="13">product actions</text>
+
+  <path d="M236 171C263 171 268 202 292 210" fill="none" stroke="#6b6875" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M236 265C263 265 268 234 292 226" fill="none" stroke="#6b6875" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M476 207C503 207 504 171 532 171" fill="none" stroke="#6b6875" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M476 229C503 229 504 265 532 265" fill="none" stroke="#6b6875" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <text x="784" y="76" fill="#9a4611" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="700" letter-spacing="1.5">MORDN CONTROL PLANE</text>
+  <text x="784" y="108" fill="#2a2623" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Production plumbing, hosted</text>
+
+  <g font-family="Inter, Arial, sans-serif" font-size="15" fill="#49423d">
+    <circle cx="796" cy="152" r="4" fill="#c45813"/><text x="814" y="158">Published configuration</text>
+    <circle cx="796" cy="190" r="4" fill="#c45813"/><text x="814" y="196">Knowledge and memory</text>
+    <circle cx="796" cy="228" r="4" fill="#c45813"/><text x="814" y="234">Persistence and attachments</text>
+    <circle cx="796" cy="266" r="4" fill="#c45813"/><text x="814" y="272">Feedback and observability</text>
+  </g>
+
+  <path d="M694 218H752" fill="none" stroke="#c45813" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M752 240H694" fill="none" stroke="#c45813" stroke-width="2.5" marker-end="url(#arrow)"/>
+</svg>

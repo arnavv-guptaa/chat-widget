@@ -1,20 +1,38 @@
 # @mordn/chat-widget
 
-A secure-by-default AI chat widget for React/Next.js: one component, one route, one agent config.
+**The open-source AI chat layer for Next.js: your model and tools run on your server while mordn hosts the production infrastructure around them.**
 
-**[Docs](https://mordn.com/docs)** · [Quickstart](https://mordn.com/docs/quickstart) · [Security](https://mordn.com/docs/security) · [API](https://mordn.com/docs/api/create-chat-handler)
+[![npm version](https://img.shields.io/npm/v/@mordn/chat-widget?label=@mordn/chat-widget)](https://www.npmjs.com/package/@mordn/chat-widget)
+[![npm](https://img.shields.io/npm/dm/@mordn/chat-widget)](https://www.npmjs.com/package/@mordn/chat-widget)
+[![license](https://img.shields.io/npm/l/@mordn/chat-widget)](./LICENSE)
 
-## Install
+[Start building](https://mordn.com/sign-up) · [Quickstart](https://mordn.com/docs/quickstart) · [Documentation](https://mordn.com/docs)
+
+## The split
+
+![Architecture split between the developer application and the mordn control plane](./docs/assets/architecture.svg)
+
+The browser never asserts a user id, model, prompt, or agent configuration. Your route resolves identity from a verified server session and runs inference and tool calls in your deployment. mordn supplies the published configuration and the operational plumbing around each conversation.
+
+## Hosted quickstart
+
+Add a production chat agent to a Next.js App Router application. No database, object store, migration, or model-provider package is required.
+
+### 1. Create and publish an agent
+
+[Create an account](https://mordn.com/sign-up), publish an agent, and copy its server key.
+
+```env
+MORDN_CHAT_KEY="mck_live_..."
+```
+
+### 2. Install
 
 ```bash
 npm install @mordn/chat-widget ai @ai-sdk/react
 ```
 
-Styles are prebuilt and scoped to `.chat-widget-container`. No Tailwind needed.
-
-## Setup
-
-The route owns identity, persistence, and model execution. The component is only the surface.
+### 3. Add one server route
 
 ```ts
 // app/api/chat/[[...chat]]/route.ts
@@ -27,77 +45,55 @@ export const { GET, POST, DELETE, OPTIONS } = createMordnHandler({
 });
 ```
 
+Use the authentication system you already trust—Clerk, Auth.js, Supabase Auth, or your own sessions. `getUserId` must return a stable id from a **verified server session**, or `null`.
+
+> `getUserId` is the authorization boundary. Never derive it from a header, query parameter, or request body controlled by the browser. See the [security model](https://mordn.com/docs/security).
+
+### 4. Mount the widget
+
 ```tsx
-// components/assistant.tsx
 'use client';
 
 import { ChatWidget } from '@mordn/chat-widget';
 import '@mordn/chat-widget/styles.css';
 
-export default function Assistant() {
-  return <ChatWidget apiBase="/api/chat" />; // must match the route path, defaults to /api/chat
+export function Assistant() {
+  return <ChatWidget />;
 }
 ```
 
-```env
-AI_GATEWAY_API_KEY="..."  # runs runtime.model gateway strings
-MORDN_CHAT_KEY="..."      # published config + hosted persistence
-```
+Render `<Assistant />`, sign in, and send a message. The published agent config supplies the model, system prompt, theme, knowledge, memory, and enabled features. Conversations and attachments persist automatically.
 
-Models execute in your route, so the route needs its own credential. Without the AI SDK gateway, install a provider package, set its key, and pass `model` in code.
+Follow the [complete quickstart](https://mordn.com/docs/quickstart) for Auth.js examples, deployment notes, and a production verification checklist.
 
-For your own database and storage, swap `createMordnHandler` for `createChatHandler` with a `store`, optional `storage`, and a code `model`. See [backends](https://mordn.com/docs/backends/overview).
+## Why mordn
 
-## The one rule
+### Your model and tools stay on your server
 
-`getUserId` is the authorization boundary. Derive it from a verified server session; return `null` when unauthenticated. Never read identity from a header, query param, or body.
+Inference and tool execution happen inside your Next.js route on your gateway or provider credentials. mordn does not proxy the model call or bill you for tokens. Pin models and register tools in code whenever the host application needs control.
 
-Store and storage factories are constructed per request with the server-verified id, so cross-user access is unrepresentable rather than merely checked. The client sends no `userId`, `agentId`, model, prompt, or config headers: the widget calls `GET /api/chat/bootstrap` on mount and gets back only what the browser may see. See [SECURITY.md](./SECURITY.md).
+### User identity is server-verified
 
-## Config
+The widget sends no client-controlled `userId`. The handler binds stores and storage to the identity returned by your verified session, making cross-user conversation access unrepresentable through the public contracts.
 
-`AgentConfig` is versioned, JSON-serializable, and shared by control plane, handler, and preview transport. Data only: no React nodes, functions, credentials, or endpoint URLs.
+### Production infrastructure without rebuilding the plumbing
 
-```ts
-import type { AgentConfig } from '@mordn/chat-widget';
+Published configuration, conversation history, private attachments, knowledge retrieval, memory, feedback, and observability are wired through one server key. You keep the application-specific runtime; mordn operates the reusable control plane.
 
-const config: AgentConfig = {
-  schemaVersion: 1,
-  runtime: { model: 'anthropic/claude-sonnet-4-5', temperature: 0.3 },
-  client: { greeting: 'How can I help?', display: { layout: 'popup' } },
-};
-```
+## Prefer to manage the data plane yourself?
 
-Production handlers ignore request config. Owner previews opt in via `resolvePreviewConfig`.
+Use `createChatHandler` with the included Drizzle, Supabase, or custom `ChatStore` and `StorageAdapter` implementations. The widget and server-side identity boundary stay the same; you supply the model, database, storage, prompt, and tools.
 
-## Script-tag embed
+[Bring your own database](https://mordn.com/docs/quickstart/self-host) · [Backend guide](https://mordn.com/docs/backends/overview)
 
-```html
-<script
-  src="https://unpkg.com/@mordn/chat-widget/dist/embed.global.js"
-  data-api-base="https://your-app.com/api/chat"
-></script>
-```
+## Documentation
 
-Same bootstrap flow: identity and agent selection stay server-side.
-
-## Docs
-
-| | |
-| --- | --- |
-| [Quickstart](https://mordn.com/docs/quickstart) | Scaffold the backend, mount the widget |
-| [Security](https://mordn.com/docs/security) | The identity boundary and its guarantees |
-| [Backends](https://mordn.com/docs/backends/overview) | Hosted, Drizzle, Supabase, custom |
-| [Theming](https://mordn.com/docs/guides/theming) · [Context](https://mordn.com/docs/guides/context) | Appearance, page awareness |
-| [Models & tools](https://mordn.com/docs/guides/models-and-tools) · [MCP](https://mordn.com/docs/guides/mcp) | Model selection, tool wiring |
-| [Actions](https://mordn.com/docs/guides/build-actions) · [Templates](https://mordn.com/docs/guides/action-templates) | Doing things, not just answering |
-| [Knowledge](https://mordn.com/docs/guides/knowledge) | RAG ingestion, retrieval, CI evals |
-| [Attachments](https://mordn.com/docs/guides/attachments) · [Persistence](https://mordn.com/docs/guides/persistence) · [Memory](https://mordn.com/docs/guides/memory) | State |
-| [Production](https://mordn.com/docs/guides/production-readiness) | Ship checklist |
-| [ChatWidget](https://mordn.com/docs/api/chat-widget) · [Handler](https://mordn.com/docs/api/create-chat-handler) · [Exports](https://mordn.com/docs/api/exports) | Every option |
-| [CLI](https://mordn.com/docs/api/cli) | `npx @mordn/chat-widget`: scaffold, ingest, eval |
-
-In-repo: [index freshness](./docs/keep-your-index-fresh.md), [action templates](./docs/action-templates.md), [SECURITY.md](./SECURITY.md), [CHANGELOG.md](./CHANGELOG.md).
+| Build | Operate | Reference |
+| --- | --- | --- |
+| [Quickstart](https://mordn.com/docs/quickstart) | [Production readiness](https://mordn.com/docs/guides/production-readiness) | [ChatWidget API](https://mordn.com/docs/api/chat-widget) |
+| [Models and tools](https://mordn.com/docs/guides/models-and-tools) | [Security](https://mordn.com/docs/security) | [Handler API](https://mordn.com/docs/api/create-chat-handler) |
+| [Actions](https://mordn.com/docs/guides/build-actions) | [Knowledge](https://mordn.com/docs/guides/knowledge) | [Package exports and CLI](./docs/package-reference.md) |
+| [Theming](https://mordn.com/docs/guides/theming) | [Persistence and memory](https://mordn.com/docs/guides/persistence) | [Full documentation](https://mordn.com/docs) |
 
 ## License
 
