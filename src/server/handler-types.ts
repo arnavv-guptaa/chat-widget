@@ -582,10 +582,15 @@ export interface CreateChatHandlerOptions {
    * Optional overall wall-clock timeout (ms) for the streamed model response. A
    * hung or stalled upstream (bad gateway, wedged tool call) otherwise holds the
    * connection and server resources open until the platform kills it. When set,
-   * the handler aborts the stream after this many ms (in addition to honouring
-   * client-abort). OFF by default, so long but legitimate tool-using turns are
-   * never cut short — set it to a ceiling comfortably above your slowest expected
-   * answer and at/below your platform's function timeout.
+   * the handler aborts the stream after this many ms. OFF by default, so long
+   * but legitimate tool-using turns are never cut short — set it to a ceiling
+   * comfortably above your slowest expected answer and at/below your platform's
+   * function timeout.
+   *
+   * Note: this is now purely an ADDITIONAL ceiling. Client disconnects are
+   * always propagated to the upstream model call so generation and billing stop
+   * when the live SSE request ends. Work that must outlive its requester belongs
+   * on a background job/queue surface rather than this request handler.
    */
   streamTimeoutMs?: number;
 
