@@ -46,6 +46,7 @@ import {
 } from 'ai';
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
+import { classifyError, isAbortError, messageForErrorKind } from './errors';
 import { normalizeUsage } from './usage';
 import type { StorageAdapter } from './storage-adapter';
 import type {
@@ -1047,13 +1048,45 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         return mappedStreamError;
       }
 
+      // ── Classify before doing anything else ────────────────────────────────
+      // A 429, an expired key, a blown context window and a genuine 500 used to
+      // collapse into one string, which pushed the entire taxonomy burden onto
+      // the host's `onError`. Now the handler classifies once and hands the
+      // result to the host, so retry/backoff logic is written against a
+      // discriminated `kind` instead of regexing provider prose.
+      const classified = classifyError(err);
+
       if (logErrors) {
+        // Structured so it is greppable and aggregatable — a category and a
+        // retry hint are what you actually need at 3am, not just a stack.
         console.error(
-          '[chat-widget] stream error:',
-          err instanceof Error ? (err.stack ?? err.message) : err,
+          JSON.stringify({
+            event: 'chat.stream_error',
+            kind: classified.kind,
+            retryable: classified.retryable,
+            ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
+            ...(classified.status !== undefined ? { status: classified.status } : {}),
+            ...(classified.code ? { code: classified.code } : {}),
+            userId: ctx.userId,
+            conversationId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
         );
+        // The stack stays on its own line: it is the thing a human reads, and
+        // folding a multi-line stack into the JSON above makes both unreadable.
+        if (err instanceof Error && err.stack) {
+          console.error('[chat-widget] stream error:', err.stack);
+        }
       }
-      mappedStreamError = (onError ? onError(err) : GENERIC_STREAM_ERROR_MESSAGE) || GENERIC_STREAM_ERROR_MESSAGE;
+
+      // The host's hook wins when it returns a non-empty string; otherwise the
+      // category's own copy is already far better than the old one-size
+      // fallback. `onError` receives the classification as a second argument —
+      // additive, so existing `(error) => string` handlers keep working.
+      mappedStreamError =
+        (onError ? onError(err, classified) : classified.message) ||
+        classified.message ||
+        GENERIC_STREAM_ERROR_MESSAGE;
       void runCleanup('on-error');
       return mappedStreamError;
     };
@@ -1693,36 +1726,13 @@ function formatContextPreamble(context: Record<string, unknown>): string {
 // the underlying error is handled at the call site, gated by `logErrors` (#163).
 const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the response.';
 
-// Abort copy. Both strings intentionally contain "abort" — the client's error
-// banner hides abort-shaped messages so a stopped turn shows the partial answer
-// instead of an error strip. See `mapStreamError`.
-const CLIENT_ABORT_MESSAGE = 'The response was aborted.';
+// Abort copy. `CLIENT_ABORT_MESSAGE` comes from the taxonomy (kind: 'abort');
+// the timeout variant is handler-local because only the handler knows a
+// wall-clock cap was configured. Both intentionally contain "abort" — the
+// client's error banner hides abort-shaped messages so a stopped turn shows the
+// partial answer instead of an error strip. See `mapStreamError`.
+const CLIENT_ABORT_MESSAGE = messageForErrorKind('abort');
 const STREAM_TIMEOUT_ABORT_MESSAGE = 'The response timed out and was aborted.';
-
-/**
- * Is this the AbortController firing, rather than a real failure?
- *
- * Aborts reach the stream's error channel in several shapes depending on
- * runtime and provider: a DOMException named 'AbortError' (undici / browsers),
- * a plain Error with `name === 'AbortError'`, the AI SDK's own
- * `AI_ToolExecutionError`-wrapped abort, or — on some runtimes — a bare
- * `Error('The operation was aborted')`. We check name first (the reliable
- * signal) and fall back to a narrow message probe for the runtimes that lose
- * the name across an async boundary.
- *
- * Deliberately conservative: a false negative just logs one extra error, while
- * a false positive would silently swallow a genuine outage.
- */
-function isAbortError(err: unknown): boolean {
-  if (!err) return false;
-  const name = (err as { name?: unknown }).name;
-  if (name === 'AbortError' || name === 'TimeoutError') return true;
-  // Nested cause (the SDK wraps provider errors).
-  const cause = (err as { cause?: unknown }).cause;
-  if (cause && cause !== err && isAbortError(cause)) return true;
-  const message = (err as { message?: unknown }).message;
-  return typeof message === 'string' && /\baborted\b/i.test(message);
-}
 
 async function readBodyWithLimit(
   request: Request,

@@ -13,6 +13,27 @@
 
 import { AlertTriangleIcon, XIcon } from "lucide-react";
 
+// These strings are emitted by the server taxonomy and contain no provider
+// detail. Keep the raw network/provider message off-screen, but preserve the
+// package-owned guidance instead of collapsing every category to a generic line.
+const SAFE_SERVER_MESSAGES = new Set([
+  "The assistant is handling a lot of requests right now. Please try again in a moment.",
+  "The assistant is not configured correctly. Please contact support.",
+  "The assistant is temporarily unavailable. Please try again.",
+  "I can't help with that request.",
+  "That request couldn't be processed. Try rephrasing or shortening your message.",
+  "The configured model could not complete this request. Try a different request or contact support.",
+  "A tool the assistant was using failed. Please try again.",
+  "An error occurred while generating the response.",
+]);
+
+const NON_RETRYABLE_SERVER_MESSAGES = new Set([
+  "The assistant is not configured correctly. Please contact support.",
+  "I can't help with that request.",
+  "That request couldn't be processed. Try rephrasing or shortening your message.",
+  "The configured model could not complete this request. Try a different request or contact support.",
+]);
+
 export interface ChatErrorBannerProps {
   /** The error to surface. When null, the component renders nothing. */
   error: Error | null | undefined;
@@ -40,11 +61,12 @@ export function ChatErrorBanner({
   // "the generation errored". Client-side aborts only come from the stop
   // button or navigation; real server-side failures arrive as error chunks
   // with their own messages and still render below.
-  if (/abort/i.test(error.message ?? "")) return null;
+  if (error.name === "AbortError" || error.message === "The response was aborted.") return null;
 
   // Default message kept short — the raw Error.message can be a wall of
   // text from the network layer. We only surface it on hover via title.
   const friendly = friendlyErrorMessage(error);
+  const retryable = !NON_RETRYABLE_SERVER_MESSAGES.has(error.message ?? "");
 
   return (
     <div
@@ -63,7 +85,7 @@ export function ChatErrorBanner({
       <div className="flex-1 min-w-0">
         <span style={{ color: "hsl(var(--chat-text-body))" }}>{friendly}</span>
       </div>
-      {canRetry && onRetry && (
+      {canRetry && retryable && onRetry && (
         <button
           type="button"
           onClick={onRetry}
@@ -90,6 +112,7 @@ export function ChatErrorBanner({
 
 function friendlyErrorMessage(error: Error): string {
   const raw = error.message ?? "";
+  if (SAFE_SERVER_MESSAGES.has(raw)) return raw;
   if (/network|fetch|disconnect|ECONN/i.test(raw)) {
     return "Connection issue. Check your network and try again.";
   }
