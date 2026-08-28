@@ -281,13 +281,13 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
 
   // ── History lazy-loading (reverse pagination) ───────────────────────────────
   // We load the most-recent page on open and fetch older pages when the user
-  // scrolls near the top. `hasMoreHistory` gates further fetches; `oldestTs` is
-  // the `before` cursor for the next page; the ref guards against concurrent /
-  // duplicate fetches. PAGE_SIZE is the per-request count.
+  // scrolls near the top. `hasMoreHistory` gates further fetches; the server
+  // supplies an opaque composite cursor for the next page; the ref guards
+  // against concurrent / duplicate fetches. PAGE_SIZE is the request count.
   const HISTORY_PAGE_SIZE = 30;
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const oldestTsRef = useRef<string | null>(null);
+  const historyCursorRef = useRef<string | null>(null);
   const loadingOlderRef = useRef(false);
 
   // Track last synced tab to prevent infinite loops
@@ -658,8 +658,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         if (!isCurrent()) return;
         const loadedMessages = data.messages || [];
 
-        // Seed the reverse-pagination cursor from the oldest loaded message.
-        oldestTsRef.current = loadedMessages.length ? loadedMessages[0].created_at ?? null : null;
+        // The server owns the opaque composite cursor (timestamp + message id).
+        historyCursorRef.current = typeof data.nextCursor === 'string' ? data.nextCursor : null;
         setHasMoreHistory(Boolean(data.hasMore));
         // Safe to apply immediately: by the time the fetch resolved, the
         // render that re-keyed useChat to this conversation has long since
@@ -669,7 +669,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         // Conversation doesn't exist yet - this is normal for new chats.
         // Fresh conversations start from the host's initialMessages seed
         // (usually undefined → empty).
-        oldestTsRef.current = null;
+        historyCursorRef.current = null;
         setHasMoreHistory(false);
         setMessages(initialMessagesRef.current ?? []);
       } else {
@@ -687,7 +687,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // ref so overlapping scroll events don't double-fetch the same page.
   const scrollViewportRef = useRef<HTMLElement | null>(null);
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlderRef.current || !hasMoreHistory || !oldestTsRef.current) return;
+    if (loadingOlderRef.current || !hasMoreHistory || !historyCursorRef.current) return;
     if (!activeTabId) return;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
@@ -706,7 +706,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     try {
       const res = await fetch(
         `${apiBase}/history/${encodeURIComponent(activeTabId)}` +
-          `?limit=${HISTORY_PAGE_SIZE}&before=${encodeURIComponent(oldestTsRef.current)}`,
+          `?limit=${HISTORY_PAGE_SIZE}&cursor=${encodeURIComponent(historyCursorRef.current)}`,
         { cache: 'no-store', headers: config?.headers, credentials: config?.requestCredentials },
       );
       if (!res.ok || !isCurrent()) return;
@@ -717,7 +717,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
         setHasMoreHistory(false);
         return;
       }
-      oldestTsRef.current = older[0].created_at ?? oldestTsRef.current;
+      historyCursorRef.current =
+        typeof data.nextCursor === 'string' ? data.nextCursor : historyCursorRef.current;
       setHasMoreHistory(Boolean(data.hasMore));
       // Prepend, de-duping by id (defensive against overlap at the boundary).
       setMessages((prev) => {

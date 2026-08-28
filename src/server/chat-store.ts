@@ -127,9 +127,23 @@ export interface ChatStore {
    * render. Returns `[]` if the conversation doesn't exist or isn't owned by
    * the user — same non-distinguishing contract as `getConversation`.
    *
-   * Honours `ListMessagesOptions` for pagination. Implementations MUST clamp
-   * `limit` to a ceiling (default ceiling: 100) so a hostile client can't
-   * request an unbounded page.
+   * Honours `ListMessagesOptions` for pagination. Implementations MUST:
+   *
+   *  - Apply `before` as a strict composite cursor when `beforeId` is present:
+   *    `(createdAt < before) OR (createdAt = before AND id < beforeId)`.
+   *    Timestamp-only callers retain strict `createdAt < before` behavior.
+   *  - Return CHRONOLOGICAL order (oldest → newest), with `id` as the stable
+   *    tiebreaker for equal timestamps.
+   *  - Clamp `limit` so a hostile client cannot request an unbounded page —
+   *    but clamp to **101, not 100**. The router asks for `limit + 1` to detect
+   *    whether an older page exists without a second COUNT query; a ceiling of
+   *    exactly 100 eats that probe row at the maximum page size, so `hasMore`
+   *    silently reports `false` and the conversation appears to end at message
+   *    100 with no way to scroll further (#55). One row of headroom keeps the
+   *    probe working while the ceiling still bounds the query.
+   *
+   * A store that ignores these options is not merely slower — it breaks the
+   * router's `hasMore` contract and ships the whole transcript on every load.
    */
   listMessages(conversationId: string, opts?: ListMessagesOptions): Promise<StoredMessage[]>;
 

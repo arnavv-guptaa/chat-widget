@@ -110,6 +110,11 @@ export interface ListMessagesOptions {
    * "load older messages" infinite-scroll. Omit for the most-recent page.
    */
   before?: Date;
+  /**
+   * Deterministic tiebreaker paired with `before`. When present, return rows
+   * where `(createdAt, id)` is lexicographically older than the cursor.
+   */
+  beforeId?: string;
 }
 
 /**
