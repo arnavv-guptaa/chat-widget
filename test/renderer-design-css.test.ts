@@ -137,6 +137,11 @@ describe('renderer design-system contract', () => {
     expect(markdownTable).toContain('data-copied={copied ? "" : undefined}');
   });
 
+  it('defers Mermaid layout until streaming settles', () => {
+    expect(response).toContain('<ResponseStreamingContext.Provider value={isStreaming}>');
+    expect(css).toContain('.chat-mermaid-pending');
+  });
+
   it('keeps the composer focus treatment subtle and token-driven', () => {
     const rule = css.match(/\.chat-widget-container \.chat-prompt-box:focus-within\s*\{([\s\S]*?)\}/);
     expect(rule?.[1]).toContain('hsl(var(--chat-primary) / 0.07)');

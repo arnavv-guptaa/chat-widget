@@ -578,7 +578,21 @@
 }
 
 /* Mermaid diagrams — same card discipline as charts: fit the column, scroll
-   sideways inside their own box rather than breaking the bubble. */
+   sideways inside their own box rather than breaking the bubble. While source
+   is streaming, reserve one quiet, stable block instead of repeatedly measuring
+   and swapping partial SVGs of different heights. */
+.chat-widget-container .chat-mermaid-pending {
+  display: flex;
+  min-height: 8rem;
+  margin: 10px 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--chat-border-soft));
+  border-radius: 10px;
+  background-color: hsl(var(--chat-background));
+  color: hsl(var(--chat-text-faint));
+  font-size: 12.5px;
+}
 .chat-widget-container .chat-mermaid {
   margin: 10px 0;
   overflow-x: auto;

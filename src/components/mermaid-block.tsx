@@ -2,9 +2,9 @@
 
 /**
  * MermaidCode — fence renderer for `mermaid` blocks (generative registry:
- * 'diagrams'). Mirrors ChartCode's contract: Streamdown hands the code
- * component the COMPLETE fenced text once the closing backticks arrive, so we
- * never parse a partial diagram.
+ * 'diagrams'). Unlike ChartCode, Mermaid must not render while its fenced text
+ * is still streaming: each render measures live layout and replaces an SVG, so
+ * rendering partial source makes the message visibly flutter.
  *
  * The mermaid library (already a streamdown dependency) is imported lazily on
  * first use, so it costs nothing until a diagram actually appears. SECURITY:
@@ -36,7 +36,7 @@
  *      `document.body`.
  */
 
-import { useEffect, useId, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useState } from 'react';
 import { CollapsibleCode } from './collapsible-code';
 
 interface StreamdownCodeProps {
@@ -45,6 +45,10 @@ interface StreamdownCodeProps {
   children?: React.ReactNode;
   node?: unknown;
 }
+
+// Context reaches MermaidCode even when Streamdown's memo comparator ignores a
+// changed `components` object on the final status-only render.
+export const ResponseStreamingContext = createContext(false);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mermaidPromise: Promise<any> | null = null;
@@ -97,9 +101,31 @@ function stringifyChildren(children: React.ReactNode): string {
   return String(children);
 }
 
+function MermaidPending() {
+  return (
+    <div className="chat-mermaid-pending not-prose" role="status" aria-label="Generating diagram">
+      <span>Generating diagram</span>
+    </div>
+  );
+}
+
 export function MermaidCode({ inline, className, children }: StreamdownCodeProps) {
+  const isStreaming = useContext(ResponseStreamingContext);
+
+  useEffect(() => {
+    if (!inline && isStreaming) void loadMermaid().catch(() => undefined);
+  }, [inline, isStreaming]);
+
   if (inline) return <code className={className}>{children}</code>;
   const code = (typeof children === 'string' ? children : stringifyChildren(children)).trim();
+
+  // Mermaid measures and rewrites an SVG for every source change. During token
+  // streaming that turns each partial line into a render, collapses the previous
+  // SVG, then inserts a differently sized one — the visible "flutter". Keep one
+  // stable placeholder while the fence is changing and render exactly once when
+  // the response settles.
+  if (isStreaming) return <MermaidPending />;
+
   return <MermaidDiagram code={code} className={className} rawChildren={children} />;
 }
 
@@ -166,7 +192,7 @@ function MermaidDiagram({
   // Invalid mermaid (or an empty fence): degrade to the normal code view so
   // the output is inspectable rather than a broken image or nothing.
   if (failed) return <CollapsibleCode className={className}>{rawChildren ?? code}</CollapsibleCode>;
-  if (!svg) return null; // one frame while the lazy import + render settle
+  if (!svg) return <MermaidPending />; // keep the reserved space while parse + render settle
   return (
     <div
       className="chat-mermaid not-prose"
