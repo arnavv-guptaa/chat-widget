@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## Unreleased
+## 0.18.1 — 2026-08-29
 
 ### Fixed
 - **Mermaid diagrams no longer flutter while their source streams.** Partial diagram text now holds one stable, labelled placeholder while Mermaid loads in the background; parsing, layout measurement, and SVG insertion happen once after the response settles instead of repeating for every token.
