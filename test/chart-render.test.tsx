@@ -219,8 +219,10 @@ describe('ChartBlock — provenance + a11y', () => {
     expect(container.querySelector('[role="figure"]')?.getAttribute('aria-label')).toBe('Sales');
   });
   it('right-aligns numeric columns in the data table', () => {
-    const { container, getByRole } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'Sales', series: { points: [{ label: 'a', value: 1 }] } }} />);
-    fireEvent.click(getByRole('button', { name: 'View data' }));
+    const { container } = render(<ChartBlock spec={{ schemaVersion: 2, type: 'bar', title: 'Sales', series: { points: [{ label: 'a', value: 1 }] } }} />);
+    // Scope to this render: vitest runs without globals here, so RTL's
+    // auto-cleanup is off and earlier charts in the file are still mounted.
+    fireEvent.click(container.querySelector('button[aria-label="View data"]')!);
     expect(container.querySelectorAll('td.is-num').length).toBe(1);
   });
 });
