@@ -2,6 +2,11 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.20.1 — 2026-09-02
+
+### Changed
+- **Dictation button moved next to Send.** The microphone now sits in the right-hand action cluster immediately left of Send (where every mainstream chat composer puts it); Attach stays on the left. No behaviour change.
+
 ## 0.20.0 — 2026-09-02
 
 ### Added
