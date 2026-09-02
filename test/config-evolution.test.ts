@@ -51,8 +51,8 @@ describe('tolerant readers (runtime contract)', () => {
       '$comment', // unknown key at the root
       'client.display.layout', // unknown enum member → default applies
       'client.display.motion',
-      'client.features.voiceInput',
-      'client.features.voiceInputLanguage',
+      'client.features.readAloud',
+      'client.features.readAloudVoice',
       'client.starterPrompts.1.icon',
       'client.voice',
       'runtime.topK',
@@ -101,12 +101,12 @@ describe('tolerant readers (runtime contract)', () => {
       revision: 'rev-9',
       storageScope: 'scope',
       capabilities: { transcribe: true },
-      client: { features: { fileUpload: true, voiceInput: true } },
+      client: { features: { fileUpload: true, readAloud: true } },
     };
     const read = readAgentBootstrap(bootstrap);
     expect(read.ok).toBe(true);
     if (!read.ok) return;
-    expect(read.dropped.map((issue) => issue.path).sort()).toEqual(['capabilities', 'client.features.voiceInput']);
+    expect(read.dropped.map((issue) => issue.path).sort()).toEqual(['capabilities', 'client.features.readAloud']);
     expect(read.value.client.features).toEqual({ fileUpload: true });
     expect(isAgentBootstrap(bootstrap)).toBe(false);
     // The transport version is still a hard contract.
@@ -116,13 +116,18 @@ describe('tolerant readers (runtime contract)', () => {
 
 describe('defaults live in the descriptor', () => {
   it('resolveFeatures applies schema defaults and preserves explicit values', () => {
-    expect(DEFAULT_FEATURES).toEqual({ fileUpload: false, fileUploadAccept: 'image/*', webSearch: false });
+    expect(DEFAULT_FEATURES).toEqual({ fileUpload: false, fileUploadAccept: 'image/*', webSearch: false, voiceInput: true });
     expect(resolveFeatures(undefined)).toEqual(DEFAULT_FEATURES);
     expect(resolveFeatures({ fileUpload: true, fileUploadMaxBytes: 5 })).toEqual({
       fileUpload: true,
       fileUploadAccept: 'image/*',
       fileUploadMaxBytes: 5,
       webSearch: false,
+      voiceInput: true,
+    });
+    expect(resolveFeatures({ voiceInput: false, voiceInputLanguage: 'en-GB' })).toMatchObject({
+      voiceInput: false,
+      voiceInputLanguage: 'en-GB',
     });
     expect(resolveFeatures({ fileUploadAccept: undefined })).toEqual(DEFAULT_FEATURES);
   });

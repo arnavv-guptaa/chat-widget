@@ -10,8 +10,8 @@
     "greeting": "Hello from the future",
     "features": {
       "fileUpload": true,
-      "voiceInput": true,
-      "voiceInputLanguage": "en-GB"
+      "readAloud": true,
+      "readAloudVoice": "warm"
     },
     "display": {
       "layout": "drawer",
