@@ -1893,16 +1893,22 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               />
               <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
                 {features.fileUpload && <AttachButton />}
-                {features.voiceInput && <DictationButton dictation={dictation} />}
-                <PromptInputSubmit
-                  // Filled circular send button, right-aligned in the action row.
-                  // Colors come entirely from the Button default variant tokens
-                  // (bg-primary / text-primary-foreground / disabled:opacity-50).
-                  className="ml-auto size-8 rounded-full p-0 [&_svg]:size-3.5"
-                  disabled={status === 'streaming' || status === 'submitted' ? false : !input}
-                  status={status}
-                  onStop={stop}
-                />
+                {/* Right cluster: actions on the message. Dictation sits
+                    immediately left of Send — the convention users know from
+                    every mainstream chat composer — while Attach stays on the
+                    left with the other "add to message" controls. */}
+                <div className="ml-auto flex items-center gap-1.5">
+                  {features.voiceInput && <DictationButton dictation={dictation} />}
+                  <PromptInputSubmit
+                    // Filled circular send button, right-aligned in the action row.
+                    // Colors come entirely from the Button default variant tokens
+                    // (bg-primary / text-primary-foreground / disabled:opacity-50).
+                    className="size-8 rounded-full p-0 [&_svg]:size-3.5"
+                    disabled={status === 'streaming' || status === 'submitted' ? false : !input}
+                    status={status}
+                    onStop={stop}
+                  />
+                </div>
               </div>
             </PromptInputBody>
           </PromptInput>
