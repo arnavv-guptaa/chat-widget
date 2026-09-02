@@ -85,7 +85,14 @@ import {
 } from '../utils/follow-ups';
 import { generateThreadTitle } from './thread-title';
 import { buildRenderingSystem } from '../generative/registry';
-import { BOOTSTRAP_PROTOCOL_VERSION, isAgentConfig, type AgentConfig, type PublishedAgentConfig } from '../config';
+import {
+  BOOTSTRAP_PROTOCOL_VERSION,
+  formatConfigIssues,
+  isAgentConfig,
+  readAgentConfig,
+  type AgentConfig,
+  type PublishedAgentConfig,
+} from '../config';
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -342,6 +349,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     return { userId, conversationId, request };
   }
 
+  // Revisions we have already warned about carrying fields this build doesn't
+  // know. The config is re-read every turn (60s hosted cache), so without this
+  // a newer dashboard would produce one warning per message.
+  const warnedRevisions = new Set<string>();
+
   async function loadPublishedConfig(ctx: ChatRequestContext): Promise<PublishedAgentConfig | null> {
     if (!getHostedConfig) return null;
     const published = await getHostedConfig(ctx);
@@ -350,12 +362,31 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       typeof published.agent !== 'string' ||
       published.agent.trim() === '' ||
       typeof published.revision !== 'string' ||
-      published.revision.trim() === '' ||
-      !isAgentConfig(published.config)
+      published.revision.trim() === ''
     ) {
       throw new Error('[chat-widget] published agent config is malformed');
     }
-    return published;
+    // TOLERANT read, deliberately (config-evolution contract): a revision
+    // published by a newer dashboard may carry fields this installed version
+    // has never heard of. Those are dropped — the schema default applies — and
+    // the turn proceeds. Only a wrong schemaVersion or a broken required field
+    // (no model, no envelope) is fatal. The strict validator stays reserved for
+    // the WRITER side (preview trust boundary below, publish in chat-api).
+    const read = readAgentConfig(published.config);
+    if (!read.ok) {
+      throw new Error(
+        `[chat-widget] published agent config is malformed: ${formatConfigIssues(read.issues)}`,
+      );
+    }
+    if (read.dropped.length > 0 && !warnedRevisions.has(published.revision)) {
+      warnedRevisions.add(published.revision);
+      loggerFor(ctx.request).warn('config.unknown_fields', {
+        revision: published.revision,
+        dropped: read.dropped.map((issue) => issue.path),
+        hint: 'The published config uses fields this @mordn/chat-widget version does not understand. Upgrade to apply them.',
+      });
+    }
+    return { agent: published.agent, revision: published.revision, config: read.value };
   }
 
   async function defaultStorageScope(ctx: ChatRequestContext, agent: string): Promise<string> {

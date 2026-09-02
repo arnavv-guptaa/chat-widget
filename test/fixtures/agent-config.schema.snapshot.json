@@ -1,0 +1,698 @@
+{
+  "schemaVersion": 1,
+  "bootstrapProtocolVersion": 1,
+  "config": [
+    {
+      "path": "client",
+      "kind": "object",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Browser-safe client projection."
+    },
+    {
+      "path": "client.allowAutoReopen",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Allow the widget to reopen itself after an explicit dismiss."
+    },
+    {
+      "path": "client.assistantName",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "The assistant's display name."
+    },
+    {
+      "path": "client.capabilitiesPrompt",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Client-visible capabilities blurb."
+    },
+    {
+      "path": "client.display",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Layout and chrome."
+    },
+    {
+      "path": "client.display.defaultOpen",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Start open.",
+      "default": false
+    },
+    {
+      "path": "client.display.keyboardShortcut",
+      "kind": "string|literal",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Keyboard combo that toggles the widget, or `false` for none."
+    },
+    {
+      "path": "client.display.layout",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Layout shape the widget renders in.",
+      "default": "popup",
+      "enum": [
+        "popup",
+        "inline",
+        "page"
+      ]
+    },
+    {
+      "path": "client.display.resizable",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Drag-to-resize.",
+      "default": true
+    },
+    {
+      "path": "client.display.showToggleButton",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Render the floating toggle button.",
+      "default": true
+    },
+    {
+      "path": "client.display.size",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Width preset (popup layout).",
+      "default": "default",
+      "enum": [
+        "compact",
+        "default",
+        "large",
+        "full"
+      ]
+    },
+    {
+      "path": "client.display.starterPromptsLayout",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state starter prompt layout.",
+      "default": "list",
+      "enum": [
+        "list",
+        "grid"
+      ]
+    },
+    {
+      "path": "client.display.toggleButtonPosition",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Toggle button offsets."
+    },
+    {
+      "path": "client.display.toggleButtonPosition.bottom",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "CSS offset from the bottom edge."
+    },
+    {
+      "path": "client.display.toggleButtonPosition.right",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "CSS offset from the right edge."
+    },
+    {
+      "path": "client.display.width",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Custom CSS width override."
+    },
+    {
+      "path": "client.features",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Feature flags."
+    },
+    {
+      "path": "client.features.fileUpload",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Show the attach button and accept file uploads.",
+      "default": false
+    },
+    {
+      "path": "client.features.fileUploadAccept",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "HTML `accept` filter for the file picker.",
+      "default": "image/*"
+    },
+    {
+      "path": "client.features.fileUploadMaxBytes",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Client-side per-file size cap in bytes.",
+      "integer": true,
+      "min": 1
+    },
+    {
+      "path": "client.features.webSearch",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Enable web search.",
+      "default": false
+    },
+    {
+      "path": "client.feedback",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Show per-message feedback controls.",
+      "default": false
+    },
+    {
+      "path": "client.greeting",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state headline."
+    },
+    {
+      "path": "client.persistState",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Persist open/closed state per user."
+    },
+    {
+      "path": "client.starterPrompts",
+      "kind": "array",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state starter prompts."
+    },
+    {
+      "path": "client.starterPrompts.subtitle",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Secondary line."
+    },
+    {
+      "path": "client.starterPrompts.title",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Prompt text (sent as the message when clicked)."
+    },
+    {
+      "path": "client.streamingThrottleMs",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Render throttle for streamed text.",
+      "integer": true,
+      "min": 0
+    },
+    {
+      "path": "client.subGreeting",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Faint line under the greeting."
+    },
+    {
+      "path": "client.theme",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Color theme (all-or-nothing)."
+    },
+    {
+      "path": "client.theme.backgroundColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Chat background color (hex)."
+    },
+    {
+      "path": "client.theme.primaryColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Primary accent color (hex)."
+    },
+    {
+      "path": "client.theme.textColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Body text color (hex)."
+    },
+    {
+      "path": "runtime",
+      "kind": "object",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Server-side runtime settings."
+    },
+    {
+      "path": "runtime.followUps",
+      "kind": "boolean|object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Follow-up suggestions: boolean shorthand or detailed settings."
+    },
+    {
+      "path": "runtime.followUps.enabled",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Generate follow-up suggestions after each reply."
+    },
+    {
+      "path": "runtime.followUps.max",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Maximum follow-up suggestions per reply.",
+      "integer": true,
+      "min": 1,
+      "max": 5
+    },
+    {
+      "path": "runtime.followUps.timeoutMs",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Time budget for follow-up generation.",
+      "integer": true,
+      "min": 1
+    },
+    {
+      "path": "runtime.maxOutputTokens",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Output token cap per turn.",
+      "integer": true,
+      "min": 1
+    },
+    {
+      "path": "runtime.memory",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Long-term memory settings."
+    },
+    {
+      "path": "runtime.memory.enabled",
+      "kind": "boolean",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Long-term memory on/off."
+    },
+    {
+      "path": "runtime.memory.extract",
+      "kind": "boolean",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Extract and store memories after a completed turn."
+    },
+    {
+      "path": "runtime.memory.inject",
+      "kind": "boolean",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Inject recalled memories before generation."
+    },
+    {
+      "path": "runtime.memory.limit",
+      "kind": "number",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Maximum memories injected per turn.",
+      "integer": true,
+      "min": 1,
+      "max": 20
+    },
+    {
+      "path": "runtime.model",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Gateway model identifier the handler runs."
+    },
+    {
+      "path": "runtime.systemPrompt",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "System prompt."
+    },
+    {
+      "path": "runtime.temperature",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Sampling temperature.",
+      "min": 0,
+      "max": 2
+    },
+    {
+      "path": "runtime.titles",
+      "kind": "boolean|object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Smart thread titles: boolean shorthand or detailed settings."
+    },
+    {
+      "path": "runtime.titles.enabled",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Name conversations with a lightweight model call after the first exchange."
+    },
+    {
+      "path": "runtime.titles.timeoutMs",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Time budget for title generation.",
+      "integer": true,
+      "min": 1
+    },
+    {
+      "path": "schemaVersion",
+      "kind": "literal",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Schema major.",
+      "literal": 1
+    }
+  ],
+  "bootstrap": [
+    {
+      "path": "agent",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Resolved agent identifier."
+    },
+    {
+      "path": "client",
+      "kind": "object",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Browser-safe client projection."
+    },
+    {
+      "path": "client.allowAutoReopen",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Allow the widget to reopen itself after an explicit dismiss."
+    },
+    {
+      "path": "client.assistantName",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "The assistant's display name."
+    },
+    {
+      "path": "client.capabilitiesPrompt",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Client-visible capabilities blurb."
+    },
+    {
+      "path": "client.display",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Layout and chrome."
+    },
+    {
+      "path": "client.display.defaultOpen",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Start open.",
+      "default": false
+    },
+    {
+      "path": "client.display.keyboardShortcut",
+      "kind": "string|literal",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Keyboard combo that toggles the widget, or `false` for none."
+    },
+    {
+      "path": "client.display.layout",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Layout shape the widget renders in.",
+      "default": "popup",
+      "enum": [
+        "popup",
+        "inline",
+        "page"
+      ]
+    },
+    {
+      "path": "client.display.resizable",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Drag-to-resize.",
+      "default": true
+    },
+    {
+      "path": "client.display.showToggleButton",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Render the floating toggle button.",
+      "default": true
+    },
+    {
+      "path": "client.display.size",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Width preset (popup layout).",
+      "default": "default",
+      "enum": [
+        "compact",
+        "default",
+        "large",
+        "full"
+      ]
+    },
+    {
+      "path": "client.display.starterPromptsLayout",
+      "kind": "enum",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state starter prompt layout.",
+      "default": "list",
+      "enum": [
+        "list",
+        "grid"
+      ]
+    },
+    {
+      "path": "client.display.toggleButtonPosition",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Toggle button offsets."
+    },
+    {
+      "path": "client.display.toggleButtonPosition.bottom",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "CSS offset from the bottom edge."
+    },
+    {
+      "path": "client.display.toggleButtonPosition.right",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "CSS offset from the right edge."
+    },
+    {
+      "path": "client.display.width",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Custom CSS width override."
+    },
+    {
+      "path": "client.features",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Feature flags."
+    },
+    {
+      "path": "client.features.fileUpload",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Show the attach button and accept file uploads.",
+      "default": false
+    },
+    {
+      "path": "client.features.fileUploadAccept",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "HTML `accept` filter for the file picker.",
+      "default": "image/*"
+    },
+    {
+      "path": "client.features.fileUploadMaxBytes",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Client-side per-file size cap in bytes.",
+      "integer": true,
+      "min": 1
+    },
+    {
+      "path": "client.features.webSearch",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Enable web search.",
+      "default": false
+    },
+    {
+      "path": "client.feedback",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Show per-message feedback controls.",
+      "default": false
+    },
+    {
+      "path": "client.greeting",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state headline."
+    },
+    {
+      "path": "client.persistState",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Persist open/closed state per user."
+    },
+    {
+      "path": "client.starterPrompts",
+      "kind": "array",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Empty-state starter prompts."
+    },
+    {
+      "path": "client.starterPrompts.subtitle",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Secondary line."
+    },
+    {
+      "path": "client.starterPrompts.title",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Prompt text (sent as the message when clicked)."
+    },
+    {
+      "path": "client.streamingThrottleMs",
+      "kind": "number",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Render throttle for streamed text.",
+      "integer": true,
+      "min": 0
+    },
+    {
+      "path": "client.subGreeting",
+      "kind": "string",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Faint line under the greeting."
+    },
+    {
+      "path": "client.theme",
+      "kind": "object",
+      "required": false,
+      "since": "0.15.0",
+      "description": "Color theme (all-or-nothing)."
+    },
+    {
+      "path": "client.theme.backgroundColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Chat background color (hex)."
+    },
+    {
+      "path": "client.theme.primaryColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Primary accent color (hex)."
+    },
+    {
+      "path": "client.theme.textColor",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Body text color (hex)."
+    },
+    {
+      "path": "protocolVersion",
+      "kind": "literal",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Bootstrap envelope version.",
+      "literal": 1
+    },
+    {
+      "path": "revision",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Published revision identifier."
+    },
+    {
+      "path": "storageScope",
+      "kind": "string",
+      "required": true,
+      "since": "0.15.0",
+      "description": "Opaque browser storage namespace."
+    }
+  ]
+}

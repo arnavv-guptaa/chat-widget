@@ -2,6 +2,18 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## UNRELEASED
+
+### Fixed
+- **A newer published config no longer breaks older installs.** Every runtime consumer of an agent configuration — the handler's published-config load, the hosted `GET /v1/config` fetcher, and the browser's `/bootstrap` read — now uses a *tolerant* reader: fields this installed version does not know are dropped (and logged once per revision) instead of failing the whole document. Previously the strict validator rejected any unknown key, so publishing a config that used a field from a newer `@mordn/chat-widget` took down chat for every customer still on the older version. The strict validator (`isAgentConfig`) is unchanged and remains the writer-side contract for publish and preview.
+
+### Added
+- **Config evolution contract.** One schema descriptor (`src/agent-config/descriptor.ts`) now derives every validator, default, and description. New exports from `@mordn/chat-widget/config`: `readAgentConfig` / `readAgentBootstrap` (tolerant readers returning `{ ok, value, dropped }`), `resolveFeatures` / `DEFAULT_FEATURES` (schema defaults applied in one place), `describeAgentConfigSchema()` (machine-readable contract), `formatConfigIssues`, `AGENT_CONFIG_SCHEMA_VERSION`. Two gates enforce the rules in CI: a type-level `satisfies Record<keyof …, Field>` check so a field cannot exist in the type without a descriptor entry (or vice versa), and a baseline-compatibility test that fails on any removal, type change, tightened range, dropped enum member, or new required field within schema v1. Rules and the add-a-field checklist live in `docs/config-evolution.md`.
+- The hosted config fetcher sends `X-Mordn-Widget-Version` and `X-Mordn-Config-Schema` so the control plane can reason about what a deployment understands.
+
+### Changed
+- The composer reads feature flags through `resolveFeatures()` (defaults: `fileUpload: false`, `fileUploadAccept: 'image/*'`, `webSearch: false`) instead of ad-hoc `=== true` / `?? 'image/*'` fallbacks. Behaviour is identical.
+
 ## 0.18.0 — 2026-08-28
 
 ### Added

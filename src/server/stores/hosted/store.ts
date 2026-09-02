@@ -27,7 +27,8 @@ import type {
   StoredMessage,
 } from '../../types';
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
-import { isAgentConfig } from '../../../config';
+import { AGENT_CONFIG_SCHEMA_VERSION, formatConfigIssues, readAgentConfig } from '../../../config';
+import { WIDGET_VERSION } from '../../../utils/widget-version';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.com';
 
@@ -355,6 +356,9 @@ export function createHostedConfig(options: HostedOptions) {
   // clear it rather than let it grow unbounded — simplest possible cap.
   const cache = new Map<string, { value: HostedAgentConfig; at: number }>();
   const MAX_CACHE_ENTRIES = 200;
+  // Revisions already warned about for carrying unknown fields — one line per
+  // revision, not one per fetch.
+  const warnedRevisions = new Set<string>();
 
   return async (ctx: ChatRequestContext): Promise<HostedAgentConfig | null> => {
     const key = ctx.userId ?? '';
@@ -367,7 +371,16 @@ export function createHostedConfig(options: HostedOptions) {
 
     const res = await fetchImpl(`${baseUrl}/v1/config`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}`, 'X-Chat-User': ctx.userId },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'X-Chat-User': ctx.userId,
+        // Advertise what THIS deployment understands so the control plane can
+        // reason about compatibility (log, warn in the dashboard, or project a
+        // revision down for a known-older reader). Informational today; the
+        // tolerant read below is what actually keeps an older install alive.
+        'X-Mordn-Widget-Version': WIDGET_VERSION,
+        'X-Mordn-Config-Schema': String(AGENT_CONFIG_SCHEMA_VERSION),
+      },
     });
     if (!res.ok) {
       throw new Error(`[chat-widget] hosted config request failed (${res.status})`);
@@ -378,12 +391,28 @@ export function createHostedConfig(options: HostedOptions) {
       typeof raw.agent !== 'string' ||
       raw.agent.trim() === '' ||
       typeof raw.revision !== 'string' ||
-      raw.revision.trim() === '' ||
-      !isAgentConfig(raw.config)
+      raw.revision.trim() === ''
     ) {
       throw new Error('[chat-widget] hosted config response is malformed');
     }
-    const value: HostedAgentConfig = raw;
+    // TOLERANT read (config-evolution contract): a newer dashboard may publish
+    // fields this installed version doesn't know. Drop them, keep serving.
+    const read = readAgentConfig(raw.config);
+    if (!read.ok) {
+      throw new Error(
+        `[chat-widget] hosted config response is malformed: ${formatConfigIssues(read.issues)}`,
+      );
+    }
+    if (read.dropped.length > 0 && !warnedRevisions.has(raw.revision)) {
+      warnedRevisions.add(raw.revision);
+      console.warn(
+        `[chat-widget] published config revision ${raw.revision} uses fields this version ` +
+          `(${WIDGET_VERSION}) does not understand and ignored them: ` +
+          read.dropped.map((issue) => issue.path).join(', ') +
+          '. Upgrade @mordn/chat-widget to apply them.',
+      );
+    }
+    const value: HostedAgentConfig = { agent: raw.agent, revision: raw.revision, config: read.value };
     if (cache.size > MAX_CACHE_ENTRIES) cache.clear();
     cache.set(key, { value, at: now });
     return value;

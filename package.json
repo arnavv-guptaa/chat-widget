@@ -122,7 +122,8 @@
     "test": "vitest run",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "esm-check": "node scripts/assert-esm-importable.mjs"
+    "esm-check": "node scripts/assert-esm-importable.mjs",
+    "config:baseline": "cp test/fixtures/agent-config.schema.snapshot.json test/fixtures/agent-config.schema.baseline.json"
   },
   "peerDependencies": {
     "@ai-sdk/google": "^1.0.0 || ^2.0.0",

@@ -10,7 +10,18 @@
 export { ChatWidget, default } from './ChatWidget';
 
 // Types
-export { BOOTSTRAP_PROTOCOL_VERSION, isAgentBootstrap, isAgentConfig } from './config';
+export {
+  AGENT_CONFIG_SCHEMA_VERSION,
+  BOOTSTRAP_PROTOCOL_VERSION,
+  DEFAULT_FEATURES,
+  describeAgentConfigSchema,
+  formatConfigIssues,
+  isAgentBootstrap,
+  isAgentConfig,
+  readAgentBootstrap,
+  readAgentConfig,
+  resolveFeatures,
+} from './config';
 export type {
   AgentConfig,
   AgentRuntimeConfig,
@@ -19,6 +30,10 @@ export type {
   PublishedAgentConfig,
   SerializableStarterPrompt,
   SerializableMemoryConfig,
+  ConfigReadIssue,
+  ConfigReadResult,
+  ConfigFieldDescription,
+  ResolvedFeatureConfig,
 } from './config';
 export type {
   ThemeConfig,

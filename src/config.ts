@@ -1,8 +1,33 @@
 /**
  * Canonical, JSON-serializable agent configuration shared by the control plane,
  * server handler, bootstrap response, and browser preview transport.
+ *
+ * Validation lives in two flavours, both derived from ONE descriptor
+ * (`src/agent-config/descriptor.ts`) so they cannot drift:
+ *
+ *   • `isAgentConfig` / `isAgentBootstrap` — STRICT. The writer contract.
+ *     Unknown keys are errors. Use where a document is authored or accepted
+ *     for storage (publish, preview trust boundary).
+ *   • `readAgentConfig` / `readAgentBootstrap` — TOLERANT. The reader
+ *     contract. Unknown keys and uninterpretable optional values are dropped
+ *     (and reported), never fatal. Use in every runtime consumer, so a
+ *     document published by a NEWER dashboard/schema loads on an OLDER
+ *     deployed widget. See docs/config-evolution.md.
  */
 import type { DisplayConfig, FeatureConfig, ThemeConfig } from './types';
+import { describeFields, readObject, type ReadIssue, type ReadResult } from './agent-config/field';
+import {
+  AGENT_CONFIG_FIELDS,
+  AGENT_CONFIG_SCHEMA_VERSION,
+  BOOTSTRAP_FIELDS,
+  BOOTSTRAP_PROTOCOL_VERSION,
+  FEATURE_FIELDS,
+  defaultsOf,
+} from './agent-config/descriptor';
+
+export { AGENT_CONFIG_SCHEMA_VERSION, BOOTSTRAP_PROTOCOL_VERSION };
+export type { ReadIssue as ConfigReadIssue, ReadResult as ConfigReadResult };
+export type { FieldDescription as ConfigFieldDescription } from './agent-config/field';
 
 export interface SerializableStarterPrompt {
   title: string;
@@ -63,7 +88,7 @@ export interface AgentClientConfig {
 }
 
 export interface AgentConfig {
-  schemaVersion: 1;
+  schemaVersion: typeof AGENT_CONFIG_SCHEMA_VERSION;
   runtime: AgentRuntimeConfig;
   client: AgentClientConfig;
 }
@@ -74,14 +99,6 @@ export interface PublishedAgentConfig {
   revision: string;
   config: AgentConfig;
 }
-
-/**
- * Version of the bootstrap HTTP envelope. Independent of the config document's
- * `schemaVersion`: the transport shape and the configuration schema evolve on
- * separate tracks (a new config field never forces a protocol bump and vice
- * versa).
- */
-export const BOOTSTRAP_PROTOCOL_VERSION = 1 as const;
 
 /** Browser-safe projection returned from GET /bootstrap. */
 export interface AgentBootstrap {
@@ -123,105 +140,86 @@ export function mergeAgentClientConfig(
   };
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-const only = (value: Record<string, unknown>, keys: readonly string[]) =>
-  Object.keys(value).every((key) => keys.includes(key));
-const optional = (value: unknown, check: (candidate: unknown) => boolean) =>
-  value === undefined || check(value);
-const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-const safeInteger = (value: unknown): value is number =>
-  finite(value) && Number.isSafeInteger(value);
-const integerInRange = (value: unknown, min: number, max = Number.MAX_SAFE_INTEGER) =>
-  safeInteger(value) && value >= min && value <= max;
-const bool = (value: unknown): value is boolean => typeof value === 'boolean';
-const str = (value: unknown): value is string => typeof value === 'string';
-const nonEmptyString = (value: unknown): value is string => str(value) && value.trim().length > 0;
+// ── Readers (tolerant) ───────────────────────────────────────────────────────
 
-function validFollowUps(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    only(value, ['enabled', 'max', 'timeoutMs']) &&
-    optional(value.enabled, bool) &&
-    optional(value.max, (candidate) => integerInRange(candidate, 1, 5)) &&
-    optional(value.timeoutMs, (candidate) => integerInRange(candidate, 1))
-  );
+/**
+ * Read a complete schema-v1 config the way a RUNTIME must: fields this build
+ * doesn't know are dropped and reported in `dropped`, never fatal. Fails only
+ * on a wrong `schemaVersion` or a missing/invalid required field. Use in the
+ * handler, the hosted config fetcher, and any other consumer of a published
+ * document. The returned `value` contains only known, valid fields.
+ */
+export function readAgentConfig(value: unknown): ReadResult<AgentConfig> {
+  return readObject<AgentConfig>(value, AGENT_CONFIG_FIELDS, 'tolerant');
 }
 
-function validTitles(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    only(value, ['enabled', 'timeoutMs']) &&
-    optional(value.enabled, bool) &&
-    optional(value.timeoutMs, (candidate) => integerInRange(candidate, 1))
-  );
+/** Tolerant reader for the browser-safe bootstrap envelope (see `readAgentConfig`). */
+export function readAgentBootstrap(value: unknown): ReadResult<AgentBootstrap> {
+  return readObject<AgentBootstrap>(value, BOOTSTRAP_FIELDS, 'tolerant');
 }
 
-function validRuntime(value: unknown): value is AgentRuntimeConfig {
-  if (!isRecord(value) || !only(value, ['model', 'systemPrompt', 'temperature', 'maxOutputTokens', 'followUps', 'titles', 'memory'])) return false;
-  if (!nonEmptyString(value.model)) return false;
-  if (!optional(value.systemPrompt, str)) return false;
-  if (!optional(value.temperature, (v) => finite(v) && v >= 0 && v <= 2)) return false;
-  if (!optional(value.maxOutputTokens, (v) => integerInRange(v, 1))) return false;
-  if (!optional(value.followUps, (candidate) => typeof candidate === 'boolean' || validFollowUps(candidate))) return false;
-  if (!optional(value.titles, (candidate) => typeof candidate === 'boolean' || validTitles(candidate))) return false;
-  return optional(
-    value.memory,
-    (candidate) =>
-      isRecord(candidate) &&
-      only(candidate, ['enabled', 'inject', 'extract', 'limit']) &&
-      bool(candidate.enabled) &&
-      bool(candidate.inject) &&
-      bool(candidate.extract) &&
-      finite(candidate.limit) &&
-      Number.isInteger(candidate.limit) &&
-      candidate.limit >= 1 &&
-      candidate.limit <= 20,
-  );
-}
+// ── Validators (strict) ──────────────────────────────────────────────────────
 
-function validClient(value: unknown): value is AgentClientConfig {
-  if (!isRecord(value) || !only(value, ['greeting', 'subGreeting', 'assistantName', 'theme', 'features', 'display', 'starterPrompts', 'capabilitiesPrompt', 'feedback', 'streamingThrottleMs', 'persistState', 'allowAutoReopen'])) return false;
-  if (!optional(value.greeting, str)) return false;
-  if (!optional(value.subGreeting, str)) return false;
-  if (!optional(value.assistantName, str)) return false;
-  if (!optional(value.theme, (candidate) => isRecord(candidate) && only(candidate, ['backgroundColor', 'textColor', 'primaryColor']) && str(candidate.backgroundColor) && str(candidate.textColor) && str(candidate.primaryColor))) return false;
-  if (!optional(value.features, (candidate) => isRecord(candidate) && only(candidate, ['fileUpload', 'fileUploadAccept', 'fileUploadMaxBytes', 'webSearch']) && optional(candidate.fileUpload, bool) && optional(candidate.fileUploadAccept, str) && optional(candidate.fileUploadMaxBytes, (v) => integerInRange(v, 1)) && optional(candidate.webSearch, bool))) return false;
-  if (!optional(value.display, (candidate) => {
-    if (!isRecord(candidate) || !only(candidate, ['layout', 'size', 'width', 'resizable', 'defaultOpen', 'starterPromptsLayout', 'showToggleButton', 'toggleButtonPosition', 'keyboardShortcut'])) return false;
-    return optional(candidate.layout, (v) => v === 'popup' || v === 'inline' || v === 'page') &&
-      optional(candidate.size, (v) => v === 'compact' || v === 'default' || v === 'large' || v === 'full') &&
-      optional(candidate.width, str) && optional(candidate.resizable, bool) && optional(candidate.defaultOpen, bool) &&
-      optional(candidate.starterPromptsLayout, (v) => v === 'list' || v === 'grid') && optional(candidate.showToggleButton, bool) &&
-      optional(candidate.keyboardShortcut, (v) => v === false || str(v)) &&
-      optional(candidate.toggleButtonPosition, (v) => isRecord(v) && only(v, ['bottom', 'right']) && optional(v.bottom, str) && optional(v.right, str));
-  })) return false;
-  if (!optional(value.starterPrompts, (candidate) => Array.isArray(candidate) && candidate.every((prompt) => isRecord(prompt) && only(prompt, ['title', 'subtitle']) && str(prompt.title) && optional(prompt.subtitle, str)))) return false;
-  return optional(value.capabilitiesPrompt, str) && optional(value.feedback, bool) &&
-    optional(value.streamingThrottleMs, (v) => integerInRange(v, 0)) &&
-    optional(value.persistState, bool) && optional(value.allowAutoReopen, bool);
-}
-
-/** Validate the browser-safe bootstrap payload before it reaches widget state. */
-export function isAgentBootstrap(value: unknown): value is AgentBootstrap {
-  return (
-    isRecord(value) &&
-    only(value, ['protocolVersion', 'agent', 'revision', 'client', 'storageScope']) &&
-    value.protocolVersion === BOOTSTRAP_PROTOCOL_VERSION &&
-    nonEmptyString(value.agent) &&
-    nonEmptyString(value.revision) &&
-    validClient(value.client) &&
-    nonEmptyString(value.storageScope)
-  );
-}
-
-/** Validate the complete, strict schema-v1 config before preview trust. */
+/**
+ * Validate the complete, strict schema-v1 config before it is authored,
+ * stored, or trusted as a preview. Unknown keys are rejected — this is what
+ * keeps typos and junk out of published revisions. Runtime consumers must use
+ * `readAgentConfig` instead, or a newer dashboard will break older deployments.
+ */
 export function isAgentConfig(value: unknown): value is AgentConfig {
-  return (
-    isRecord(value) &&
-    only(value, ['schemaVersion', 'runtime', 'client']) &&
-    value.schemaVersion === 1 &&
-    validRuntime(value.runtime) &&
-    validClient(value.client)
-  );
+  return readObject<AgentConfig>(value, AGENT_CONFIG_FIELDS, 'strict').ok;
+}
+
+/** Strict validator for the bootstrap envelope. Browsers should prefer `readAgentBootstrap`. */
+export function isAgentBootstrap(value: unknown): value is AgentBootstrap {
+  return readObject<AgentBootstrap>(value, BOOTSTRAP_FIELDS, 'strict').ok;
+}
+
+// ── Defaults ─────────────────────────────────────────────────────────────────
+
+/** `FeatureConfig` with every defaulted flag resolved. */
+export interface ResolvedFeatureConfig {
+  fileUpload: boolean;
+  fileUploadAccept: string;
+  fileUploadMaxBytes?: number;
+  webSearch: boolean;
+}
+
+/** Feature defaults, sourced from the descriptor — the single place they live. */
+export const DEFAULT_FEATURES: ResolvedFeatureConfig = defaultsOf(FEATURE_FIELDS) as ResolvedFeatureConfig;
+
+/**
+ * Apply schema defaults to a (possibly partial or absent) `features` object.
+ * Consumers read flags from the result instead of sprinkling `=== true` /
+ * `?? 'image/*'` fallbacks through UI code, so a default changes in one place.
+ */
+export function resolveFeatures(features?: FeatureConfig | null): ResolvedFeatureConfig {
+  const resolved: ResolvedFeatureConfig = { ...DEFAULT_FEATURES };
+  if (!features) return resolved;
+  for (const [key, value] of Object.entries(features)) {
+    if (value !== undefined) (resolved as unknown as Record<string, unknown>)[key] = value;
+  }
+  return resolved;
+}
+
+// ── Schema description ───────────────────────────────────────────────────────
+
+/**
+ * Machine-readable description of the whole contract: every path with its
+ * kind, requiredness, `since`, default and constraints. The compatibility gate
+ * (`test/config-evolution.test.ts`) snapshots this and diffs it against the
+ * last release; dashboards and docs can render it directly.
+ */
+export function describeAgentConfigSchema() {
+  return {
+    schemaVersion: AGENT_CONFIG_SCHEMA_VERSION,
+    bootstrapProtocolVersion: BOOTSTRAP_PROTOCOL_VERSION,
+    config: describeFields(AGENT_CONFIG_FIELDS),
+    bootstrap: describeFields(BOOTSTRAP_FIELDS),
+  };
+}
+
+/** One-line summary of read issues for error messages and logs. */
+export function formatConfigIssues(issues: readonly ReadIssue[]): string {
+  return issues.map((issue) => `${issue.path || '<root>'}: ${issue.message}`).join('; ');
 }
