@@ -62,7 +62,9 @@ function Harness({ enabled = true, lang }: { enabled?: boolean; lang?: string })
 }
 
 const textarea = () => screen.getByTestId('ta') as HTMLTextAreaElement;
-const button = () => screen.getByRole('button', { name: /dictation/i });
+// The harness renders exactly one button; its accessible name changes with
+// state ("Start dictation" / "Stop dictation" / "Microphone access is blocked…").
+const button = () => screen.getByRole('button');
 
 beforeEach(() => {
   FakeRecognition.instances = [];
@@ -193,13 +195,16 @@ describe('DictationButton / useDictation', () => {
     });
     expect(screen.getByRole('alert').textContent).toMatch(/internet/);
     expect(button().getAttribute('aria-pressed')).toBe('false');
-    // A silence timeout is a normal end, not an error.
+    // Starting again clears the stale notice, and a silence timeout is a
+    // normal end, not an error — so no notice at all after this session.
     fireEvent.click(button());
+    expect(screen.queryByRole('alert')).toBeNull();
     act(() => {
       latest().fail('no-speech');
       latest().onend?.({});
     });
-    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(button().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('aborts the session on unmount', () => {
