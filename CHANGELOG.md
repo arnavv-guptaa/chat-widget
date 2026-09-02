@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## Unreleased
+## 0.20.0 — 2026-09-02
 
 ### Added
 - **Voice dictation in the composer.** A microphone button turns speech into text in the textbox using the browser's built-in speech recognition — the user edits and presses Send like any typed message; nothing is ever auto-sent and no audio passes through the host or mordn. Interim words appear inline while speaking; tap again, press Escape, send, or start typing to stop. The button renders only where the browser supports the API (Chrome, Edge, Safari — not Firefox by default), so unsupported browsers look exactly as before. Config: `features.voiceInput` (optional boolean, default **true**) and `features.voiceInputLanguage` (optional BCP-47 string; defaults to the page language, then the browser language). Both flow through explicit config and the published agent config; both are `since 0.20.0` in the schema descriptor.
