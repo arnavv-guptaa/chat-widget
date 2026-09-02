@@ -142,8 +142,8 @@ describe('defaults live in the descriptor', () => {
 describe('schema compatibility gate', () => {
   const current = describeAgentConfigSchema();
 
-  it('matches the committed snapshot (refresh deliberately with `vitest -u` and review the diff)', () => {
-    expect(JSON.stringify(current, null, 2) + '\n').toMatchFileSnapshot('./fixtures/agent-config.schema.snapshot.json');
+  it('matches the committed snapshot (refresh deliberately with `vitest -u` and review the diff)', async () => {
+    await expect(JSON.stringify(current, null, 2) + '\n').toMatchFileSnapshot('./fixtures/agent-config.schema.snapshot.json');
   });
 
   it('every field records the version that introduced it', () => {
