@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## UNRELEASED
+## 0.19.0 — 2026-09-02
 
 ### Fixed
 - **A newer published config no longer breaks older installs.** Every runtime consumer of an agent configuration — the handler's published-config load, the hosted `GET /v1/config` fetcher, and the browser's `/bootstrap` read — now uses a *tolerant* reader: fields this installed version does not know are dropped (and logged once per revision) instead of failing the whole document. Previously the strict validator rejected any unknown key, so publishing a config that used a field from a newer `@mordn/chat-widget` took down chat for every customer still on the older version. The strict validator (`isAgentConfig`) is unchanged and remains the writer-side contract for publish and preview.
