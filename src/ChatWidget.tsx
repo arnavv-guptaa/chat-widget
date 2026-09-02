@@ -31,6 +31,10 @@ import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
 import { hexToHslTriplet } from './utils/color';
 import { useOpenTriggers } from './hooks/use-open-triggers';
+import { hostedApiBase, useHostedAuth } from './hooks/use-hosted-auth';
+
+// Hosts that passed BOTH `publishableKey` and `apiBase` — warned once per key.
+const warnedHostedApiBase = new Set<string>();
 
 export interface ChatWidgetProps {
   /** Full canonical config for caller overrides or an authenticated preview. */
@@ -40,6 +44,35 @@ export interface ChatWidgetProps {
   /** Generic transport headers (for example a host's CSRF token). */
   headers?: Record<string, string>;
   requestCredentials?: RequestCredentials;
+  /**
+   * HOSTED RUNTIME MODE — for apps with no server route (Vite/Lovable/Bolt,
+   * Supabase-backed SPAs). Pass the agent's publishable key (`pk_live_…`, from
+   * the dashboard or the mordn MCP server) and the widget talks to
+   * `api.mordn.com/v1/hosted/<key>` directly instead of `apiBase`. The key is
+   * public by design: it selects the agent and grants nothing on its own — the
+   * hosted runtime enforces the agent's origin allowlist and verifies the end
+   * user from `getUserToken`. Mutually exclusive with `apiBase`.
+   */
+  publishableKey?: string;
+  /**
+   * Hosted mode only: returns the signed-in user's access token from the app's
+   * identity provider (e.g. Supabase `session.access_token`, Clerk `getToken()`),
+   * or `null` when nobody is signed in. Sent as `Authorization: Bearer …` and
+   * verified server-side against the agent's configured JWKS — the browser
+   * never asserts an id, it only presents a token somebody else signed.
+   * Re-resolved every few minutes so expiring tokens stay fresh.
+   */
+  getUserToken?: () => Promise<string | null | undefined> | string | null | undefined;
+  /**
+   * Hosted mode only: allow unauthenticated visitors. When no token is
+   * available the widget sends a persisted random visitor id instead, and the
+   * runtime scopes history to it as an explicitly anonymous (`anon:`) user.
+   * Only takes effect when the agent's hosted settings also allow anonymous
+   * visitors. Default false.
+   */
+  anonymous?: boolean;
+  /** Hosted mode only: API origin override for a self-hosted chat-api. Default `https://api.mordn.com`. */
+  hostedBaseUrl?: string;
   className?: string;
   conversationId?: string;
   initialMessages?: any[];
@@ -83,9 +116,13 @@ export interface ChatWidgetHandle {
 
 export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWidget({
   config: explicitConfig,
-  apiBase: apiBaseProp = '/api/chat',
+  apiBase: apiBaseProp,
   headers,
-  requestCredentials,
+  requestCredentials: requestCredentialsProp,
+  publishableKey,
+  getUserToken,
+  anonymous,
+  hostedBaseUrl,
   conversationId,
   initialMessages,
   className,
@@ -101,19 +138,37 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   actionRenderers,
   onFeedback,
 }: ChatWidgetProps, ref) {
-  const apiBase = apiBaseProp.replace(/\/+$/, '');
+  // Hosted runtime mode: a publishable key REPLACES apiBase — the widget talks
+  // to the hosted runtime directly. Cookies are never sent cross-origin in this
+  // mode; identity travels as the verified token from `getUserToken`.
+  const hostedKey = typeof publishableKey === 'string' && publishableKey.trim() !== '' ? publishableKey.trim() : null;
+  const hostedMode = hostedKey !== null;
+  if (hostedKey && apiBaseProp !== undefined && !warnedHostedApiBase.has(hostedKey)) {
+    warnedHostedApiBase.add(hostedKey);
+    console.warn('[chat-widget] `apiBase` is ignored when `publishableKey` is set — hosted mode talks to api.mordn.com directly.');
+  }
+  const apiBase = (hostedKey ? hostedApiBase(hostedKey, hostedBaseUrl) : apiBaseProp ?? '/api/chat').replace(/\/+$/, '');
+  const requestCredentials: RequestCredentials | undefined = hostedMode ? 'omit' : requestCredentialsProp;
+  const hostedAuth = useHostedAuth({ enabled: hostedMode, getUserToken, anonymous });
+
   const [bootstrap, setBootstrap] = useState<AgentBootstrap | null>(null);
   const [bootstrapReady, setBootstrapReady] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
-  const headersKey = JSON.stringify(headers ?? null);
+  // Host headers plus (hosted mode) the Authorization / visitor header, value-keyed
+  // so a token refresh re-issues bootstrap and updates the transport headers.
+  const headersKey = JSON.stringify([headers ?? null, hostedAuth.headers]);
   const stableHeaders = useMemo(
-    () => headers,
+    () => (hostedMode ? { ...(headers ?? {}), ...hostedAuth.headers } : headers),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- value-keyed on purpose
     [headersKey],
   );
+  const hostedAuthReady = hostedAuth.ready;
 
   useEffect(() => {
+    // Hosted mode: wait for the first token resolution so bootstrap never fires
+    // as an anonymous request for a user who is actually signed in.
+    if (!hostedAuthReady) return;
     const controller = new AbortController();
     setBootstrap(null);
     setBootstrapError(null);
@@ -158,7 +213,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
         if (!controller.signal.aborted) setBootstrapReady(true);
       });
     return () => controller.abort();
-  }, [apiBase, stableHeaders, requestCredentials, bootstrapAttempt]);
+  }, [apiBase, stableHeaders, requestCredentials, bootstrapAttempt, hostedAuthReady]);
 
   const client = mergeAgentClientConfig(bootstrap?.client, explicitConfig?.client);
   const { greeting, subGreeting, assistantName, theme, features, display, starterPrompts, capabilitiesPrompt, feedback } = client;

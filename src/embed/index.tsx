@@ -319,12 +319,19 @@ function readScriptConfig(script: HTMLElement | null): MordnChatConfig | null {
     ['data-api-base', 'apiBase'],
     ['data-target', 'target'],
     ['data-css-url', 'cssUrl'],
+    // Hosted runtime mode (no server route): the publishable key replaces
+    // apiBase; `getUserToken` has no declarative form — sign-in-aware embeds
+    // call `MordnChat.init({ publishableKey, getUserToken })` instead.
+    ['data-publishable-key', 'publishableKey'],
+    ['data-hosted-base-url', 'hostedBaseUrl'],
+    ['data-anonymous', 'anonymous'],
   ];
   let hasShortcut = false;
   for (const [attr, key] of map) {
     const v = script.getAttribute(attr);
     if (v !== null) {
-      (shortcuts as Record<string, unknown>)[key] = v;
+      // Boolean shortcut: a bare `data-anonymous` (empty string) or "true" is on.
+      (shortcuts as Record<string, unknown>)[key] = key === 'anonymous' ? v === '' || v === 'true' : v;
       hasShortcut = true;
     }
   }
