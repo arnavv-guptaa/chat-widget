@@ -13,6 +13,7 @@ The runbook for cutting a release. Written for 0.12.0 but reusable — it exists
   - [ ] `node scripts/assert-esm-importable.mjs` passes (after #183).
 - [ ] Hosted backend (chat-api) prerequisites for the features in this release are live: migrations applied in order (`0006_retrieval_misses`, `0007_source_sync` if those PRs shipped), `GEMINI_API_KEY` set for embeddings.
 - [ ] `CHANGELOG.md`: replace `UNRELEASED` with today's date.
+- [ ] **Config schema baseline.** If this release adds configuration fields, run `npm run config:baseline` so `test/fixtures/agent-config.schema.baseline.json` records the contract as shipped, and commit it. The compatibility gate (`test/config-evolution.test.ts`) diffs every future PR against this file — see `docs/config-evolution.md`. Never edit the baseline by hand, and never regenerate it mid-cycle to make a failing gate pass.
 
 ## 2. Publish
 

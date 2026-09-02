@@ -30,6 +30,7 @@ import {
 } from './actions';
 import { MessageAttachments } from './message-attachments';
 import { useInputPlugins } from './input-plugin-popover';
+import { resolveFeatures } from '../config';
 import { ChatErrorBanner } from './chat-error-banner';
 import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -202,6 +203,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // A bare '/' (root mount) strips to '' so `${apiBase}/history` stays a
   // proper root-relative path instead of a scheme-relative '//history'.
   const apiBase = String(config?.apiBase ?? '/api/chat').replace(/\/+$/, '');
+
+  // Feature flags with schema defaults applied (config-evolution contract):
+  // read flags from here, never from `config.features` directly, so a default
+  // lives in exactly one place (the schema descriptor).
+  const features = resolveFeatures(config?.features);
 
   // Per-tab composer drafts (sessionStorage — see safeSession above). Scoped
   // exactly like every other persisted key; null when identity is incomplete,
@@ -1814,14 +1820,14 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
             className="chat-prompt-box"
             globalDrop
             multiple
-            accept={config?.features?.fileUploadAccept ?? 'image/*'}
-            maxFileSize={config?.features?.fileUploadMaxBytes}
+            accept={features.fileUploadAccept}
+            maxFileSize={features.fileUploadMaxBytes}
             onError={(err) => {
               if (err.code === 'max_file_size') {
                 setUploadError(
-                  config?.features?.fileUploadMaxBytes
+                  features.fileUploadMaxBytes
                     ? `File too large (max ${Math.floor(
-                        config.features.fileUploadMaxBytes / 1024 / 1024,
+                        features.fileUploadMaxBytes / 1024 / 1024,
                       )} MB).`
                     : 'File too large.',
                 );
@@ -1848,7 +1854,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                 className="min-h-0 w-full px-3.5 pt-3 pb-1 text-[13.5px] leading-6"
               />
               <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-                {config?.features?.fileUpload === true && <AttachButton />}
+                {features.fileUpload && <AttachButton />}
                 <PromptInputSubmit
                   // Filled circular send button, right-aligned in the action row.
                   // Colors come entirely from the Button default variant tokens

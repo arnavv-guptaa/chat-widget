@@ -21,7 +21,11 @@ import type {
   ToolRenderer,
 } from './types';
 import type { AgentBootstrap, AgentConfig } from './config';
-import { isAgentBootstrap, mergeAgentClientConfig } from './config';
+import { formatConfigIssues, mergeAgentClientConfig, readAgentBootstrap } from './config';
+
+// Bootstrap revisions already reported for carrying client fields this bundle
+// doesn't understand — one console line per revision, not per mount/remount.
+const warnedBootstrapRevisions = new Set<string>();
 import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
@@ -123,8 +127,24 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       .then(async (response) => {
         if (!response.ok) throw new Error(`bootstrap failed (${response.status})`);
         const value: unknown = await response.json();
-        if (!isAgentBootstrap(value)) throw new Error('bootstrap returned an invalid response');
-        return value;
+        // TOLERANT read (config-evolution contract): the server may be newer
+        // than this bundle (or the published revision newer than both) and
+        // carry client fields this build doesn't know. They are dropped and the
+        // schema default applies — never a broken widget. Only a wrong protocol
+        // version or a missing required envelope field is fatal.
+        const read = readAgentBootstrap(value);
+        if (!read.ok) {
+          throw new Error(`bootstrap returned an invalid response (${formatConfigIssues(read.issues)})`);
+        }
+        if (read.dropped.length > 0 && !warnedBootstrapRevisions.has(read.value.revision)) {
+          warnedBootstrapRevisions.add(read.value.revision);
+          console.info(
+            '[chat-widget] bootstrap contained fields this widget version does not understand and ignored them: ' +
+              read.dropped.map((issue) => issue.path).join(', ') +
+              '. Upgrade @mordn/chat-widget to apply them.',
+          );
+        }
+        return read.value;
       })
       .then((value) => setBootstrap(value))
       .catch((error) => {

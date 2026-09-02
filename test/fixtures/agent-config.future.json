@@ -1,0 +1,27 @@
+{
+  "$comment": "A schema-v1 document as a FUTURE dashboard might publish it: every level carries something this build has never heard of. The tolerant reader must load it (dropping the unknowns); the strict validator must reject it. If you add a real field with one of these names, rename the fixture key — the point is that it stays unknown.",
+  "schemaVersion": 1,
+  "runtime": {
+    "model": "gateway/future-model",
+    "systemPrompt": "Be helpful.",
+    "topK": 40
+  },
+  "client": {
+    "greeting": "Hello from the future",
+    "features": {
+      "fileUpload": true,
+      "voiceInput": true,
+      "voiceInputLanguage": "en-GB"
+    },
+    "display": {
+      "layout": "drawer",
+      "size": "large",
+      "motion": "reduced"
+    },
+    "starterPrompts": [
+      { "title": "Known" },
+      { "title": "With future icon", "icon": "sparkles" }
+    ],
+    "voice": { "tts": { "enabled": true } }
+  }
+}

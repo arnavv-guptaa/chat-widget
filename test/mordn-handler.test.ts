@@ -66,7 +66,12 @@ describe('createMordnHandler bootstrap wiring', () => {
     expect(firstFetch).toHaveBeenCalledWith(
       'https://api.mordn.com/v1/config',
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer server-secret-one' }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer server-secret-one',
+          // The fetcher advertises the schema major it reads (config-evolution
+          // contract) so the control plane can reason about compatibility.
+          'X-Mordn-Config-Schema': '1',
+        }),
       }),
     );
   });

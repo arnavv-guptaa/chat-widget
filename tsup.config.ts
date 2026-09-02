@@ -64,6 +64,12 @@ export default defineConfig([
     splitting: false,
     sourcemap: true,
     clean: false, // Don't clean since first config already cleaned
+    define: {
+      // The hosted config fetcher advertises this build's version to the
+      // control plane (`X-Mordn-Widget-Version`). Same source as the embed's
+      // define below, so the two can never disagree.
+      '__MORDN_WIDGET_VERSION__': JSON.stringify(pkg.version),
+    },
     // All peer/runtime deps the host provides must stay external so a single
     // shared instance is used. esbuild matches EXACT specifiers unless a `/*`
     // wildcard is given: a bare `drizzle-orm` entry does NOT cover subpaths like

@@ -67,8 +67,17 @@ export type {
   PublishedAgentConfig,
   AgentBootstrap,
   SerializableMemoryConfig,
+  ConfigReadIssue,
+  ConfigReadResult,
 } from '../config';
-export { isAgentBootstrap, isAgentConfig } from '../config';
+export {
+  AGENT_CONFIG_SCHEMA_VERSION,
+  formatConfigIssues,
+  isAgentBootstrap,
+  isAgentConfig,
+  readAgentBootstrap,
+  readAgentConfig,
+} from '../config';
 export type {
   CreateChatHandlerOptions,
   ChatRequestContext,
