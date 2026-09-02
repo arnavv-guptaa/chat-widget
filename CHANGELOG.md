@@ -2,6 +2,14 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## Unreleased
+
+### Changed
+- **Charts: a quality pass on every chart kind.** Charts now render at real pixels — the plot measures its column and lays out in CSS px, so type is always 11px and hairlines are always 1px whether the widget is a 360px popup or a fullscreen panel (previously the whole SVG scaled with the card, shrinking labels in narrow columns and ballooning them in wide ones). Category labels are thinned to fit instead of rotated. Gridlines only, one baseline hairline, and an emphasized zero line whenever an axis crosses zero. Hovering shows a proper tooltip (category header, one row per series, swatches) with a crosshair on line charts and dimming of the other bars; the per-shape native `<title>` tooltips are gone. Legends are HTML under the title, never drawn inside the plot. Pie and donut render beside a slice list (label · value · share) and the donut center shows the total, or the hovered slice's share. Bars are rounded on the outer end only; areas fade with a gradient; sparklines show their last value. Multi-series charts use a categorical palette derived from the brand primary via `color-mix()` (hue rotations at equal lightness), exposed as `--chat-chart-1` … `--chat-chart-8` and `--chat-chart-negative` on `.chat-chart` for white-label overrides. The card's footer actions are quiet text buttons; the data table right-aligns numbers. `valueLabels` is now honored (bar, line, stacked totals) and defaults **on** for horizontal bars.
+
+### Fixed
+- **Bar charts with negative values drew below the axis.** The value axis was clamped to start at 0, so losses rendered under the plot, over the tick labels. The axis now *includes* zero rather than starting at it: with mixed signs the baseline moves into the plot and negative bars take the negative color (`--chat-chart-negative`, defaults to `--chat-danger`).
+
 ## 0.20.1 — 2026-09-02
 
 ### Changed
