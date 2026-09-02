@@ -30,6 +30,8 @@ import {
 } from './actions';
 import { MessageAttachments } from './message-attachments';
 import { useInputPlugins } from './input-plugin-popover';
+import { useDictation } from '../hooks/use-dictation';
+import { DictationButton } from './dictation-button';
 import { resolveFeatures } from '../config';
 import { ChatErrorBanner } from './chat-error-banner';
 import { MessageActions } from './message-actions';
@@ -224,6 +226,16 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     value: input,
     setValue: setInput,
     plugins: config?.inputPlugins,
+  });
+  // Voice dictation (features.voiceInput, default on). Speech lands in the
+  // same `input` state as typing; the hook renders nothing where the browser
+  // has no SpeechRecognition, and never submits on its own.
+  const dictation = useDictation({
+    textareaRef: inputRef,
+    value: input,
+    setValue: setInput,
+    enabled: features.voiceInput,
+    lang: features.voiceInputLanguage,
   });
   const [showHistory, setShowHistory] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -519,6 +531,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     }
 
     submittingRef.current = true;
+    // Sending ends dictation: the text being sent is what is on screen now.
+    dictation.stop();
     try {
 
     // Upload files to Supabase first if there are attachments
@@ -1739,6 +1753,19 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               {uploadError}
             </div>
           )}
+          {dictation.notice && (
+            <div
+              role="alert"
+              className="mb-3 px-4 py-3 rounded-2xl text-sm shadow-sm"
+              style={{
+                backgroundColor: 'hsl(var(--chat-danger) / 0.08)',
+                border: '1px solid hsl(var(--chat-danger) / 0.25)',
+                color: 'hsl(var(--chat-danger))',
+              }}
+            >
+              {dictation.notice}
+            </div>
+          )}
 
           {/* While we're still hydrating tabs from localStorage and the
               active tab from the API, hold render so we don't briefly flash
@@ -1848,13 +1875,25 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
                   token-derived focus ring in every theme. */}
               <PromptInputTextarea
                 ref={inputRef}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={inputPlugins.onKeyDown}
+                onChange={(e) => {
+                  // A manual edit (typing, paste, cut) ends dictation first
+                  // so the recognizer can't overwrite what the user just did.
+                  dictation.onManualEdit();
+                  setInput(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  // Input plugins own the keys while their panel is open;
+                  // dictation only takes Escape when nothing else claimed it.
+                  inputPlugins.onKeyDown(e);
+                  if (!e.defaultPrevented) dictation.onKeyDown(e);
+                }}
+                placeholder={dictation.state === 'listening' && !input ? 'Listening…' : undefined}
                 value={input}
                 className="min-h-0 w-full px-3.5 pt-3 pb-1 text-[13.5px] leading-6"
               />
               <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
                 {features.fileUpload && <AttachButton />}
+                {features.voiceInput && <DictationButton dictation={dictation} />}
                 <PromptInputSubmit
                   // Filled circular send button, right-aligned in the action row.
                   // Colors come entirely from the Button default variant tokens

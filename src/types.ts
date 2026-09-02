@@ -244,6 +244,23 @@ export interface FeatureConfig {
    * Enable web search
    */
   webSearch?: boolean;
+
+  /**
+   * Voice dictation: a microphone button in the composer that turns speech
+   * into text in the textbox (the user still edits and presses Send —
+   * nothing is auto-sent). Uses the browser's built-in speech recognition,
+   * so there is no server, key, or audio path through the host or mordn;
+   * Chrome and Safari may send audio to Google/Apple speech services. The
+   * button renders only where the browser supports the API (Chrome, Edge,
+   * Safari; not Firefox by default). Defaults to `true`.
+   */
+  voiceInput?: boolean;
+
+  /**
+   * BCP-47 language tag for dictation (e.g. `"en-GB"`, `"de"`). When
+   * unset, the page's `<html lang>` is used, then the browser language.
+   */
+  voiceInputLanguage?: string;
 }
 
 /**

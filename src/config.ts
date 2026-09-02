@@ -183,6 +183,8 @@ export interface ResolvedFeatureConfig {
   fileUploadAccept: string;
   fileUploadMaxBytes?: number;
   webSearch: boolean;
+  voiceInput: boolean;
+  voiceInputLanguage?: string;
 }
 
 /** Feature defaults, sourced from the descriptor — the single place they live. */

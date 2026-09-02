@@ -1354,3 +1354,35 @@
   white-space: pre-wrap; word-break: break-word; max-height: 12rem; overflow-y: auto;
 }
 
+/* ============================================
+   COMPOSER DICTATION — listening ring
+   A soft pulse around the microphone button while the browser is listening.
+   Same conventions as the activity section: keyframes stay global, the class
+   rule is self-prefixed with .chat-widget-container, and reduced-motion
+   swaps the pulse for a static ring.
+   ============================================ */
+.chat-widget-container .chat-dictation-active {
+  position: relative;
+}
+.chat-widget-container .chat-dictation-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 0 hsl(var(--chat-primary) / 0.35);
+  animation: chat-dictation-pulse 1.6s ease-out infinite;
+}
+
+@keyframes chat-dictation-pulse {
+  0%   { box-shadow: 0 0 0 0 hsl(var(--chat-primary) / 0.35); }
+  70%  { box-shadow: 0 0 0 6px hsl(var(--chat-primary) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--chat-primary) / 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-widget-container .chat-dictation-active::after {
+    animation: none;
+    box-shadow: 0 0 0 2px hsl(var(--chat-primary) / 0.35);
+  }
+}

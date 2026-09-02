@@ -168,6 +168,21 @@
       "min": 1
     },
     {
+      "path": "client.features.voiceInput",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.20.0",
+      "description": "Show the microphone button for browser speech-to-text dictation into the composer (rendered only where the browser supports it; never auto-sends).",
+      "default": true
+    },
+    {
+      "path": "client.features.voiceInputLanguage",
+      "kind": "string",
+      "required": false,
+      "since": "0.20.0",
+      "description": "BCP-47 language for dictation. Defaults to the page language, then the browser language."
+    },
+    {
       "path": "client.features.webSearch",
       "kind": "boolean",
       "required": false,
@@ -576,6 +591,21 @@
       "description": "Client-side per-file size cap in bytes.",
       "integer": true,
       "min": 1
+    },
+    {
+      "path": "client.features.voiceInput",
+      "kind": "boolean",
+      "required": false,
+      "since": "0.20.0",
+      "description": "Show the microphone button for browser speech-to-text dictation into the composer (rendered only where the browser supports it; never auto-sends).",
+      "default": true
+    },
+    {
+      "path": "client.features.voiceInputLanguage",
+      "kind": "string",
+      "required": false,
+      "since": "0.20.0",
+      "description": "BCP-47 language for dictation. Defaults to the page language, then the browser language."
     },
     {
       "path": "client.features.webSearch",

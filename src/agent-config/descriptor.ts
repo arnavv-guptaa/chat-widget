@@ -49,6 +49,8 @@ export const AGENT_CONFIG_SCHEMA_VERSION = 1 as const;
 
 /** The release that introduced the canonical schema — `since` for every v1 field. */
 const V1 = '0.15.0';
+/** 0.20.0 — composer voice dictation. */
+const V0_20 = '0.20.0';
 
 // ── runtime ──────────────────────────────────────────────────────────────────
 
@@ -101,6 +103,8 @@ export const FEATURE_FIELDS = {
   fileUploadAccept: { spec: { kind: 'string' }, since: V1, default: 'image/*', description: 'HTML `accept` filter for the file picker.' },
   fileUploadMaxBytes: { spec: { kind: 'number', integer: true, min: 1 }, since: V1, description: 'Client-side per-file size cap in bytes.' },
   webSearch: { spec: { kind: 'boolean' }, since: V1, default: false, description: 'Enable web search.' },
+  voiceInput: { spec: { kind: 'boolean' }, since: V0_20, default: true, description: 'Show the microphone button for browser speech-to-text dictation into the composer (rendered only where the browser supports it; never auto-sends).' },
+  voiceInputLanguage: { spec: { kind: 'string' }, since: V0_20, description: 'BCP-47 language for dictation. Defaults to the page language, then the browser language.' },
 } satisfies Record<keyof FeatureConfig, Field>;
 
 const TOGGLE_POSITION_FIELDS = {
