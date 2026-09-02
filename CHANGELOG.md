@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## Unreleased
+## 0.22.0 — 2026-09-02
 
 ### Added
 - **Hosted runtime mode (client).** Apps with no server route — Vite/Lovable/Bolt SPAs, Supabase-backed apps — can now mount the widget with a browser-safe publishable key instead of a route: `<ChatWidget publishableKey="pk_live_…" getUserToken={…} />`. The widget talks to `api.mordn.com/v1/hosted/<key>` directly; `getUserToken` returns the signed-in user's access token from the app's identity provider (Supabase Auth, Clerk, Auth0, …), which the hosted runtime verifies against the agent's configured JWKS — the browser still never asserts who it is. `anonymous` (default off, and only when the agent allows it) sends a persisted random visitor id instead of a token so unauthenticated visitors get isolated, clearly-labelled histories. `hostedBaseUrl` overrides the API origin for self-hosted chat-api. Tokens are re-resolved every few minutes so they stay fresh. The script-tag embed gains `data-publishable-key`, `data-anonymous` and `data-hosted-base-url`. Requires chat-api with hosted mode enabled for the agent; server mode (`apiBase` + your route) is unchanged.
