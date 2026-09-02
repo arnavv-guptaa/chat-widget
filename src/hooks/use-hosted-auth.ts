@@ -111,11 +111,12 @@ export function useHostedAuth(options: {
 
   const visitorId = useMemo(() => (enabled && anonymous ? getOrCreateVisitorId() : null), [enabled, anonymous]);
 
-  const headers = useMemo<Record<string, string>>(() => {
-    if (!enabled) return {};
-    if (token) return { Authorization: `Bearer ${token}` };
-    if (visitorId) return { [VISITOR_HEADER]: visitorId };
-    return {};
+  const headers = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (!enabled) return out;
+    if (token) out.Authorization = `Bearer ${token}`;
+    else if (visitorId) out[VISITOR_HEADER] = visitorId;
+    return out;
   }, [enabled, token, visitorId]);
 
   return { headers, ready, refresh };
