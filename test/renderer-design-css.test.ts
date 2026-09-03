@@ -142,3 +142,36 @@ describe('renderer design-system contract', () => {
     expect(rule?.[1]).toContain('hsl(var(--chat-primary) / 0.07)');
   });
 });
+
+describe('button reset (no Preflight dependency)', () => {
+  // The widget intentionally ships without Tailwind Preflight so it never
+  // restyles the host page. That means its own <button>s must not lean on the
+  // host having a reset: without this rule a plain Vite/CRA host shows the UA
+  // bevelled border + ButtonFace grey on every icon button.
+  it('does not import Tailwind preflight', () => {
+    expect(css).not.toContain('tailwindcss/preflight');
+    expect(css).not.toMatch(/@import\s+["']tailwindcss["']/);
+  });
+
+  it('resets the UA button chrome inside the container at low specificity', () => {
+    const rule = decls.match(
+      /\.chat-widget-container :where\(button, input\[type="button"\], input\[type="submit"\], input\[type="reset"\]\)\s*\{([\s\S]*?)\}/,
+    );
+    expect(rule).not.toBeNull();
+    expect(rule?.[1]).toContain('border: 0 solid');
+    expect(rule?.[1]).toContain('background-color: transparent');
+    expect(rule?.[1]).toContain('padding: 0');
+    expect(rule?.[1]).toContain('color: inherit');
+    expect(rule?.[1]).toContain('font: inherit');
+  });
+
+  it('leaves the keyboard focus ring alone', () => {
+    const rule = decls.match(
+      /\.chat-widget-container :where\(button, input\[type="button"\], input\[type="submit"\], input\[type="reset"\]\)\s*\{([\s\S]*?)\}/,
+    );
+    // outline / box-shadow are what focus-visible:ring-* and the UA focus
+    // indicator use — resetting them here would silently drop a11y focus.
+    expect(rule?.[1]).not.toContain('outline');
+    expect(rule?.[1]).not.toContain('box-shadow');
+  });
+});
