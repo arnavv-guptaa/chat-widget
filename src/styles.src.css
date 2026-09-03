@@ -598,6 +598,38 @@
    FORM & INPUT ELEMENTS
    ============================================ */
 
+/* Button reset — the widget ships NO Tailwind Preflight (styles.src.css
+   imports only tailwindcss/theme + /utilities) so it never rewrites the host
+   page's elements. The flip side: the widget's own <button>s inherited the
+   HOST's reset. Inside Tailwind apps, Preflight zeroed the UA border, padding
+   and ButtonFace background, so the icon buttons (header controls, Attach,
+   Dictation, message actions, launcher) looked right by accident. In a host
+   with no reset (plain Vite, CRA, Rails…) every one rendered with the
+   browser's bevelled default border and grey face. Ship the button subset of
+   Preflight ourselves, scoped to the container.
+
+   :where() keeps this at (0,1,0) — below every scoped utility
+   (`.chat-widget-container .border` is (0,2,0)), so `border`, `rounded-*`,
+   `bg-*`, `p-*`, `text-*` on outline/secondary/ghost buttons still win. Only
+   properties the UA styles on buttons are reset. `outline` and `box-shadow`
+   are deliberately NOT touched: the keyboard focus ring
+   (`focus-visible:ring-*`) and the UA focus outline on buttons that don't
+   declare their own both stay intact. */
+.chat-widget-container :where(button, input[type="button"], input[type="submit"], input[type="reset"]) {
+  margin: 0;
+  padding: 0;
+  border: 0 solid;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  color: inherit;
+  font: inherit;
+  font-feature-settings: inherit;
+  font-variation-settings: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
+
 /* Send button = the brand accent (--chat-primary), so it matches the Stop
    button shown mid-stream (which is primary) and honors a themed primaryColor.
    Previously this used --chat-text, which looked fine only because the default

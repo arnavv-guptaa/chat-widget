@@ -2,6 +2,11 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## UNRELEASED
+
+### Fixed
+- **Icon buttons no longer show the browser's default border in hosts without a CSS reset.** The widget deliberately ships without Tailwind Preflight so it never restyles the host page — but its own `<button>`s (header New chat / History / Close, Attach, Dictation, message actions, the launcher) were relying on the *host's* reset to zero the user-agent border, padding and grey button face. Inside Tailwind apps this was invisible; in a plain Vite/CRA/Rails host every icon button rendered with a bevelled native border. The stylesheet now carries a scoped, low-specificity button reset (`.chat-widget-container :where(button, …)`) that removes the UA chrome while leaving `outline`/`box-shadow` untouched, so the keyboard `focus-visible` ring is unchanged. No host-side Preflight is required.
+
 ## 0.22.0 — 2026-09-02
 
 ### Added
