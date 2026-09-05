@@ -385,15 +385,20 @@ export interface DisplayConfig {
    * convention for "open AI chat" and won't fight the search shortcut for
    * the same key.
    *
-   * **Bare keys and typing**: a combo with NO modifier token (e.g. `"/"`)
-   * is suppressed while focus is inside an `input`, `textarea`, `select`,
-   * or any `contenteditable` element — otherwise every "/" a visitor types
-   * into a normal form field would hijack the page. Modifier combos (`"mod+k"`
-   * etc.) always fire, typing or not — same behaviour as every command
-   * palette (Slack, Linear, Notion, …) a user already expects this from.
-   * If your own page also wants a global shortcut on the same key, listen
-   * with `capture: true` and call `stopPropagation()`, exactly as you would
-   * to resolve a conflict with any other library's global hotkey.
+   * **Typing and host shortcuts**: ALL combos, including modifier combos,
+   * are ignored inside `input`, `textarea`, `select`, or `contenteditable`
+   * surfaces (including descendants and `plaintext-only`). This intentionally
+   * leaves editor shortcuts such as Cmd/Ctrl+I for italic alone. Previously,
+   * only bare keys were suppressed while typing. Repeated/composing keydowns
+   * and events already claimed with `preventDefault()` are also ignored.
+   * A host can reserve a conflicting shortcut with `preventDefault()` before
+   * it reaches the widget's window listener, or with `stopPropagation()`.
+   *
+   * **Explicit intent**: shortcuts and `data-mordn-chat-open` / `-toggle`
+   * clicks can reopen a dismissed panel even when `allowAutoReopen` is false,
+   * just like the launcher. Ref methods and `mordn-chat:*` CustomEvents remain
+   * programmatic: opening still requires `allowAutoReopen`. All paths share
+   * controlled-mode delegation and persistence; closing is always allowed.
    *
    * **Multi-instance**: if a page mounts more than one `<ChatWidget>`, a
    * matching shortcut/button/event fires ALL of them (no cross-instance
