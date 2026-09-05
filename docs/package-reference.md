@@ -35,7 +35,7 @@ export const { GET, POST, DELETE } = createChatHandler({
 | Supabase storage | `@mordn/chat-widget/server/supabase` → `createSupabaseStorage` | Private-bucket attachments and signed URLs |
 | Custom | Implement `ChatStore` or `StorageAdapter` | Any database or object store |
 
-See the [backend guide](https://mordn.com/docs/backends/overview) for the complete contracts.
+See the [backend guide](https://mordn.com/docs/backends/overview) for the complete contracts. Self-managed Postgres users should also read the [schema and migration notes](./self-hosted-migrations.md): the repository development config is not a consumer upgrade runner, and the hand-written SQL must be obtained and applied separately.
 
 ## Script-tag embed
 
@@ -73,7 +73,7 @@ The main entry is the browser surface. Server-only code is guarded by `server-on
 | Config | `@mordn/chat-widget/config` | `AgentConfig`, validation, bootstrap types |
 | Actions | `@mordn/chat-widget/actions` | Action contracts and vertical templates |
 | Models | `@mordn/chat-widget/models` | Model-related public types |
-| Database | `@mordn/chat-widget/db` and `/schema` | Drizzle schema and table definitions |
+| Legacy database | `@mordn/chat-widget/db` and `/schema` | Legacy `conversations` / `messages` schema; not the current default ChatStore schema |
 | Server core | `@mordn/chat-widget/server` | Hosted and self-managed handlers plus store contracts |
 | Drizzle | `@mordn/chat-widget/server/drizzle` | Postgres chat store |
 | Supabase | `@mordn/chat-widget/server/supabase` | Attachment storage adapter |
