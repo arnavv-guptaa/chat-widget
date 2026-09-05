@@ -30,7 +30,7 @@ import { MessageCircle, X } from 'lucide-react';
 import { ChatStorageProvider } from './contexts/chat-storage-context';
 import { ChatPortalProvider } from './contexts/chat-portal-context';
 import { hexToHslTriplet } from './utils/color';
-import { useOpenTriggers } from './hooks/use-open-triggers';
+import { useOpenTriggers, type OpenTriggerSource } from './hooks/use-open-triggers';
 import { hostedApiBase, useHostedAuth } from './hooks/use-hosted-auth';
 
 // Hosts that passed BOTH `publishableKey` and `apiBase` — warned once per key.
@@ -315,16 +315,16 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     [setOpenState, isOpen]
   );
 
-  // Page-chrome open triggers (#193): keyboard shortcut, `data-mordn-chat-*`
-  // attribute buttons, and the `document` CustomEvent API. These call the
-  // EXACT SAME `setOpenState` the imperative handle above uses, with the
-  // same `programmatic` gating, so a docs-site nav button and a React ref
-  // behave identically — same allowAutoReopen gate, same controlled-mode
-  // onOpenChange delegation, same persistState behaviour.
-  const triggerOpen = useCallback(() => setOpenState(true, { programmatic: true }), [setOpenState]);
+  // Page-chrome triggers share state/persistence with the launcher. Explicit
+  // keyboard shortcuts and attribute clicks bypass automatic-reopen suppression
+  // (#245); CustomEvents preserve the imperative API's programmatic gate.
+  const triggerOpen = useCallback(
+    (source: OpenTriggerSource) => setOpenState(true, { programmatic: source === 'programmatic' }),
+    [setOpenState]
+  );
   const triggerClose = useCallback(() => setOpenState(false), [setOpenState]);
   const triggerToggle = useCallback(
-    () => setOpenState(!isOpen, { programmatic: !isOpen }),
+    (source: OpenTriggerSource) => setOpenState(!isOpen, { programmatic: source === 'programmatic' }),
     [setOpenState, isOpen]
   );
   useOpenTriggers(display?.keyboardShortcut, { open: triggerOpen, close: triggerClose, toggle: triggerToggle });

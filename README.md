@@ -66,6 +66,27 @@ Render `<Assistant />`, sign in, and send a message. The published agent config 
 
 Follow the [complete quickstart](https://mordn.com/docs/quickstart) for Auth.js examples, deployment notes, and a production verification checklist.
 
+## Opening the widget from your site
+
+Set `client.display.keyboardShortcut` to `"mod+i"` in your agent config to enable Cmd+I on Mac / Ctrl+I elsewhere (off by default). The shortcut toggles the popup. Static page chrome can also open, toggle, or close it without a React ref:
+
+```html
+<button type="button" data-mordn-chat-open>Ask AI</button>
+<button type="button" data-mordn-chat-toggle>Toggle chat</button>
+<button type="button" data-mordn-chat-close>Close chat</button>
+```
+
+Shortcuts and attribute clicks are explicit user actions: they can reopen a dismissed panel even with `client.allowAutoReopen: false`, just like the launcher. All keyboard combos now yield inside inputs, textareas, selects, and contenteditable surfaces—including modifier shortcuts such as Cmd/Ctrl+I for italic. Repeated/composing keydowns and already-prevented events are ignored. This intentionally replaces the older modifier-shortcuts-fire-while-typing behavior.
+
+For programmatic control, use a `ChatWidget` ref or the document event API:
+
+```js
+document.dispatchEvent(new CustomEvent('mordn-chat:open'));
+// Also supported: 'mordn-chat:toggle' and 'mordn-chat:close'.
+```
+
+Compatibility: ref and CustomEvent opens still require `client.allowAutoReopen: true`; automatic reopen suppression is unchanged. Closing remains allowed. Every route uses the same persistence and controlled-mode `onOpenChange` behavior. Triggers are page-wide: with multiple mounted widgets, all matching instances respond.
+
 ## Why mordn
 
 ### Your model and tools stay on your server

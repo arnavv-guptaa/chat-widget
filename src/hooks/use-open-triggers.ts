@@ -9,9 +9,10 @@
  * They all call the exact same `open` / `close` / `toggle` callbacks the
  * caller passes in — which in `ChatWidget.tsx` are thin wrappers around the
  * single `setOpenState` used by the imperative handle. That keeps the
- * `allowAutoReopen` gate, controlled-mode `onOpenChange` delegation, and
- * `persistState` behaviour identical no matter which door the user walked
- * through.
+ * controlled-mode `onOpenChange` delegation and `persistState` behaviour
+ * identical. Keyboard shortcuts and attribute clicks carry explicit user
+ * intent and bypass `allowAutoReopen`; CustomEvents remain programmatic and
+ * preserve the imperative API's automatic-reopen gate.
  *
  * Multi-instance note: if a page mounts more than one `<ChatWidget>`, every
  * instance registers its own listeners here, so a shortcut/button/event
@@ -21,10 +22,12 @@
  */
 import { useEffect, useMemo } from 'react';
 
+export type OpenTriggerSource = 'user' | 'programmatic';
+
 export interface OpenTriggerActions {
-  open: () => void;
+  open: (source: OpenTriggerSource) => void;
   close: () => void;
-  toggle: () => void;
+  toggle: (source: OpenTriggerSource) => void;
 }
 
 interface ParsedShortcut {
@@ -35,9 +38,6 @@ interface ParsedShortcut {
   shift: boolean;
   /** Lower-cased non-modifier key, e.g. "k", "/". */
   key: string;
-  /** True when the combo has no modifier tokens (e.g. bare "/") — these are
-   * suppressed while the user is typing so they don't hijack normal input. */
-  bare: boolean;
 }
 
 /** Parse a `+`-joined combo string once (memoized by the caller). Returns
@@ -51,7 +51,7 @@ function parseShortcut(combo: string | false | undefined): ParsedShortcut | null
     .filter(Boolean);
   if (tokens.length === 0) return null;
 
-  const parsed: ParsedShortcut = { mod: false, ctrl: false, alt: false, shift: false, key: '', bare: false };
+  const parsed: ParsedShortcut = { mod: false, ctrl: false, alt: false, shift: false, key: '' };
   const keyTokens: string[] = [];
   for (const token of tokens) {
     switch (token) {
@@ -79,18 +79,21 @@ function parseShortcut(combo: string | false | undefined): ParsedShortcut | null
   const key = keyTokens[keyTokens.length - 1];
   if (!key) return null; // no key token at all (e.g. "mod+") — malformed, ignore
   parsed.key = key;
-  parsed.bare = !parsed.mod && !parsed.ctrl && !parsed.alt && !parsed.shift;
   return parsed;
 }
 
-/** Element the user is actively typing into — bare-key shortcuts (no
- * modifier) must not fire while this is true. Modifier combos always fire;
- * an editor that wants to reserve e.g. Cmd+K for itself should stopPropagation
- * on its own listener, same as any other global shortcut. */
+/** All shortcuts yield to editable surfaces, including modifier combos such
+ * as Cmd/Ctrl+I (italic). Check inherited contenteditable, including
+ * plaintext-only, without depending on isContentEditable support in jsdom. */
 function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+  if (!(target instanceof Element)) return false;
+  if (target.closest('input, textarea, select')) return true;
+  for (let element: Element | null = target; element; element = element.parentElement) {
+    const editable = element.getAttribute('contenteditable')?.toLowerCase();
+    if (editable === '' || editable === 'true' || editable === 'plaintext-only') return true;
+    if (editable === 'false') return false;
+  }
+  return false;
 }
 
 function isMac(): boolean {
@@ -141,10 +144,10 @@ export function useOpenTriggers(shortcut: string | false | undefined, actions: O
     if (typeof window === 'undefined') return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (parsedShortcut.bare && isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || e.isComposing || e.repeat || isTypingTarget(e.target)) return;
       if (!matchesShortcut(e, parsedShortcut)) return;
       e.preventDefault();
-      toggle();
+      toggle('user');
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -162,9 +165,9 @@ export function useOpenTriggers(shortcut: string | false | undefined, actions: O
       const target = e.target;
       if (!(target instanceof Element)) return;
       if (target.closest('[data-mordn-chat-open]')) {
-        open();
+        open('user');
       } else if (target.closest('[data-mordn-chat-toggle]')) {
-        toggle();
+        toggle('user');
       } else if (target.closest('[data-mordn-chat-close]')) {
         close();
       }
@@ -180,9 +183,9 @@ export function useOpenTriggers(shortcut: string | false | undefined, actions: O
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
-    const handleOpen = () => open();
+    const handleOpen = () => open('programmatic');
     const handleClose = () => close();
-    const handleToggle = () => toggle();
+    const handleToggle = () => toggle('programmatic');
 
     document.addEventListener('mordn-chat:open', handleOpen);
     document.addEventListener('mordn-chat:close', handleClose);
