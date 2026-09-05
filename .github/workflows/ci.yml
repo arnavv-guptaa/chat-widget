@@ -62,6 +62,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Assert built hosted CLI
+        # Exercise the shipped bin in disposable projects, not source helpers.
+        # Also runs in the reusable release tag gate; no installs or API calls.
+        run: node scripts/assert-hosted-cli.mjs
+
       - name: Assert strict-ESM importability
         # The gate that catches the #177 crash class: import the built client
         # entries under Node's real ESM loader. A bare directory / extensionless
