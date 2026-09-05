@@ -8,8 +8,9 @@ import type { CitationSource } from './citation-markers';
 import { MessageAttachments } from './message-attachments';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
+import { getMessagePartRenderer, isCustomMessageDataPart } from '../utils/message-part-renderers';
 import type { TurnState } from './transcript/types';
-import type { ActionRenderer, ToolRenderer, FeedbackEvent } from '../types';
+import type { ActionRenderer, ToolRenderer, FeedbackEvent, MessagePartRenderers } from '../types';
 
 /**
  * One message in the conversation, as its own memoized component.
@@ -40,6 +41,7 @@ interface MessageItemProps {
   status: ChatStatus;
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
+  messagePartRenderers?: MessagePartRenderers;
   onRegenerate?: () => void;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
   feedbackEnabled?: boolean;
@@ -66,7 +68,7 @@ function sourceTitle(part: SourceUrlPart): string {
   return part.title || part.url;
 }
 
-function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, feedbackCredentials, onFeedback }: MessageItemProps) {
+function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRenderers, actionRenderers, messagePartRenderers, onRegenerate, onToolApproval, feedbackEnabled, conversationId, feedbackApiBase, feedbackHeaders, feedbackCredentials, onFeedback }: MessageItemProps) {
   const sourceParts = useMemo(
     () => (message.parts?.filter((part) => part.type === 'source-url') ?? []) as SourceUrlPart[],
     [message.parts],
@@ -147,6 +149,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
               turn={turnState}
               toolRenderers={toolRenderers}
               actionRenderers={actionRenderers}
+              messagePartRenderers={messagePartRenderers}
               onToolApproval={onToolApproval}
               sources={citationSources}
             />
@@ -183,6 +186,14 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
                       <Response>{part.text}</Response>
                     </MessageContent>
                   </Message>
+                </Fragment>
+              ) : isCustomMessageDataPart(part) ? (
+                <Fragment key={`${message.id}-${i}`}>
+                  {getMessagePartRenderer(part, messagePartRenderers)?.(part, {
+                    messageId: message.id,
+                    role: message.role,
+                    isStreaming: false,
+                  }) ?? null}
                 </Fragment>
               ) : null,
             )}

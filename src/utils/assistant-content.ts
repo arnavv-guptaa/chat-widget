@@ -1,11 +1,16 @@
 import type { UIMessage } from 'ai';
+import type { MessagePartRenderers } from '../types';
+import { getMessagePartRenderer } from './message-part-renderers';
 
 /**
  * Whether an assistant message currently has anything the transcript can paint.
  * Keep this aligned with MessageItem / AgentTurnTranscript: metadata-only parts
  * such as step-start and data-follow-ups must not dismiss the planning state.
  */
-export function hasRenderableAssistantContent(message: UIMessage | undefined): boolean {
+export function hasRenderableAssistantContent(
+  message: UIMessage | undefined,
+  messagePartRenderers?: MessagePartRenderers,
+): boolean {
   if (message?.role !== 'assistant') return false;
 
   return (message.parts ?? []).some((part) => {
@@ -17,7 +22,10 @@ export function hasRenderableAssistantContent(message: UIMessage | undefined): b
       part.type === 'source-url' ||
       part.type === 'file' ||
       part.type === 'dynamic-tool' ||
-      part.type.startsWith('tool-')
+      part.type.startsWith('tool-') ||
+      // Registration opts the part into transcript ownership. Never invoke a
+      // host render callback here (it may return null or a component).
+      !!getMessagePartRenderer(part, messagePartRenderers)
     );
   });
 }
@@ -30,11 +38,12 @@ export function hasRenderableAssistantContent(message: UIMessage | undefined): b
 export function messagesForTranscript(
   messages: UIMessage[],
   showPlanning: boolean,
+  messagePartRenderers?: MessagePartRenderers,
 ): UIMessage[] {
   if (!showPlanning) return messages;
 
   const last = messages.at(-1);
-  if (last?.role !== 'assistant' || hasRenderableAssistantContent(last)) {
+  if (last?.role !== 'assistant' || hasRenderableAssistantContent(last, messagePartRenderers)) {
     return messages;
   }
 
