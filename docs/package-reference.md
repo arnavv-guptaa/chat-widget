@@ -62,6 +62,10 @@ const config: AgentConfig = {
 };
 ```
 
+## Mermaid rendering
+
+Mermaid fences defer layout while their text part streams, then render the settled diagram or fall back to copyable source. See [streaming, SSR, security and compatibility details](./mermaid-rendering.md).
+
 ## Exports
 
 The main entry is the browser surface. Server-only code is guarded by `server-only`; importing it into a client bundle is a build error.

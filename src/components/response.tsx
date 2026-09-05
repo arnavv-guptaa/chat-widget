@@ -12,7 +12,7 @@ import { CitationRef, CitationSourcesProvider, type CitationSource } from "./cit
 import { remarkCitations } from "../utils/citation-tokens";
 import { ChartCode } from "../charts/chart-code";
 import { isChartFenceLanguage } from "../charts/chart-spec";
-import { MermaidCode } from "./mermaid-block";
+import { MermaidCode, ResponseStreamingContext } from "./mermaid-block";
 import { MERMAID_FENCE_LANGUAGE } from "../generative/registry";
 
 // Override Streamdown's element rendering with our own components:
@@ -99,17 +99,19 @@ export const Response = memo(
     return (
       <div ref={containerRef}>
         <CitationSourcesProvider value={ctxValue}>
-          <Streamdown
-            className={cn(
-              "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-              className
-            )}
-            components={components}
-            remarkPlugins={remarkPlugins}
-            {...rest}
-          >
-            {content}
-          </Streamdown>
+          <ResponseStreamingContext.Provider value={isStreaming}>
+            <Streamdown
+              className={cn(
+                "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+                className
+              )}
+              components={components}
+              remarkPlugins={remarkPlugins}
+              {...rest}
+            >
+              {content}
+            </Streamdown>
+          </ResponseStreamingContext.Provider>
         </CitationSourcesProvider>
       </div>
     );
