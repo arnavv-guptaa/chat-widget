@@ -47,13 +47,14 @@ describe('mermaid containment', () => {
   });
 
   it('leaves nothing on document.body after a VALID diagram', async () => {
-    const { container } = render(
+    const { container, queryByRole } = render(
       <MermaidCode className="language-mermaid">{'graph TD\n  A-->B'}</MermaidCode>,
     );
 
     // jsdom cannot lay out SVG, so mermaid may still fail here — that is fine.
-    // The invariant under test is containment, which must hold either way.
-    await waitFor(() => expect(container.textContent).toBeTruthy());
+    // Wait for the pending state to leave, not just text: the labelled placeholder
+    // now has text before Mermaid has parsed or rendered anything.
+    await waitFor(() => expect(queryByRole('status')).toBeNull());
     expect(strayNodes([container])).toHaveLength(0);
   });
 

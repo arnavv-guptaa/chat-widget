@@ -137,6 +137,16 @@ describe('renderer design-system contract', () => {
     expect(markdownTable).toContain('data-copied={copied ? "" : undefined}');
   });
 
+  it('defers Mermaid layout with a stable, scoped, token-driven placeholder', () => {
+    expect(response).toContain('<ResponseStreamingContext.Provider value={isStreaming}>');
+    const pending = decls.match(/\.chat-widget-container \.chat-mermaid-pending\s*\{([\s\S]*?)\}/);
+    expect(pending?.[1]).toContain('min-height: 8rem');
+    expect(pending?.[1]).toContain('hsl(var(--chat-border-soft))');
+    expect(pending?.[1]).toContain('hsl(var(--chat-background))');
+    expect(pending?.[1]).toContain('hsl(var(--chat-text-faint))');
+    expect(pending?.[1]).not.toContain('animation:');
+  });
+
   it('keeps the composer focus treatment subtle and token-driven', () => {
     const rule = css.match(/\.chat-widget-container \.chat-prompt-box:focus-within\s*\{([\s\S]*?)\}/);
     expect(rule?.[1]).toContain('hsl(var(--chat-primary) / 0.07)');
