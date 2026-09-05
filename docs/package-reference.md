@@ -66,6 +66,10 @@ const config: AgentConfig = {
 
 Mermaid fences defer layout while their text part streams, then render the settled diagram or fall back to copyable source. See [streaming, SSR, security and compatibility details](./mermaid-rendering.md).
 
+## Custom message parts
+
+Host React apps can pass `messagePartRenderers` directly to `ChatWidget` to render custom `data-*` parts alongside the stock transcript. See the [contract and account lookup example](./message-part-renderers.md). The map is host code, not a field in published JSON configuration; it does not override server policy or built-in text, citations, tools, and attachments.
+
 ## Exports
 
 The main entry is the browser surface. Server-only code is guarded by `server-only`; importing it into a client bundle is a build error.

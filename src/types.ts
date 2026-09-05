@@ -28,6 +28,43 @@ export interface FeedbackEvent {
  */
 export type ToolRenderer = (part: ToolPartLike) => ReactNode | null;
 
+/** Custom AI SDK data part. Payloads are untrusted until the host validates them. */
+export interface MessageDataPart {
+  readonly type: `data-${string}`;
+  readonly id?: string;
+  readonly data: unknown;
+}
+
+/** Presentation context only; no identity, permissions, or tool execution authority. */
+export interface MessagePartRendererContext {
+  readonly messageId: string;
+  readonly role: 'system' | 'user' | 'assistant';
+  /** True only for the active assistant message while its stream is flowing. */
+  readonly isStreaming: boolean;
+}
+
+/**
+ * Host-code-only render callback for custom data-* parts. Return null/undefined
+ * to omit the part (the default); unknown data is never dumped into the UI.
+ * Validate `part.data` before using it. Keep callbacks pure, synchronous and
+ * SSR-safe; return a React component if you need hooks. Renderer errors follow
+ * the host's React error boundary, just like toolRenderers.
+ */
+export type MessagePartRenderer = (
+  part: MessageDataPart,
+  context: MessagePartRendererContext,
+) => ReactNode | null;
+
+/**
+ * Exact full part-type keys, e.g. 'data-account-lookup'. Built-in text, sources,
+ * files, reasoning and tools cannot be overridden. data-follow-ups,
+ * data-thread-title and data-chat-error are reserved widget metadata and are
+ * not dispatched here. Transient events are not transcript parts.
+ * Replace the map (rather than mutate it) when changing renderers.
+ * Never put these functions in AgentConfig/published JSON/bootstrap payloads.
+ */
+export type MessagePartRenderers = Readonly<Partial<Record<`data-${string}`, MessagePartRenderer>>>;
+
 /**
  * Outcome of an action, derived from the REAL tool output (never the model's
  * prose). Drives the card's icon + colour. 'partial' is the critical state for
