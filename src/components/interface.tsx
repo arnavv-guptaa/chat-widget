@@ -34,6 +34,7 @@ import { useDictation } from '../hooks/use-dictation';
 import { DictationButton } from './dictation-button';
 import { resolveFeatures } from '../config';
 import { ChatErrorBanner } from './chat-error-banner';
+import { createChatErrorRecovery } from '../utils/chat-error-recovery';
 import { MessageActions } from './message-actions';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { HistoryIcon, MessageSquareIcon, SearchIcon, PaperclipIcon, SquarePenIcon, XIcon } from 'lucide-react';
@@ -397,9 +398,10 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   const chatsRef = useRef<Map<string, Chat<UIMessage>>>(new Map());
 
   const buildTransport = useCallback(
-    () =>
+    (recovery: ReturnType<typeof createChatErrorRecovery>) =>
       new DefaultChatTransport({
       api: apiBase || '/',
+      fetch: recovery.fetch,
       // Resolved PER REQUEST (see headersRef above) so host-injected headers
       // are never stale — a static object froze the mount-time values.
       headers: () => headersRef.current,
@@ -449,9 +451,11 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
     (tabId: string): Chat<UIMessage> => {
       const existing = chatsRef.current.get(tabId);
       if (existing) return existing;
+      // Recovery belongs to this Chat, including when it streams in background.
+      const recovery = createChatErrorRecovery();
       const created = new Chat<UIMessage>({
         id: tabId,
-        transport: buildTransport(),
+        transport: recovery.wrapTransport(buildTransport(recovery)),
         // Human-in-the-loop tool approval: once the user has answered all
         // pending approval requests on the last assistant message, send the
         // responses back so the SDK resumes (runs or skips the tool). Without

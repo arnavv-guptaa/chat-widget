@@ -42,12 +42,14 @@ import {
   type ModelMessage,
   type ToolSet,
   type UIMessage,
+  type UIMessageChunk,
   type UIMessageStreamWriter,
 } from 'ai';
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { validateChatRequest } from './chat-request';
 import { classifyError, isAbortError, messageForErrorKind } from './errors';
+import { CHAT_ERROR_DATA_TYPE, CHAT_ERROR_HEADER, toChatErrorMetadata, type ChatErrorMetadata } from '../utils/chat-error-protocol';
 import {
   createConsoleLogger,
   createTurnLogger,
@@ -1059,6 +1061,19 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     });
 
     let mappedStreamError: string | undefined;
+    const emitErrorMetadata = (classified: Pick<ChatErrorMetadata, 'kind' | 'retryable' | 'retryAfterMs'>) => {
+      // Transient data reaches onData but never history/model context. Emit it
+      // BEFORE the SDK's ordinary error chunk; older clients keep errorText.
+      try {
+        followUpWriter?.write({
+          type: CHAT_ERROR_DATA_TYPE,
+          data: toChatErrorMetadata(classified, traceFor(request)),
+          transient: true,
+        });
+      } catch {
+        // A disconnected writer must not replace the original safe error.
+      }
+    };
     const mapStreamError = (err: unknown): string => {
       // The wrapped stream can observe the same failure twice (once while the
       // model stream maps it into an error chunk, once while the outer stream
@@ -1077,22 +1092,8 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // interesting — the upstream stalled past its budget — so it warns
       // rather than going silent, but it still isn't routed to `onError`.
       //
-      // The returned copy deliberately reads as an abort: the client's error
-      // banner suppresses abort-shaped messages (`chat-error-banner.tsx`), so
-      // a stopped turn renders as the partial answer it is instead of a red
-      // error strip under text the user already has. That string coupling is
-      // load-bearing today. The error taxonomy this branch builds on now gives
-      // the server a real `kind`; putting that kind on the wire so the client
-      // branches on a discriminant instead of a message probe is the tracked
-      // follow-up, not something this branch does.
-      // Gated on our own controller having actually fired. `isAbortError` alone
-      // is a shape probe, and its message fallback matches any error whose text
-      // contains "aborted" — including genuine upstream failures like
-      // "the request was aborted by the upstream gateway". Swallowing one of
-      // those would be total silence: no log, no `onError`, and a user-facing
-      // string the client's banner hides, so the user sees a truncated answer
-      // with no indication anything broke. If we never aborted, it is not our
-      // abort, and it belongs on the real error path below.
+      // Only our controller establishes a user stop/timeout. An upstream
+      // AbortError without our abort is a visible failure, not a hidden stop.
       if (streamAbort?.signal.aborted && isAbortError(err)) {
         // `streamTimedOut` is set by the wall-clock timer itself rather than
         // inferred from `request.signal.aborted`, which misreported both
@@ -1109,6 +1110,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         mappedStreamError = timedOut
           ? STREAM_TIMEOUT_ABORT_MESSAGE
           : CLIENT_ABORT_MESSAGE;
+        emitErrorMetadata({ kind: timedOut ? 'transient' : 'abort', retryable: timedOut });
         void runCleanup('on-abort');
         return mappedStreamError;
       }
@@ -1120,6 +1122,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // result to the host, so retry/backoff logic is written against a
       // discriminated `kind` instead of regexing provider prose.
       const classified = classifyError(err);
+      if (classified.kind === 'abort') {
+        classified.kind = 'transient';
+        classified.retryable = true;
+        classified.message = messageForErrorKind('transient');
+      }
 
       // A category and a retry hint are what you actually need at 3am, and the
       // traceId ties this line to the turn.start / tool / save lines around it.
@@ -1138,10 +1145,14 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // category's own copy is already far better than the old one-size
       // fallback. `onError` receives the classification as a second argument —
       // additive, so existing `(error) => string` handlers keep working.
-      mappedStreamError =
-        (onError ? onError(err, classified) : classified.message) ||
-        classified.message ||
-        GENERIC_STREAM_ERROR_MESSAGE;
+      mappedStreamError = classified.message || GENERIC_STREAM_ERROR_MESSAGE;
+      emitErrorMetadata(classified);
+      try {
+        const customMessage = onError?.(err, classified);
+        if (typeof customMessage === 'string' && customMessage) mappedStreamError = customMessage;
+      } catch (callbackError) {
+        turnLog.warn('error.callback_failed', errorFields(callbackError));
+      }
       void runCleanup('on-error');
       return mappedStreamError;
     };
@@ -1170,7 +1181,20 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             originalMessages: incoming,
             generateMessageId: generateId,
             onError: mapStreamError,
-          }),
+          }).pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
+            transform(chunk, controller) {
+              // SDK v6 emits an abort chunk (not onError) for abortSignal.
+              // Preserve it for partial-turn persistence, but make our timeout
+              // visible to Chat: abort chunks alone do not set its error state.
+              if (chunk.type === 'abort' && mappedStreamError === undefined && streamAbort?.signal.aborted) {
+                const errorText = mapStreamError(Object.assign(new Error('Owned stream abort'), { name: 'AbortError' }));
+                controller.enqueue(chunk);
+                if (streamTimedOut) controller.enqueue({ type: 'error', errorText });
+                return;
+              }
+              controller.enqueue(chunk);
+            },
+          })),
         );
       },
       onFinish: async ({ messages: finalMessages, isAborted }) => {
@@ -1639,6 +1663,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           .filter(Boolean),
       );
       exposed.add(TRACE_HEADER);
+      exposed.add(CHAT_ERROR_HEADER);
       response.headers.set('Access-Control-Expose-Headers', [...exposed].join(', '));
     }
     if (preflight) {
@@ -1666,6 +1691,18 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
   function withTraceHeader(request: Request, response: Response): Response {
     const headers = new Headers(response.headers);
     headers.set(TRACE_HEADER, traceFor(request));
+    if (response.status >= 400 && !headers.has(CHAT_ERROR_HEADER)) {
+      // Explicit rejections do not carry a thrown cause. Classify only by our
+      // response status, NEVER the request's headers/body or human error text.
+      // A bare 5xx can mean missing configuration; don't promise a retry helps.
+      const kind = response.status === 401 || response.status === 403 ? 'auth'
+        : response.status === 429 ? 'rate_limit'
+        : [400, 413, 422].includes(response.status) ? 'prompt'
+        : [408, 502, 504].includes(response.status) ? 'transient' : 'unknown';
+      headers.set(CHAT_ERROR_HEADER, JSON.stringify(toChatErrorMetadata({
+        kind, retryable: kind === 'rate_limit' || kind === 'transient',
+      }, traceFor(request))));
+    }
     // Re-wrap rather than mutate: streamed/cached Responses can expose immutable
     // headers on edge runtimes. The body stream itself is passed through.
     return new Response(response.body, {
@@ -1746,6 +1783,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // distinguishable from a genuine bug at a glance, and carrying the trace
       // id so it joins the rest of the turn's lines.
       const classified = classifyError(err);
+      if (classified.kind === 'abort' && !request.signal.aborted) {
+        classified.kind = 'transient';
+        classified.retryable = true;
+        classified.message = messageForErrorKind('transient');
+      }
       loggerFor(request).error('request.error', {
         kind: classified.kind,
         retryable: classified.retryable,
@@ -1754,7 +1796,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         path: segments.join('/'),
         ...errorFields(err),
       });
-      return json({ error: 'Internal server error' }, 500);
+      // Preserve the legacy body/status while carrying the actual (allowlisted)
+      // setup/auth/storage failure classification separately for modern clients.
+      return json({ error: 'Internal server error' }, 500, {
+        [CHAT_ERROR_HEADER]: JSON.stringify(toChatErrorMetadata(classified, traceFor(request))),
+      });
     }
   }
 
@@ -1816,9 +1862,9 @@ const GENERIC_STREAM_ERROR_MESSAGE = 'An error occurred while generating the res
 
 // Abort copy. `CLIENT_ABORT_MESSAGE` comes from the taxonomy (kind: 'abort');
 // the timeout variant is handler-local because only the handler knows a
-// wall-clock cap was configured. Both intentionally contain "abort" — the
-// client's error banner hides abort-shaped messages so a stopped turn shows the
-// partial answer instead of an error strip. See `mapStreamError`.
+// wall-clock cap was configured. Preserve both legacy strings; modern clients
+// distinguish a visible transient timeout from a hidden user stop by metadata.
+// See `mapStreamError`.
 const CLIENT_ABORT_MESSAGE = messageForErrorKind('abort');
 const STREAM_TIMEOUT_ABORT_MESSAGE = 'The response timed out and was aborted.';
 

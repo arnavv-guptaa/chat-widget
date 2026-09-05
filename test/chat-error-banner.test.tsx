@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatErrorBanner } from '../src/components/chat-error-banner';
+import { createChatErrorRecovery } from '../src/utils/chat-error-recovery';
+import { messageForErrorKind, type ChatErrorKind } from '../src/utils/chat-error-protocol';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('ChatErrorBanner taxonomy messages', () => {
   it.each([
@@ -130,5 +132,80 @@ describe('ChatErrorBanner taxonomy messages', () => {
   it('does not hide upstream failures that merely contain the word aborted', () => {
     render(<ChatErrorBanner error={new Error('request was aborted by the upstream gateway')} />);
     expect(screen.getByRole('alert')).toBeTruthy();
+  });
+});
+
+function typedError(kind: ChatErrorKind, retryable = false, retryAfterMs?: number) {
+  const seam = createChatErrorRecovery();
+  const error = new Error('Translated/custom copy with sk-test-banner-secret');
+  seam.onData({ type: 'data-chat-error', transient: true, data: {
+    version: 1, kind, retryable, retryAfterMs,
+    traceId: 'opaque-reference-1234', message: 'secret extra field',
+  } });
+  seam.onError(error);
+  return error;
+}
+
+describe('ChatErrorBanner typed recovery', () => {
+  it.each<ChatErrorKind>(['auth', 'content_policy', 'prompt', 'model', 'tool', 'unknown'])('uses %s independently of human wording and disallows blind retry', (kind) => {
+    const onRetry = vi.fn();
+    const onDismiss = vi.fn();
+    const { container } = render(<ChatErrorBanner error={typedError(kind, true)} onRetry={onRetry} onDismiss={onDismiss} />);
+    expect(screen.getByRole('alert').textContent).toBe(messageForErrorKind(kind));
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(container.innerHTML).not.toMatch(/secret|opaque-reference/);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('suppresses typed aborts even when legacy copy does not say abort', () => {
+    const { container } = render(<ChatErrorBanner error={typedError('abort')} />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('does not let abort-like text hide a typed transient failure', () => {
+    const error = typedError('transient', true);
+    error.message = 'The response was aborted.';
+    render(<ChatErrorBanner error={error} />);
+    expect(screen.getByRole('alert').textContent).toBe(messageForErrorKind('transient'));
+  });
+
+  it('honors a retry delay across rerenders and only retries on an explicit click', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const error = typedError('rate_limit', true, 2000);
+    const onRetry = vi.fn();
+    const { rerender } = render(<ChatErrorBanner error={error} onRetry={onRetry} />);
+    const button = screen.getByRole('button', { name: 'Try again' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onRetry).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1000); });
+    rerender(<ChatErrorBanner error={error} onRetry={onRetry} />);
+    expect(button.disabled).toBe(true);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(button.disabled).toBe(false);
+    expect(onRetry).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('never lets metadata override canRetry or retryable:false', () => {
+    const { rerender } = render(<ChatErrorBanner error={typedError('transient', true)} canRetry={false} onRetry={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    rerender(<ChatErrorBanner error={typedError('transient', false)} onRetry={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('falls back safely for unknown versions rather than rendering metadata text', () => {
+    const seam = createChatErrorRecovery();
+    const error = new Error('unknown secret');
+    seam.onData({ type: 'data-chat-error', transient: true, data: { version: 999, kind: 'auth', retryable: false, message: 'secret' } });
+    seam.onError(error);
+    const { container } = render(<ChatErrorBanner error={error} onRetry={vi.fn()} />);
+    expect(screen.getByRole('alert').textContent).toContain('Something went wrong');
+    expect(container.innerHTML).not.toContain('secret');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 });
