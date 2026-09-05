@@ -80,6 +80,9 @@ export async function validateChatRequest(value: unknown): Promise<ValidationRes
     }
     for (const part of message.parts) {
       if (!isRecord(part)) return { ok: false, error: 'Invalid message parts' };
+      // Reserved server-to-client transient control data is never valid history.
+      // Reject forged/replayed copies before persistence or model conversion.
+      if (part.type === 'data-chat-error') return { ok: false, error: 'Invalid message parts' };
       // storagePath is a widget extension, absent from the SDK schema. Preserve
       // it for re-signing/deletion, but never interpret it as proof of ownership.
       if (part.type === 'file' && part.storagePath !== undefined &&

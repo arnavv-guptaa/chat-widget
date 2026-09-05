@@ -466,8 +466,13 @@ export interface CreateChatHandlerOptions {
   onFeedback?: (feedback: FeedbackEvent, ctx: ChatRequestContext) => void | Promise<void>;
 
   /**
-   * Map a stream error to the user-facing string the widget shows. Lets you
-   * downgrade benign post-finish teardown noise and localise messages.
+   * Map a stream error to the legacy SDK errorText string. Existing callback
+   * arguments and return values are preserved. Only return safe public copy:
+   * raw provider errors may contain credentials or prompt fragments.
+   *
+   * The widget now uses versioned data-chat-error metadata for guidance and
+   * retry controls, independently of this string. Custom clients can still
+   * display/localise your errorText; the built-in banner uses package copy.
    *
    * The second argument is the handler's own classification of the failure —
    * a discriminated `kind` (`rate_limit`, `auth`, `transient`,
@@ -477,13 +482,9 @@ export interface CreateChatHandlerOptions {
    * regexing provider prose:
    *
    * ```ts
-   * onError: (error, { kind, retryAfterMs }) => {
-   *   if (kind === 'rate_limit') {
-   *     scheduleRetry(retryAfterMs ?? 5_000);
-   *     return 'One moment — retrying.';
-   *   }
+   * onError: (error, { kind }) => {
    *   if (kind === 'auth') { pageOncall(error); }
-   *   return undefined as never; // fall through to the built-in copy
+   *   return ''; // fall through to the built-in copy
    * }
    * ```
    *
@@ -492,7 +493,9 @@ export interface CreateChatHandlerOptions {
    * override tone, or to fire a side effect.
    *
    * Additive and backward compatible: an existing `(error) => string` handler
-   * keeps working untouched.
+   * keeps working untouched. Throwing from this hook falls back to safe copy.
+   * Retry hints do not authorize automatic replay: tools may already have
+   * performed side effects. The built-in UI only offers manual retry.
    *
    * Note: providing this does NOT silence the server-side error log. Stream
    * errors are logged by default (see `logErrors`) so a production failure

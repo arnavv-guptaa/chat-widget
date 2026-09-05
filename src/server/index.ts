@@ -28,6 +28,8 @@ export { ConversationOwnershipError } from './chat-store';
 // job, or a non-chat call path — instead of writing a second, divergent one.
 export type { ChatErrorKind, ClassifiedChatError } from './errors';
 export { classifyError, isAbortError, messageForErrorKind } from './errors';
+export { CHAT_ERROR_VERSION, CHAT_ERROR_DATA_TYPE, CHAT_ERROR_HEADER, parseChatErrorMetadata, parseChatErrorHeader, toChatErrorMetadata } from '../utils/chat-error-protocol';
+export type { ChatErrorMetadata } from '../utils/chat-error-protocol';
 
 // Observability. `ChatLogger` is the seam for routing chat telemetry into an
 // existing logging stack; the rest is exported so an adapter (OTel, Pino,
