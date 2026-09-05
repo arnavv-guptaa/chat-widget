@@ -105,7 +105,7 @@ Published configuration, conversation history, private attachments, knowledge re
 
 Use `createChatHandler` with the included Drizzle, Supabase, or custom `ChatStore` and `StorageAdapter` implementations. The widget and server-side identity boundary stay the same; you supply the model, database, storage, prompt, and tools.
 
-[Bring your own database](https://mordn.com/docs/quickstart/self-host) · [Backend guide](https://mordn.com/docs/backends/overview)
+[Bring your own database](https://mordn.com/docs/quickstart/self-host) · [Backend guide](https://mordn.com/docs/backends/overview) · [Self-hosted schema and migration notes](./docs/self-hosted-migrations.md)
 
 ## Documentation
 
