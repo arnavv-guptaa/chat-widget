@@ -58,6 +58,7 @@ import {
   type TurnLogger,
 } from './observability';
 import { normalizeUsage } from './usage';
+import { createToolObservability } from './tool-observability';
 import type { StorageAdapter } from './storage-adapter';
 import type {
   BuiltTools,
@@ -435,9 +436,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const ctx = await authenticate(request, conversationId);
     if (!ctx) return new Response('Unauthorized', { status: 401 });
 
-    // Every line for this turn carries the same traceId + userId +
-    // conversationId from here on, so one grep reconstructs the whole turn.
-    const turnLog = loggerFor(request, { userId: ctx.userId, conversationId });
+    // A trace may be shared across requests. Mint a separate turn id so tool
+    // calls from concurrent turns in the same conversation remain distinguishable.
+    const turnLog = loggerFor(request, { userId: ctx.userId, conversationId, turnId: generateId() });
 
     // Resolve the complete runtime config before persistence or resource
     // allocation. Production ignores body.config; preview trust is explicit.
@@ -871,6 +872,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       system,
       messages: modelMessages,
       tools,
+      // Observe SDK-owned execution, including approved calls and generators;
+      // leave execute, metadata, approval and input callbacks untouched.
+      ...createToolObservability(turnLog, tools),
       // Client-abort plus the optional `streamTimeoutMs` wall-clock cap — see
       // `streamAbort` above.
       // Passing this is what makes Stop actually stop the upstream spend.
