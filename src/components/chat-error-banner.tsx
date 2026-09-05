@@ -63,8 +63,8 @@ export function ChatErrorBanner({
   // with their own messages and still render below.
   if (error.name === "AbortError" || error.message === "The response was aborted.") return null;
 
-  // Default message kept short — the raw Error.message can be a wall of
-  // text from the network layer. We only surface it on hover via title.
+  // Only package-owned safe text may reach the DOM. Raw network/provider
+  // messages can contain secrets, including when exposed via a tooltip.
   const friendly = friendlyErrorMessage(error);
   const retryable = !NON_RETRYABLE_SERVER_MESSAGES.has(error.message ?? "");
 
@@ -76,7 +76,6 @@ export function ChatErrorBanner({
         backgroundColor: "hsl(var(--chat-surface))",
         border: "1px solid hsl(var(--chat-border-soft))",
       }}
-      title={error.message}
     >
       <AlertTriangleIcon
         className="size-3.5 flex-shrink-0"
