@@ -47,6 +47,7 @@ import {
 } from 'ai';
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
+import { HostedHistoryError } from './stores/hosted/history';
 import { validateChatRequest } from './chat-request';
 import { hasAssistantContent } from './assistant-content';
 import { classifyError, isAbortError, messageForErrorKind } from './errors';
@@ -1373,7 +1374,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // equal timestamps at a page boundary otherwise create permanent gaps.
     const url = new URL(request.url);
     const limitParam = Number(url.searchParams.get('limit'));
-    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 30;
+    const limit = Number.isFinite(limitParam) && limitParam >= 1 ? Math.min(Math.floor(limitParam), 100) : 30;
     const cursorParam = url.searchParams.get('cursor');
     const legacyBeforeParam = url.searchParams.get('before');
     let before: Date | undefined;
@@ -1396,11 +1397,19 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       if (Number.isNaN(before.getTime())) return json({ error: 'Invalid history cursor' }, 400);
     }
 
-    const page = await store.listMessages(conversationId, {
-      limit: limit + 1,
-      before,
-      beforeId,
-    });
+    let page: Awaited<ReturnType<ChatStore['listMessages']>>;
+    try {
+      page = await store.listMessages(conversationId, {
+        limit: limit + 1,
+        before,
+        beforeId,
+      });
+    } catch (error) {
+      if (!(error instanceof HostedHistoryError)) throw error;
+      // Unsupported/rolling-back hosted APIs must not masquerade as exhausted
+      // history. Keep the existing page intact and let the caller retry later.
+      return jsonNoStore({ error: 'Hosted history is temporarily unavailable', code: error.code }, 503);
+    }
     const hasMore = page.length > limit;
     const ordered = hasMore ? page.slice(page.length - limit) : page;
     const oldest = ordered[0];
