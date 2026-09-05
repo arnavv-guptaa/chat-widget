@@ -60,9 +60,18 @@ export interface ChatWidgetProps {
    * or `null` when nobody is signed in. Sent as `Authorization: Bearer …` and
    * verified server-side against the agent's configured JWKS — the browser
    * never asserts an id, it only presents a token somebody else signed.
-   * Re-resolved every few minutes so expiring tokens stay fresh.
+   * Re-resolved every few minutes so expiring tokens stay fresh. Callback
+   * identity is ignored; signal login/logout/account switches with
+   * `authSessionKey` or the ref's `resetAuth()` after updating your session.
    */
   getUserToken?: () => Promise<string | null | undefined> | string | null | undefined;
+  /**
+   * Hosted mode only: local auth lifecycle marker (e.g. an incrementing counter).
+   * Change on login, logout, or account switch to drop stale auth and mounted
+   * chat state before resolving the new token. NOT identity: never sent to the
+   * server or used as a storage scope. Stable across same-session token refreshes.
+   */
+  authSessionKey?: string | number | null;
   /**
    * Hosted mode only: allow unauthenticated visitors. When no token is
    * available the widget sends a persisted random visitor id instead, and the
@@ -102,6 +111,7 @@ export interface ChatWidgetProps {
  * `config.client.allowAutoReopen` so a dismissed panel is never
  * re-surfaced without explicit opt-in; closing is always allowed. Only
  * meaningful in the `popup` layout (inline/page are always-open surfaces).
+ * `resetAuth()` applies to hosted mode in every layout.
  */
 export interface ChatWidgetHandle {
   /** Open the panel. No-op unless `allowAutoReopen` is set. */
@@ -112,6 +122,12 @@ export interface ChatWidgetHandle {
   toggle: () => void;
   /** Whether the panel is currently open. */
   readonly isOpen: boolean;
+  /**
+   * Hosted mode only: drop auth/bootstrap/mounted chat state and resolve the
+   * latest getUserToken again. Call AFTER updating the host's session source.
+   * Equivalent to changing authSessionKey; does not erase persisted chat data.
+   */
+  resetAuth: () => void;
 }
 
 export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function ChatWidget({
@@ -121,6 +137,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   requestCredentials: requestCredentialsProp,
   publishableKey,
   getUserToken,
+  authSessionKey,
   anonymous,
   hostedBaseUrl,
   conversationId,
@@ -149,11 +166,22 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   }
   const apiBase = (hostedKey ? hostedApiBase(hostedKey, hostedBaseUrl) : apiBaseProp ?? '/api/chat').replace(/\/+$/, '');
   const requestCredentials: RequestCredentials | undefined = hostedMode ? 'omit' : requestCredentialsProp;
-  const hostedAuth = useHostedAuth({ enabled: hostedMode, getUserToken, anonymous });
+  const hostedAuth = useHostedAuth({
+    enabled: hostedMode,
+    getUserToken: hostedMode ? getUserToken : undefined,
+    anonymous: hostedMode ? anonymous : false,
+    // Include the destination so a changed key/origin cannot reuse old auth.
+    sessionKey: hostedMode ? JSON.stringify([apiBase, authSessionKey ?? null]) : null,
+  });
+  const resetAuth = useCallback(() => {
+    if (hostedMode) hostedAuth.reset();
+  }, [hostedMode, hostedAuth.reset]);
 
-  const [bootstrap, setBootstrap] = useState<AgentBootstrap | null>(null);
-  const [bootstrapReady, setBootstrapReady] = useState(false);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapResult, setBootstrapResult] = useState<{
+    request: object;
+    value: AgentBootstrap | null;
+    error: string | null;
+  } | null>(null);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   // Host headers plus (hosted mode) the Authorization / visitor header, value-keyed
   // so a token refresh re-issues bootstrap and updates the transport headers.
@@ -161,18 +189,25 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   const stableHeaders = useMemo(
     () => (hostedMode ? { ...(headers ?? {}), ...hostedAuth.headers } : headers),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- value-keyed on purpose
-    [headersKey],
+    [headersKey, hostedMode],
   );
   const hostedAuthReady = hostedAuth.ready;
+  const bootstrapRequest = useMemo(() => ({}), [
+    apiBase, stableHeaders, requestCredentials, bootstrapAttempt, hostedAuthReady, hostedAuth.session,
+  ]);
+  // Never render/persist the previous session's scope while auth or bootstrap
+  // is changing — effects run too late to be the visibility boundary.
+  const bootstrapCurrent = hostedAuthReady && bootstrapResult?.request === bootstrapRequest;
+  const bootstrap = bootstrapCurrent ? bootstrapResult.value : null;
+  const bootstrapError = bootstrapCurrent ? bootstrapResult.error : null;
+  const bootstrapReady = bootstrapCurrent;
 
   useEffect(() => {
-    // Hosted mode: wait for the first token resolution so bootstrap never fires
-    // as an anonymous request for a user who is actually signed in.
+    // Hosted mode: wait for THIS session, not only the initial mount, so a
+    // transition never bootstraps with the previous token or as a visitor.
     if (!hostedAuthReady) return;
     const controller = new AbortController();
-    setBootstrap(null);
-    setBootstrapError(null);
-    setBootstrapReady(false);
+    setBootstrapResult(null);
     fetch(`${apiBase}/bootstrap`, {
       method: 'GET',
       headers: stableHeaders,
@@ -201,19 +236,21 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
         }
         return read.value;
       })
-      .then((value) => setBootstrap(value))
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        setBootstrap(null);
-        setBootstrapError(
-          error instanceof Error ? error.message : 'bootstrap failed',
-        );
+      .then((value) => {
+        // Abort alone is insufficient: a response body/custom fetch may finish
+        // after cleanup, or ignore the signal altogether.
+        if (!controller.signal.aborted) setBootstrapResult({ request: bootstrapRequest, value, error: null });
       })
-      .finally(() => {
-        if (!controller.signal.aborted) setBootstrapReady(true);
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setBootstrapResult({
+          request: bootstrapRequest,
+          value: null,
+          error: error instanceof Error ? error.message : 'bootstrap failed',
+        });
       });
     return () => controller.abort();
-  }, [apiBase, stableHeaders, requestCredentials, bootstrapAttempt, hostedAuthReady]);
+  }, [apiBase, stableHeaders, requestCredentials, bootstrapRequest, hostedAuthReady]);
 
   const client = mergeAgentClientConfig(bootstrap?.client, explicitConfig?.client);
   const { greeting, subGreeting, assistantName, theme, features, display, starterPrompts, capabilitiesPrompt, feedback } = client;
@@ -311,8 +348,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
       close: () => setOpenState(false),
       toggle: () => setOpenState(!isOpen, { programmatic: !isOpen }),
       isOpen,
+      resetAuth,
     }),
-    [setOpenState, isOpen]
+    [setOpenState, isOpen, resetAuth]
   );
 
   // Page-chrome open triggers (#193): keyboard shortcut, `data-mordn-chat-*`
