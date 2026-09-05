@@ -17,13 +17,15 @@ The runbook for cutting a release. Written for 0.12.0 but reusable — it exists
 
 ## 2. Publish
 
-```bash
-npm run build        # prepublishOnly runs it again; belt and braces
-npm publish          # publishes with files: ["dist", ...] — verify the pack list first with: npm pack --dry-run
-git tag v0.12.0 && git push origin v0.12.0
-```
+Releases are cut by **merging a release PR** — no local `npm publish`, no personal token, no manual tag. The workflow at `.github/workflows/release.yml` publishes through npm Trusted Publishing (GitHub OIDC) and then creates the tag and GitHub Release itself.
 
-Create the GitHub release from the tag, pasting this version's CHANGELOG section.
+1. Open a PR on a `release/v<version>` branch containing exactly two changes: `package.json` `version` bumped, and the `CHANGELOG.md` `UNRELEASED` heading stamped to `## <version> — YYYY-MM-DD` (run `npm run config:baseline` too if the release added configuration fields).
+2. CI (`ci.yml`) must be green on the PR. Squash-merge it.
+3. The `Release` workflow triggers on the `package.json` change on `main`, sees that `v<version>` is untagged, runs typecheck + tests + build, publishes with provenance, then pushes the `v<version>` tag and creates the GitHub Release from that version's CHANGELOG section. A failed publish leaves no tag behind; fix forward and the next push to `main` re-attempts the same version.
+
+Guards built into the workflow: it refuses to run if `v<version>` already exists, and if `CHANGELOG.md` has no dated section for the version.
+
+**Escape hatches.** Pushing a `v<version>` tag by hand still publishes (the tag must equal `package.json`). `workflow_dispatch` re-runs the release for whatever version `main` currently declares, e.g. after a transient registry failure. Never `npm publish` from a laptop: it bypasses provenance and the version guard.
 
 ## 3. Post-publish verification
 
