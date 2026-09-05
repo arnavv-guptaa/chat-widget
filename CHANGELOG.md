@@ -2,6 +2,27 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.24.0 — 2026-09-05
+
+### Breaking
+- The AI SDK peer minimum is now `ai@^6.0.175`, the reviewed floor for tool execution lifecycle hooks. Older6.0.x builds do not expose the required hooks; upgrade the peer before adopting this release.
+- CLI scaffolding no longer offers to overwrite existing files. Conflicts are skipped/refused with a nonzero exit code; merge existing integrations manually.
+- `data-chat-error` is reserved transient control metadata. Browser histories containing it are rejected; custom data renderers cannot claim it.
+
+### Added
+- **Custom business-result cards:** host-code-only `messagePartRenderers` renders validated custom `data-*` message parts with message/role/streaming context. Normal messages, assistant transcripts, initial/history content and replay share the same renderer path. Non-transient custom data-only assistant output is eligible for persistence. Reserved control parts and transient events are excluded. React renderer functions never enter published agent configuration. Includes an account-lookup example; producers still own authorized data emission.
+- **Typed error recovery:** v1 metadata travels through transient stream events and `x-chat-error` HTTP headers, with legacy safe error text preserved. Each response owns its recovery state so a stale aborted response cannot label a new turn. Rate-limit delay only enables manual Retry; it never automatically replays actions. User Stop stays quiet; wall-clock timeout is a visible transient error.
+- **Actual tool telemetry:** SDK-owned server execution emits correlated start/finish/error, duration and outcome without arguments/results/provider text. Provider/external calls are observation-only, never invented execution success. Generator and approval behavior remains owned by the SDK.
+- **Hosted own-runtime CLI:** `npx @mordn/chat-widget init --hosted` generates a Next.js catch-all route, fail-closed server-session stub, client component and separate environment reference without database scaffolding or implicit installs. Supports `app` and `src/app`; existing auth/secrets/layouts are not overwritten. Publish an agent, implement verified auth and supply gateway/model credentials before serving chat.
+
+### Fixed
+- Mermaid diagrams hold one stable accessible placeholder while streaming, then parse/render on settle. Cancelled lazy parse/render work cannot insert stale SVG. Invalid diagrams fall back to inspectable escaped code; strict containment stays enabled.
+- Error metadata cannot become persisted transcript/model content. Unknown protocol versions retain safe legacy fallback behavior.
+
+### Verification and scope
+- Regression suites cover streaming/status transitions, SSR, containment, per-response error isolation, SDK timeout behavior, tool lifecycle, custom-part persistence/replay and CLI conflicts.
+- No configuration or database schema migration. This release does not provide durable background generation, server action authorization, quota enforcement or a full headless chat controller.
+
 ## 0.23.0 — 2026-09-05
 
 ### Breaking
