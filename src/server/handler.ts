@@ -1335,20 +1335,20 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const storage = resolveStorage(ctx.userId);
 
     if (method === 'DELETE') {
-      // Purge attachment blobs BEFORE deleting the conversation rows, so a
-      // successful delete never orphans private files in the bucket (storage
-      // cost + a GDPR-erasure gap). Best-effort and strictly user-scoped:
-      // `listMessages` is bound to the verified user (a foreign conversation
-      // yields nothing) and `storage.remove()` refuses paths outside this user's
-      // prefix — so this can only ever delete the caller's own attachments. A
-      // purge failure is logged but never blocks the delete (the primary intent).
+      // Missing and foreign conversations are indistinguishable, and neither
+      // may trigger a storage purge. The store is bound to the verified user.
+      const conversation = await store.getConversation(conversationId);
+      if (!conversation) return new Response(null, { status: 404 });
+
+      // Purge before deleting rows: a failed purge must retain the message
+      // paths so the caller can retry. Wait for every removal to settle before
+      // surfacing a failure through the dispatcher's logged 500 response.
+      // Some blobs may already be gone; StorageAdapter.remove is idempotent.
       if (storage) {
-        try {
-          const paths = await collectAttachmentPaths(store, conversationId);
-          if (paths.length) await Promise.allSettled(paths.map((p) => storage.remove(p)));
-        } catch (err) {
-          console.error('[chat-widget] attachment purge on delete failed:', err);
-        }
+        const paths = await collectAttachmentPaths(store, conversationId);
+        const results = await Promise.allSettled(paths.map(async (p) => storage.remove(p)));
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
       }
       const deleted = await store.deleteConversation(conversationId);
       return new Response(null, { status: deleted ? 204 : 404 });
