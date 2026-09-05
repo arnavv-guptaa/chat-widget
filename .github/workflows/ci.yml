@@ -14,6 +14,7 @@ name: CI
 # RSC/Turbopack resolution that local `moduleResolution: bundler` never does.
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
