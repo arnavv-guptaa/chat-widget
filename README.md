@@ -88,6 +88,8 @@ Use `createChatHandler` with the included Drizzle, Supabase, or custom `ChatStor
 
 ## Documentation
 
+Using the direct hosted runtime with `publishableKey` and `getUserToken`? See the [hosted auth lifecycle contract](./docs/hosted-auth-lifecycle.md) for login, logout, and account-switch handling.
+
 | Build | Operate | Reference |
 | --- | --- | --- |
 | [Quickstart](https://mordn.com/docs/quickstart) | [Production readiness](https://mordn.com/docs/guides/production-readiness) | [ChatWidget API](https://mordn.com/docs/api/chat-widget) |

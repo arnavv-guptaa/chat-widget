@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import {
   HOSTED_BASE_URL,
   VISITOR_HEADER,
@@ -43,12 +43,25 @@ describe('visitor id', () => {
   });
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const REFRESH_MS = 4 * 60 * 1000;
+
 describe('useHostedAuth', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('is inert (empty headers, ready) when hosted mode is off', () => {
     const { result } = renderHook(() => useHostedAuth({ enabled: false, getUserToken: () => 'tok' }));
@@ -93,6 +106,162 @@ describe('useHostedAuth', () => {
     expect(result.current.headers).toEqual({});
     expect(error).toHaveBeenCalled();
     error.mockRestore();
+  });
+
+  it('masks the old session in the transition render, even with a stable getter', async () => {
+    let token: string | Promise<string> = 'alice';
+    const getUserToken = vi.fn(() => token);
+    const seen: Array<{ key: number; ready: boolean; headers: Record<string, string> }> = [];
+    const { result, rerender } = renderHook(({ key }) => {
+      const auth = useHostedAuth({ enabled: true, getUserToken, anonymous: true, sessionKey: key });
+      seen.push({ key, ready: auth.ready, headers: auth.headers });
+      return auth;
+    }, { initialProps: { key: 0 } });
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer alice'));
+    const next = deferred<string>();
+    token = next.promise;
+    rerender({ key: 1 });
+    expect(seen.find((state) => state.key === 1)).toEqual({ key: 1, ready: false, headers: {} });
+    expect(result.current.ready).toBe(false);
+    expect(result.current.headers).toEqual({}); // not even a visitor while pending
+    await act(async () => next.resolve('bob'));
+    expect(result.current.headers).toEqual({ Authorization: 'Bearer bob' });
+    expect(getUserToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('reset isolates logout from an older pending resolution', async () => {
+    const old = deferred<string>();
+    let token: string | null | Promise<string> = 'alice';
+    const getUserToken = () => token;
+    const { result } = renderHook(() => useHostedAuth({ enabled: true, getUserToken, anonymous: true }));
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer alice'));
+    token = old.promise;
+    await act(async () => { vi.advanceTimersByTime(REFRESH_MS); });
+    token = null;
+    const session = result.current.session;
+    await act(async () => result.current.reset());
+    expect(result.current.session).not.toBe(session);
+    const visitorHeaders = result.current.headers;
+    expect(visitorHeaders[VISITOR_HEADER]).toBeTruthy();
+    await act(async () => old.resolve('stale-alice'));
+    expect(result.current.headers).toEqual(visitorHeaders);
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('stays unready while reset is pending and ignores an earlier rejection', async () => {
+    const stale = deferred<string>();
+    const next = deferred<string>();
+    const getUserToken = vi.fn().mockReturnValueOnce(stale.promise).mockReturnValueOnce(next.promise);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = renderHook(() => useHostedAuth({ enabled: true, getUserToken }));
+    act(() => result.current.reset());
+    await act(async () => stale.reject(new Error('stale error')));
+    expect(result.current.ready).toBe(false);
+    expect(result.current.headers).toEqual({});
+    expect(error).not.toHaveBeenCalled();
+    await act(async () => next.resolve('new'));
+    expect(result.current.headers.Authorization).toBe('Bearer new');
+  });
+
+  it('clears disabling/removal and resolves again on enabling/adding a getter', async () => {
+    const stale = deferred<string>();
+    const next = deferred<string>();
+    const getUserToken = vi.fn().mockReturnValueOnce(stale.promise).mockReturnValueOnce(next.promise);
+    const { result, rerender } = renderHook(
+      ({ enabled, getter }: { enabled: boolean; getter?: typeof getUserToken }) =>
+        useHostedAuth({ enabled, getUserToken: getter }),
+      { initialProps: { enabled: true, getter: getUserToken } },
+    );
+    rerender({ enabled: false, getter: getUserToken });
+    expect(result.current.headers).toEqual({});
+    expect(result.current.ready).toBe(true);
+    await act(async () => stale.resolve('old'));
+    rerender({ enabled: true, getter: getUserToken });
+    expect(result.current.ready).toBe(false);
+    expect(result.current.headers).toEqual({});
+    await act(async () => next.resolve('current'));
+    expect(result.current.headers.Authorization).toBe('Bearer current');
+    rerender({ enabled: true, getter: undefined });
+    expect(result.current.headers).toEqual({});
+    expect(result.current.ready).toBe(true);
+    getUserToken.mockReturnValue('added');
+    rerender({ enabled: true, getter: getUserToken });
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer added'));
+    expect(getUserToken).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not re-resolve inline callbacks on render, but refresh uses the latest getter', async () => {
+    const called = vi.fn();
+    const { result, rerender } = renderHook(({ token }) => useHostedAuth({
+      enabled: true,
+      getUserToken: () => { called(token); return token; },
+    }), { initialProps: { token: 'first' } });
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer first'));
+    const session = result.current.session;
+    rerender({ token: 'latest' });
+    expect(called).toHaveBeenCalledTimes(1);
+    expect(result.current.headers.Authorization).toBe('Bearer first');
+    await act(async () => result.current.refresh());
+    expect(called).toHaveBeenCalledTimes(2);
+    expect(called).toHaveBeenLastCalledWith('latest');
+    expect(result.current.headers.Authorization).toBe('Bearer latest');
+    expect(result.current.session).toBe(session);
+  });
+
+  it('only the latest overlapping interval resolution may commit', async () => {
+    const older = deferred<string>();
+    const newer = deferred<string | null>();
+    const getUserToken = vi.fn()
+      .mockReturnValueOnce('first')
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+    const { result } = renderHook(() => useHostedAuth({ enabled: true, getUserToken }));
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer first'));
+    await act(async () => { vi.advanceTimersByTime(REFRESH_MS * 2); });
+    await act(async () => newer.resolve(null));
+    expect(result.current.headers).toEqual({});
+    await act(async () => older.resolve('obsolete'));
+    expect(result.current.headers).toEqual({});
+  });
+
+  it('ignores an older interval rejection after a newer success', async () => {
+    const older = deferred<string>();
+    const newer = deferred<string>();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const getUserToken = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const { result } = renderHook(() => useHostedAuth({ enabled: true, getUserToken }));
+    await act(async () => { vi.advanceTimersByTime(REFRESH_MS); });
+    await act(async () => newer.resolve('latest'));
+    await act(async () => older.reject(new Error('obsolete')));
+    expect(result.current.headers.Authorization).toBe('Bearer latest');
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('refresh invalidates pending work and retains same-session auth until it settles', async () => {
+    const older = deferred<string>();
+    const newer = deferred<string>();
+    const getUserToken = vi.fn().mockReturnValueOnce('first').mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const { result } = renderHook(() => useHostedAuth({ enabled: true, getUserToken }));
+    await waitFor(() => expect(result.current.headers.Authorization).toBe('Bearer first'));
+    await act(async () => { vi.advanceTimersByTime(REFRESH_MS); });
+    act(() => result.current.refresh());
+    await act(async () => older.resolve('obsolete'));
+    expect(result.current.headers.Authorization).toBe('Bearer first');
+    expect(result.current.ready).toBe(true);
+    await act(async () => newer.resolve('refreshed'));
+    expect(result.current.headers.Authorization).toBe('Bearer refreshed');
+  });
+
+  it('cancels pending work and removes the interval on unmount', async () => {
+    const pending = deferred<string>();
+    const getUserToken = vi.fn(() => pending.promise);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { unmount } = renderHook(() => useHostedAuth({ enabled: true, getUserToken }));
+    unmount();
+    await act(async () => pending.reject(new Error('after unmount')));
+    await act(async () => { vi.advanceTimersByTime(REFRESH_MS * 2); });
+    expect(getUserToken).toHaveBeenCalledOnce();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('re-resolves the token on the refresh interval', async () => {

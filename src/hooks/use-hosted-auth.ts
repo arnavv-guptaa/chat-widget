@@ -59,46 +59,66 @@ export function getOrCreateVisitorId(): string {
 }
 
 export interface HostedAuthState {
-  /** Headers to merge into every request. Empty when hosted mode is off. */
+  /** Headers to merge into every request. Empty when off or resolving a new session. */
   headers: Record<string, string>;
-  /** False until the first token resolution settles — bootstrap waits for it. */
+  /** False until this session's token resolution settles — bootstrap waits for it. */
   ready: boolean;
-  /** Force a re-resolution (call after a 401). */
+  /** Re-resolve within the SAME session, retaining its headers while pending. */
   refresh: () => void;
+  /** Discard current auth and re-resolve after login, logout, or account switch. */
+  reset: () => void;
+  /** Local lifecycle boundary for bootstrap; never identity or a storage scope. */
+  session: object;
 }
 
 export function useHostedAuth(options: {
   enabled: boolean;
   getUserToken?: GetUserToken;
   anonymous?: boolean;
+  /** Change on auth transitions; callback identity deliberately does not trigger resolution. */
+  sessionKey?: string | number | null;
 }): HostedAuthState {
-  const { enabled, getUserToken, anonymous = false } = options;
-  const [token, setToken] = useState<string | null>(null);
-  const [ready, setReady] = useState(!enabled || !getUserToken);
+  const { enabled, getUserToken, anonymous = false, sessionKey } = options;
   const [tick, setTick] = useState(0);
+  const [resetTick, setResetTick] = useState(0);
+  const hasGetter = !!getUserToken;
+  // A changed boundary hides old headers/ready in the render itself, before
+  // effect cleanup. Adding/removing a getter and disabling are transitions too.
+  const session = useMemo(() => ({}), [enabled, hasGetter, anonymous, sessionKey, resetTick]);
+  const [resolved, setResolved] = useState<{ session: object; token: string | null } | null>(null);
   const getTokenRef = useRef(getUserToken);
   getTokenRef.current = getUserToken;
+  const requestRef = useRef(0);
 
-  const refresh = useCallback(() => setTick((n) => n + 1), []);
+  const refresh = useCallback(() => {
+    // Invalidate immediately, including promises settling before effect cleanup.
+    requestRef.current += 1;
+    setTick((n) => n + 1);
+  }, []);
+  const reset = useCallback(() => {
+    requestRef.current += 1;
+    setResetTick((n) => n + 1);
+  }, []);
 
   useEffect(() => {
-    if (!enabled || !getTokenRef.current) {
-      setToken(null);
-      setReady(true);
+    if (!enabled || !hasGetter) {
+      setResolved(null);
       return;
     }
     let cancelled = false;
     const resolve = async () => {
+      // Intervals can overlap. Only the latest STARTED resolution may commit,
+      // including errors; an older success must not resurrect a logged-out user.
+      const request = ++requestRef.current;
+      const current = () => !cancelled && request === requestRef.current;
       try {
         const value = await getTokenRef.current?.();
-        if (!cancelled) setToken(typeof value === 'string' && value.trim() ? value.trim() : null);
+        if (current()) setResolved({ session, token: typeof value === 'string' && value.trim() ? value.trim() : null });
       } catch (error) {
-        if (!cancelled) {
+        if (current()) {
           console.error('[chat-widget] getUserToken threw; continuing without a user token.', error);
-          setToken(null);
+          setResolved({ session, token: null });
         }
-      } finally {
-        if (!cancelled) setReady(true);
       }
     };
     void resolve();
@@ -107,17 +127,19 @@ export function useHostedAuth(options: {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [enabled, tick]);
+  }, [enabled, hasGetter, session, tick]);
 
+  const ready = !enabled || !hasGetter || resolved?.session === session;
+  const token = enabled && hasGetter && resolved?.session === session ? resolved.token : null;
   const visitorId = useMemo(() => (enabled && anonymous ? getOrCreateVisitorId() : null), [enabled, anonymous]);
 
   const headers = useMemo(() => {
     const out: Record<string, string> = {};
-    if (!enabled) return out;
+    if (!enabled || !ready) return out;
     if (token) out.Authorization = `Bearer ${token}`;
     else if (visitorId) out[VISITOR_HEADER] = visitorId;
     return out;
-  }, [enabled, token, visitorId]);
+  }, [enabled, ready, token, visitorId]);
 
-  return { headers, ready, refresh };
+  return { headers, ready, refresh, reset, session };
 }
