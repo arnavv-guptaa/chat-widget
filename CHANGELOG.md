@@ -2,6 +2,27 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.23.0 — 2026-09-05
+
+### Breaking
+- Chat POST now rejects malformed message envelopes/parts, client system/developer roles, empty-part messages and excessive structural complexity with 400 instead of silently dropping invalid entries or failing later. IDs are limited to 256 characters, histories to 1,000 messages, 1,024 parts per message and 4,096 total parts, with bounded JSON depth/node count. Explicit empty histories remain valid; legacy ID-less messages receive IDs. This validates structure, not the authenticity of client assistant/tool history or approval responses.
+- Configured keyboard shortcuts now yield to inputs, textareas, selects and contenteditable surfaces, including modifier shortcuts. Keyboard shortcuts and data-attribute clicks count as explicit user intent and can reopen a dismissed panel; ref and CustomEvent programmatic opens still honor allowAutoReopen.
+- Conversation DELETE retains rows and returns an error when attachment purge fails, allowing a retry rather than silently losing attachment paths. Partial purge is possible; adapters must support idempotent removal.
+
+### Added
+- Hosted auth lifecycle: optional authSessionKey prop and ref.resetAuth() explicitly invalidate auth/bootstrap/mounted conversation state after login, logout or account switching. Inline token getters remain supported without resolving on every render. Hosts must update their session source first; host-owned initialMessages/conversationId and persisted cache erasure remain the host's responsibility.
+- Regression coverage for request envelopes, auth transitions/stale asynchronous results, explicit open triggers, attachment deletion, error sanitization and schema selection.
+
+### Fixed
+- Stale token/bootstrap resolutions cannot overwrite a newer hosted auth lifecycle.
+- Supabase attachment removal errors now propagate; missing/foreign conversations do not trigger attachment purges.
+- Provider error messages no longer leak through the error banner's title tooltip.
+- Repository Drizzle tooling points at the runtime parts-first schema. New documentation explains consumer migration boundaries; this is not an automatic migration runner or data migration.
+
+### Release engineering
+- Tag publication now depends on the existing full CI workflow at the same commit, including tests, source typecheck, builds, ESM checks and packaged Next.js consumer smoke. Validation runs without publish credentials.
+- No dependency ranges, configuration schema or storage schema were changed by this release. No automatic migration is run.
+
 ## 0.22.1 — 2026-09-03
 
 ### Fixed
