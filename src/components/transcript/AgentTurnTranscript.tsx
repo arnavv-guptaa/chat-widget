@@ -11,7 +11,8 @@ import {
   getToolVerb,
 } from './toolRegistry';
 import { toToolPart, type ToolPart, type TurnState } from './types';
-import type { ActionRenderer, ToolRenderer } from '../../types';
+import type { ActionRenderer, ToolRenderer, MessageDataPart, MessagePartRenderers } from '../../types';
+import { getMessagePartRenderer, isCustomMessageDataPart } from '../../utils/message-part-renderers';
 import { ActionResultCard } from '../action-result-card';
 import type { CitationSource } from '../citation-markers';
 
@@ -30,6 +31,7 @@ interface AgentTurnTranscriptProps {
   turn: TurnState;
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
+  messagePartRenderers?: MessagePartRenderers;
   onToolApproval?: (approvalId: string, approved: boolean) => void;
   /**
    * The message's source-url parts, in Sources-card order. Threaded down to
@@ -44,6 +46,7 @@ const MUTED = { color: 'hsl(var(--chat-text-muted))' } as const;
 type RenderPart =
   | { kind: 'text'; id: string; text: string; idx: number }
   | { kind: 'reasoning'; id: string; text: string; idx: number }
+  | { kind: 'data'; id: string; part: MessageDataPart; idx: number }
   | { kind: 'tool'; id: string; tool: ToolPart; idx: number };
 
 function AgentTurnTranscriptImpl({
@@ -53,6 +56,7 @@ function AgentTurnTranscriptImpl({
   turn,
   toolRenderers,
   actionRenderers,
+  messagePartRenderers,
   onToolApproval,
   sources,
 }: AgentTurnTranscriptProps) {
@@ -74,10 +78,12 @@ function AgentTurnTranscriptImpl({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tp = toToolPart(part as any, `${turnId}-${i}`);
         out.push({ kind: 'tool', id: tp.id, tool: tp, idx: i });
+      } else if (isCustomMessageDataPart(part) && getMessagePartRenderer(part, messagePartRenderers)) {
+        out.push({ kind: 'data', id: `${turnId}-${i}`, part, idx: i });
       }
     });
     return out;
-  }, [message.parts, turnId]);
+  }, [message.parts, turnId, messagePartRenderers]);
 
   const lastIdx = flat.length - 1;
   // NOTE: the pre-first-token planning indicator ("One moment", …) is rendered
@@ -113,6 +119,17 @@ function AgentTurnTranscriptImpl({
               turn={turn}
               isStreaming={isReasoningStreaming}
             />
+          );
+        }
+        if (item.kind === 'data') {
+          return (
+            <Fragment key={item.id}>
+              {getMessagePartRenderer(item.part, messagePartRenderers)?.(item.part, {
+                messageId: message.id,
+                role: message.role,
+                isStreaming: isStreaming && isLast,
+              }) ?? null}
+            </Fragment>
           );
         }
         // tool

@@ -17,6 +17,7 @@ import type {
   ActionRenderer,
   ChatContext,
   InputPlugin,
+  MessagePartRenderers,
   StarterPrompt,
   ToolRenderer,
 } from './types';
@@ -102,6 +103,8 @@ export interface ChatWidgetProps {
   inputPlugins?: InputPlugin[];
   toolRenderers?: Record<string, ToolRenderer>;
   actionRenderers?: Record<string, ActionRenderer>;
+  /** Host React code only: render custom data-* parts, never published JSON config. */
+  messagePartRenderers?: MessagePartRenderers;
   onFeedback?: (feedback: import('./types').FeedbackEvent) => void;
 }
 
@@ -153,6 +156,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
   inputPlugins,
   toolRenderers,
   actionRenderers,
+  messagePartRenderers,
   onFeedback,
 }: ChatWidgetProps, ref) {
   // Hosted runtime mode: a publishable key REPLACES apiBase — the widget talks
@@ -663,10 +667,11 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(function
     inputPlugins,
     toolRenderers,
     actionRenderers,
+    messagePartRenderers,
     feedback,
     streamingThrottleMs: client.streamingThrottleMs,
     onFeedback,
-  }), [apiBase, stableHeaders, requestCredentials, explicitConfig, greeting, subGreeting, assistantName, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, feedback, client.streamingThrottleMs, onFeedback]);
+  }), [apiBase, stableHeaders, requestCredentials, explicitConfig, greeting, subGreeting, assistantName, theme, features, starterPrompts, getStarterPrompts, capabilitiesPrompt, display?.starterPromptsLayout, context, inputPlugins, toolRenderers, actionRenderers, messagePartRenderers, feedback, client.streamingThrottleMs, onFeedback]);
 
   // Default launcher position respects iOS safe areas (home indicator /
   // rounded corners) — a fixed 24px bottom put the FAB under the home

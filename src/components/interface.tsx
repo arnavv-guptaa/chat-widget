@@ -1367,7 +1367,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // calls and text both clear it the instant they render, so a legit tool-using
   // turn doesn't hang the loader.
   const lastMessage = messages.at(-1);
-  const lastAssistantHasContent = hasRenderableAssistantContent(lastMessage);
+  const lastAssistantHasContent = hasRenderableAssistantContent(lastMessage, config?.messagePartRenderers);
   const showThinking =
     status === 'submitted' || (status === 'streaming' && !lastAssistantHasContent);
 
@@ -1376,8 +1376,8 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
   // the slot: its assistant-after-user mt-4 would push the indicator down for one
   // frame. The real assistant row takes over the same slot once content arrives.
   const transcriptMessages = useMemo(
-    () => messagesForTranscript(messages, showThinking),
-    [messages, showThinking],
+    () => messagesForTranscript(messages, showThinking, config?.messagePartRenderers),
+    [messages, showThinking, config?.messagePartRenderers],
   );
 
   // Memoized message list. Each message is a memoized <MessageItem>; the SDK
@@ -1396,6 +1396,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           status={status}
           toolRenderers={config?.toolRenderers}
           actionRenderers={config?.actionRenderers}
+          messagePartRenderers={config?.messagePartRenderers}
           onRegenerate={handleRegenerate}
           onToolApproval={handleToolApproval}
           feedbackEnabled={config?.feedback === true}
@@ -1406,7 +1407,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
           onFeedback={config?.onFeedback}
         />
       )),
-    [transcriptMessages, status, config?.toolRenderers, config?.actionRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
+    [transcriptMessages, status, config?.toolRenderers, config?.actionRenderers, config?.messagePartRenderers, handleRegenerate, handleToolApproval, config?.feedback, activeTabId, config?.apiBase, feedbackHeaders, config?.requestCredentials, config?.onFeedback],
   );
 
   // Seed the planning verb from the last USER message id: it exists from the
