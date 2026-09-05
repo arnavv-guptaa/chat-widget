@@ -89,7 +89,9 @@ The canonical export list is also available in the [API documentation](https://m
 ## CLI
 
 ```bash
-npx @mordn/chat-widget            # scaffold a self-managed backend
+npx @mordn/chat-widget init --hosted # recommended: hosted infrastructure, your runtime
+npx @mordn/chat-widget init --mode hosted # equivalent explicit mode
+npx @mordn/chat-widget            # legacy default: self-managed backend
 npx @mordn/chat-widget ingest     # ingest docs, URLs, or llms.txt
 npx @mordn/chat-widget sync       # re-ingest configured sources idempotently
 npx @mordn/chat-widget status     # inspect per-source chunk counts
@@ -97,7 +99,11 @@ npx @mordn/chat-widget list       # list sources in a namespace
 npx @mordn/chat-widget eval       # run a retrieval evaluation suite
 ```
 
-See the [CLI reference](https://mordn.com/docs/api/cli) for options and examples.
+The package bin is `chat-widget` (`dist/cli/init.js`). `chat-widget init --hosted` and `chat-widget --hosted` use the same setup path; `--mode self-hosted` explicitly selects the legacy default. Use `--help` for mode selection. Unknown or conflicting init flags fail before scaffolding.
+
+Hosted setup requires an existing `app/` or `src/app/`, generates a route + fail-closed auth stub + client component + separate env reference, and refuses output/route conflicts without overwriting files. Both modes preserve existing files and secrets; legacy setup reports skipped files and exits nonzero. No install, migration, or shell command is executed by init.
+
+See [hosted CLI setup](./cli-hosted-setup.md) for exact generated paths, credential/auth prerequisites, and verification steps, or the [CLI reference](https://mordn.com/docs/api/cli) for knowledge-command options and examples.
 
 ## Implementation stack
 

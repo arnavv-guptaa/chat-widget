@@ -34,6 +34,18 @@ npm install @mordn/chat-widget ai @ai-sdk/react
 
 ### 3. Add one server route
 
+**Recommended CLI setup:** from your existing Next.js App Router project root, run:
+
+```bash
+npx @mordn/chat-widget init --hosted
+```
+
+This generates the `createMordnHandler` route, a fail-closed server auth stub, a `MordnChat` client component, and `.env.mordn.example`. It does **not** install dependencies, create a database/storage scaffold, run migrations, or edit existing layouts or secrets. Existing chat routes or output conflicts are refused; merge manually rather than replacing them. `--mode hosted` is equivalent; bare `init` retains the legacy self-managed default. See [CLI setup and prerequisites](./docs/cli-hosted-setup.md).
+
+Before chat can work, implement the generated session verifier (it returns `null` / 401 by default), set `MORDN_CHAT_KEY` **server-side**, configure gateway/model authentication in your deployment, and render `<MordnChat />`. The mordn key authenticates hosted infrastructure, **not model calls**; inference and tools still run on your server.
+
+Or add the route manually using an authentication provider you already configured:
+
 ```ts
 // app/api/chat/[[...chat]]/route.ts
 import { createMordnHandler } from '@mordn/chat-widget/server';

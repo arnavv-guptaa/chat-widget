@@ -1,25 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
 import type { IngestSource } from '../server/knowledge';
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-function ask(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer.toLowerCase());
-    });
-  });
-}
-
-async function confirm(message: string): Promise<boolean> {
-  const answer = await ask(`${message} (y/n): `);
-  return answer === 'y' || answer === 'yes';
-}
+import { createNewFile, parseInitArgs, scaffoldHosted } from './hosted-init';
 
 function detectAppDir(): string {
   if (fs.existsSync(path.join(process.cwd(), 'src', 'app'))) {
@@ -38,20 +20,36 @@ function detectLibDir(): string {
   return path.join(process.cwd(), 'lib');
 }
 
-async function writeFileWithConfirm(filePath: string, content: string): Promise<boolean> {
-  if (fs.existsSync(filePath)) {
-    const overwrite = await confirm(
-      `File ${path.relative(process.cwd(), filePath)} already exists. Overwrite?`,
-    );
-    if (!overwrite) {
-      console.log(`  Skipped: ${path.relative(process.cwd(), filePath)}`);
-      return false;
-    }
+async function writeFileIfAbsent(filePath: string, content: string): Promise<boolean> {
+  const relativePath = path.relative(process.cwd(), filePath);
+  try {
+    createNewFile(process.cwd(), { path: relativePath, content });
+  } catch (error) {
+    console.log(`  Skipped: ${relativePath} (${error instanceof Error ? error.message : error})`);
+    process.exitCode = 1;
+    return false;
   }
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content);
-  console.log(`  Created: ${path.relative(process.cwd(), filePath)}`);
+  console.log(`  Created: ${relativePath}`);
   return true;
+}
+
+function initHosted(): void {
+  console.log('\n@mordn/chat-widget init --hosted (your runtime, hosted infrastructure)\n');
+  const { appDir, files } = scaffoldHosted(process.cwd());
+  for (const file of files) console.log(`  Created: ${file.path}`);
+  console.log('\nRequired next steps (setup is not yet ready to serve chat):');
+  console.log('  1. Install: npm install @mordn/chat-widget ai @ai-sdk/react');
+  console.log('  2. Publish an agent at https://mordn.com and set its MORDN_CHAT_KEY on your server.');
+  console.log('     .env.mordn.example is a reference only. Manually merge settings; do not replace .env.local.');
+  console.log('     Never expose server keys using NEXT_PUBLIC_ or client props.');
+  console.log('  3. Configure gateway/model credentials in YOUR deployment (e.g. AI_GATEWAY_API_KEY).');
+  console.log('     MORDN_CHAT_KEY does not authenticate model calls; inference/tools run on your server.');
+  console.log(`  4. Implement ${appDir}/api/chat/[[...chat]]/chat-auth.ts using your verified server session.`);
+  console.log('     The stub returns null: protected requests return 401 until you implement auth.');
+  console.log(`  5. Import MordnChat from ${appDir}/mordn-chat.tsx and render <MordnChat /> in your layout/page.`);
+  console.log('     Existing layouts, pages, and environment secrets were not changed.');
+  console.log('  6. Sign in and verify a chat turn, reload/history, and signed-out rejection.');
+  console.log('     https://mordn.com/docs/quickstart\n');
 }
 
 // ============================================================================
@@ -199,7 +197,7 @@ async function init() {
   console.log('Creating files...');
   // The whole backend mounts on one catch-all route.
   if (
-    await writeFileWithConfirm(
+    await writeFileIfAbsent(
       path.join(appDir, 'api', 'chat', '[[...chat]]', 'route.ts'),
       CATCHALL_ROUTE,
     )
@@ -208,17 +206,17 @@ async function init() {
   }
 
   // The auth boundary — throws until implemented.
-  if (await writeFileWithConfirm(path.join(libDir, 'chat-auth.ts'), CHAT_AUTH_STUB)) {
+  if (await writeFileIfAbsent(path.join(libDir, 'chat-auth.ts'), CHAT_AUTH_STUB)) {
     filesCreated++;
   }
 
   if (
-    await writeFileWithConfirm(path.join(process.cwd(), 'drizzle.config.ts'), DRIZZLE_CONFIG)
+    await writeFileIfAbsent(path.join(process.cwd(), 'drizzle.config.ts'), DRIZZLE_CONFIG)
   ) {
     filesCreated++;
   }
 
-  if (await writeFileWithConfirm(path.join(process.cwd(), '.env.example'), ENV_EXAMPLE)) {
+  if (await writeFileIfAbsent(path.join(process.cwd(), '.env.example'), ENV_EXAMPLE)) {
     filesCreated++;
   }
 
@@ -229,7 +227,7 @@ async function init() {
   console.log('       npm install @ai-sdk/react @ai-sdk/anthropic');
   console.log('     (@ai-sdk/react is a required peer dependency the widget renders with;');
   console.log('      swap @ai-sdk/anthropic for your provider, e.g. @ai-sdk/openai.)');
-  console.log('  2. Copy .env.example to .env.local and fill in your credentials');
+  console.log('  2. Manually merge .env.example settings into your server environment; preserve existing secrets');
   console.log('  3. Implement getChatUserId() in lib/chat-auth.ts');
   console.log('     ⚠  Until you do, every chat request will throw — by design.');
   console.log('  4. Run: npx drizzle-kit push   (creates the chat tables)');
@@ -241,7 +239,6 @@ async function init() {
   console.log('Security: identity is established by getChatUserId on the server;');
   console.log('the widget has no userId or agentId props.\n');
 
-  rl.close();
 }
 
 // ============================================================================
@@ -249,7 +246,8 @@ async function init() {
 //
 // The bin supports the scaffold (`init`, default) plus knowledge-base ops:
 //
-//   chat-widget init                       scaffold the backend (default)
+//   chat-widget init --hosted              hosted infrastructure, your runtime (recommended)
+//   chat-widget init                       self-managed backend (legacy default)
 //   chat-widget ingest [--config p] ...    ingest sources into a namespace
 //     [URL …]                                ad-hoc page URLs (.md/.mdx route as markdown)
 //     [--llms <url> …]                       an llms.txt index (expands to its linked docs)
@@ -454,25 +452,30 @@ async function runEval(argv: string[]): Promise<void> {
 async function main() {
   const command = process.argv[2];
   if (command === 'eval') {
-    rl.close(); // no interactive prompts for KB commands
     await runEval(process.argv.slice(3));
     return;
   }
   if (command && KNOWLEDGE_COMMANDS.has(command)) {
-    rl.close(); // no interactive prompts for KB commands
     await runKnowledge(command, process.argv.slice(3));
     return;
   }
-  // Default (and explicit `init`): the scaffold.
+  // Preserve the self-managed default; hosted setup is an explicit opt-in.
+  const { mode, help } = parseInitArgs(process.argv.slice(command === 'init' ? 3 : 2));
+  if (help) {
+    console.log('Usage: chat-widget [init] [--hosted | --mode hosted|self-hosted]');
+    console.log('Recommended: chat-widget init --hosted (Next.js App Router, your runtime).');
+    console.log('Default: self-hosted (legacy database/storage scaffold). Existing files are never overwritten.');
+    console.log('Knowledge commands: ingest, sync, status, list, eval (see CLI reference).');
+    return;
+  }
+  if (mode === 'hosted') {
+    initHosted();
+    return;
+  }
   await init();
 }
 
 main().catch((error) => {
   console.error('Error:', error instanceof Error ? error.message : error);
-  try {
-    rl.close();
-  } catch {
-    /* already closed */
-  }
-  process.exit(1);
+  process.exitCode = 1;
 });
