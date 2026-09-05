@@ -23,7 +23,14 @@ on:
       - 'v*'
 
 jobs:
+  quality-gate:
+    # Reuse every CI check at this tag's commit, without publish credentials.
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: quality-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
