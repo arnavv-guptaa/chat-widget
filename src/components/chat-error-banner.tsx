@@ -12,6 +12,9 @@
  */
 
 import { AlertTriangleIcon, XIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getChatErrorRecovery } from "../utils/chat-error-recovery";
+import { messageForErrorKind } from "../utils/chat-error-protocol";
 
 // These strings are emitted by the server taxonomy and contain no provider
 // detail. Keep the raw network/provider message off-screen, but preserve the
@@ -52,6 +55,19 @@ export function ChatErrorBanner({
   onRetry,
   onDismiss,
 }: ChatErrorBannerProps) {
+  const recovery = getChatErrorRecovery(error);
+  const metadata = recovery?.metadata;
+  const retryAt = recovery?.retryAt;
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    setClock(Date.now());
+    if (retryAt === undefined || retryAt <= Date.now()) return;
+    // Only unlock a MANUAL retry. Never regenerate from a timer: a failed
+    // response can already have executed tools with external side effects.
+    const timer = setTimeout(() => setClock(Date.now()), retryAt - Date.now());
+    return () => clearTimeout(timer);
+  }, [retryAt]);
+  const waiting = retryAt !== undefined && retryAt > Math.max(clock, Date.now());
   if (!error) return null;
 
   // A user-initiated Stop surfaces through useChat's error state as an
@@ -61,12 +77,14 @@ export function ChatErrorBanner({
   // "the generation errored". Client-side aborts only come from the stop
   // button or navigation; real server-side failures arrive as error chunks
   // with their own messages and still render below.
-  if (error.name === "AbortError" || error.message === "The response was aborted.") return null;
+  if (metadata ? metadata.kind === "abort" :
+      error.name === "AbortError" || error.message === "The response was aborted.") return null;
 
-  // Only package-owned safe text may reach the DOM. Raw network/provider
-  // messages can contain secrets, including when exposed via a tooltip.
-  const friendly = friendlyErrorMessage(error);
-  const retryable = !NON_RETRYABLE_SERVER_MESSAGES.has(error.message ?? "");
+  // Versioned metadata takes precedence over ALL prose (including custom or
+  // translated onError text). Legacy servers retain their safe-string fallback.
+  // Never display arbitrary error copy, or the opaque trace reference, in DOM.
+  const friendly = metadata ? messageForErrorKind(metadata.kind) : friendlyErrorMessage(error);
+  const retryable = metadata?.retryable ?? !NON_RETRYABLE_SERVER_MESSAGES.has(error.message ?? "");
 
   return (
     <div
@@ -83,11 +101,15 @@ export function ChatErrorBanner({
       />
       <div className="flex-1 min-w-0">
         <span style={{ color: "hsl(var(--chat-text-body))" }}>{friendly}</span>
+        {waiting && <span> Please wait before trying again.</span>}
       </div>
       {canRetry && retryable && onRetry && (
         <button
           type="button"
-          onClick={onRetry}
+          disabled={waiting}
+          onClick={() => {
+            if (retryAt === undefined || Date.now() >= retryAt) onRetry();
+          }}
           className="rounded-sm text-[12px] font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]"
           style={{ color: "hsl(var(--chat-text-body))" }}
         >

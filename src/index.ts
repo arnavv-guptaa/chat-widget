@@ -60,6 +60,11 @@ export type {
 
 export type { ChatWidgetProps, ChatWidgetHandle } from './ChatWidget';
 
+// Safe error protocol for custom transports/UIs (no server imports).
+export { CHAT_ERROR_VERSION, CHAT_ERROR_DATA_TYPE, CHAT_ERROR_HEADER, parseChatErrorMetadata, parseChatErrorHeader, messageForErrorKind } from './utils/chat-error-protocol';
+export type { ChatErrorKind, ChatErrorMetadata } from './utils/chat-error-protocol';
+export { createChatErrorRecovery, getChatErrorRecovery } from './utils/chat-error-recovery';
+
 // Hooks
 
 // Contexts

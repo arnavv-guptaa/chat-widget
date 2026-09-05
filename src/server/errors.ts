@@ -48,31 +48,8 @@
  *     is worse than admitting we do not know.
  */
 
-/**
- * What kind of failure this is, in terms of what the caller should DO about it.
- *
- * The axis is deliberately "what action does this imply", not "which layer
- * threw" — a category the host cannot act on differently is not worth having.
- */
-export type ChatErrorKind =
-  /** Client disconnected, or the wall-clock cap fired. Not a failure at all. */
-  | 'abort'
-  /** 429 / quota exhausted. Retry after `retryAfterMs`. */
-  | 'rate_limit'
-  /** Bad, missing, or expired credentials. The OPERATOR must fix this; retrying never helps. */
-  | 'auth'
-  /** 5xx, network blip, upstream overloaded. Retry with backoff. */
-  | 'transient'
-  /** The provider refused on safety grounds. Never retry — the same input yields the same refusal. */
-  | 'content_policy'
-  /** The request was malformed or too large. The CALLER must change the input. */
-  | 'prompt'
-  /** Model limitation: context window exceeded, unknown model, unsupported feature. */
-  | 'model'
-  /** A tool call threw. The turn failed, but the model and provider are healthy. */
-  | 'tool'
-  /** Genuinely unrecognised. Treated as non-retryable. */
-  | 'unknown';
+import { messageForErrorKind, type ChatErrorKind } from '../utils/chat-error-protocol';
+export { messageForErrorKind, type ChatErrorKind } from '../utils/chat-error-protocol';
 
 /** The result of classifying a stream/turn failure. */
 export interface ClassifiedChatError {
@@ -107,30 +84,6 @@ export interface ClassifiedChatError {
    * prefixes.
    */
   cause: unknown;
-}
-
-// ── User-facing copy ─────────────────────────────────────────────────────────
-// One sentence per category. These are what a user actually sees, so they say
-// what happened and what to do, and never leak upstream detail.
-//
-// `abort` copy intentionally contains "abort": the client error banner
-// suppresses abort-shaped messages so a stopped turn renders as the partial
-// answer it is rather than an error strip.
-const MESSAGES: Record<ChatErrorKind, string> = {
-  abort: 'The response was aborted.',
-  rate_limit: 'The assistant is handling a lot of requests right now. Please try again in a moment.',
-  auth: 'The assistant is not configured correctly. Please contact support.',
-  transient: 'The assistant is temporarily unavailable. Please try again.',
-  content_policy: "I can't help with that request.",
-  prompt: "That request couldn't be processed. Try rephrasing or shortening your message.",
-  model: 'The configured model could not complete this request. Try a different request or contact support.',
-  tool: 'A tool the assistant was using failed. Please try again.',
-  unknown: 'An error occurred while generating the response.',
-};
-
-/** The user-facing sentence for a category. Exported so hosts can reuse or localise it. */
-export function messageForErrorKind(kind: ChatErrorKind): string {
-  return MESSAGES[kind] ?? MESSAGES.unknown;
 }
 
 // ── Shape probes ─────────────────────────────────────────────────────────────
@@ -428,13 +381,13 @@ export function classifyError(err: unknown): ClassifiedChatError {
   try {
     return classifyInner(err);
   } catch {
-    return { kind: 'unknown', retryable: false, message: MESSAGES.unknown, cause: err };
+    return { kind: 'unknown', retryable: false, message: messageForErrorKind('unknown'), cause: err };
   }
 }
 
 function classifyInner(err: unknown): ClassifiedChatError {
   if (isAbortError(err)) {
-    return { kind: 'abort', retryable: false, message: MESSAGES.abort, cause: err };
+    return { kind: 'abort', retryable: false, message: messageForErrorKind('abort'), cause: err };
   }
 
   const status = extractStatus(err);
@@ -446,7 +399,7 @@ function classifyInner(err: unknown): ClassifiedChatError {
     ...(RETRYABLE.has(kind) ? { retryAfterMs: extractRetryAfterMs(err) } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(code ? { code } : {}),
-    message: MESSAGES[kind],
+    message: messageForErrorKind(kind),
     cause: err,
   });
 

@@ -68,6 +68,14 @@ export type ChatLogEvent =
   | 'turn.abort'
   /** The model finished a step. Carries stepCount and any tools invoked. */
   | 'turn.step'
+  /** A provider/external tool call was observed; NOT proof of execution. */
+  | 'tool.call'
+  /** The SDK is about to execute a server-side tool. No payload is logged. */
+  | 'tool.start'
+  /** Server-side execution completed (including generator exhaustion). */
+  | 'tool.finish'
+  /** Server-side execution threw. Carries only the safe kind, never error text. */
+  | 'tool.error'
   /** Persisting the assistant turn failed — the loudest thing in this file. */
   | 'save.failed'
   /** Thread-title generation or rename failed (degrades to a placeholder). */
@@ -110,6 +118,16 @@ export interface ChatLogFields {
   userId?: string;
   conversationId?: string;
   messageId?: string;
+  /** Unique authenticated chat request, even when several turns share a trace. */
+  turnId?: string;
+  /** SDK tool invocation id, not the tool name (concurrent calls can share a name). */
+  toolCallId?: string;
+  /** Zero-based SDK step; absent for approved calls resumed before the first step. */
+  stepNumber?: number;
+  /** External means no server execute: client/deferred/unhandled, not proven client execution. */
+  executionLocation?: 'server' | 'provider' | 'external';
+  /** Tool lifecycle outcome; observed does not assert that a tool actually ran. */
+  outcome?: 'observed' | 'started' | 'success' | 'error';
   /** Model label for this turn (`anthropic/claude-…`). */
   model?: string;
   /** Tool name, for tool-scoped events. */
