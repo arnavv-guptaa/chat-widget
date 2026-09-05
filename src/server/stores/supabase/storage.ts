@@ -125,7 +125,10 @@ class SupabaseStorageAdapter implements StorageAdapter {
   async remove(storagePath: string): Promise<void> {
     if (!this.ownsPath(storagePath)) return; // never delete outside the user's prefix
     // Supabase remove is idempotent — removing a missing object is not an error.
-    await this.client.storage.from(this.bucket).remove([storagePath]);
+    const { error } = await this.client.storage.from(this.bucket).remove([storagePath]);
+    if (error) {
+      throw new Error(`[chat-widget] storage remove failed: ${error.message}`);
+    }
   }
 
   private async signOrThrow(path: string): Promise<string> {
