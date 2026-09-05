@@ -48,6 +48,7 @@ import {
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { validateChatRequest } from './chat-request';
+import { hasAssistantContent } from './assistant-content';
 import { classifyError, isAbortError, messageForErrorKind } from './errors';
 import { CHAT_ERROR_DATA_TYPE, CHAT_ERROR_HEADER, toChatErrorMetadata, type ChatErrorMetadata } from '../utils/chat-error-protocol';
 import {
@@ -199,24 +200,6 @@ function subSegments(url: URL): string[] {
     }
   }
   return [];
-}
-
-/**
- * True when the final message set ends with an assistant message that actually
- * produced something — non-empty text/reasoning, or any tool call. Used to
- * decide whether an ABORTED turn is worth persisting: a stop AFTER content
- * arrived should be kept; a stop BEFORE the first token produced nothing and
- * must not leave an empty assistant bubble in history.
- */
-function hasAssistantContent(messages: ReadonlyArray<{ role: string; parts?: unknown }>): boolean {
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== 'assistant' || !Array.isArray(last.parts)) return false;
-  return (last.parts as Array<{ type?: string; text?: string }>).some((p) => {
-    if (!p || typeof p.type !== 'string') return false;
-    if (p.type === 'text' || p.type === 'reasoning') return Boolean(p.text && p.text.trim());
-    // Any tool call / source / file part counts as real output.
-    return p.type.startsWith('tool-') || p.type === 'dynamic-tool' || p.type === 'source-url' || p.type === 'file';
-  });
 }
 
 // ── The handler ─────────────────────────────────────────────────────────────
