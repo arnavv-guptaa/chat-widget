@@ -2,6 +2,17 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.24.1 — 2026-09-06
+
+### Fixed
+- **Hosted history no longer silently ends at 100 messages.** The hosted store negotiates the API's `created-at-id-v1` cursor protocol, forwards the timestamp and message-ID boundary, and requires a truthful acknowledgement on every page. Pages are bounded, unique, ordered and cursor-respecting; incompatible, malformed or unavailable APIs return the typed retryable `503 HOSTED_HISTORY_UNAVAILABLE` response instead of falsely reporting that history is exhausted.
+- The matching API was deployed before this package release. Its production query is scoped by tenant, agent, user and conversation and uses a millisecond-normalized timestamp plus C-collated message ID as a deterministic cursor.
+
+### Verification
+- Widget CI passed tests, source typecheck, builds, ESM checks and the packaged Next.js consumer smoke.
+- API CI executes the production history store against disposable PostgreSQL 16 with 337 messages, including 140 rows inside one millisecond, and verifies complete traversal without gaps or duplicates plus per-user isolation.
+- No configuration or database schema migration.
+
 ## 0.24.0 — 2026-09-05
 
 ### Breaking
