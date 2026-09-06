@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createChatHandler } from '../src/server/handler';
 import { ConversationOwnershipError, type ChatStore } from '../src/server/chat-store';
 import type { StoredConversation, StoredMessage } from '../src/server/types';
+import { HostedHistoryError } from '../src/server/stores/hosted/history';
 
 function conv(id: string): StoredConversation {
   return { id, title: 'T', metadata: null, createdAt: new Date(0), updatedAt: new Date(0) };
@@ -204,6 +205,26 @@ describe('handler — dispatch routing', () => {
       before: new Date('2026-01-01T00:00:00.000Z'),
       beforeId: 'm-7',
     });
+  });
+
+  it('fails closed with retryable 503 rather than declaring old hosted history exhausted', async () => {
+    const { handler, store } = setup();
+    vi.mocked(store.listMessages).mockRejectedValue(new HostedHistoryError('API lacks tuple support'));
+    const res = await handler.GET(req('/api/chat/history/c1?limit=100'));
+    expect(res.status).toBe(503);
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    const body = await res.json();
+    expect(body.code).toBe('HOSTED_HISTORY_UNAVAILABLE');
+    expect(body).not.toHaveProperty('hasMore');
+    expect(body).not.toHaveProperty('messages');
+  });
+
+  it('does not scan messages for a foreign conversation', async () => {
+    const { handler, store } = setup();
+    vi.mocked(store.getConversation).mockResolvedValue(null);
+    const res = await handler.GET(req('/api/chat/history/foreign?limit=100'));
+    expect(res.status).toBe(404);
+    expect(store.listMessages).not.toHaveBeenCalled();
   });
 
   it('routes DELETE /history/:id and returns 204', async () => {

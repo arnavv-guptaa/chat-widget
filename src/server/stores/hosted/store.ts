@@ -29,27 +29,19 @@ import type {
 import { withFetchTimeout, DEFAULT_HTTP_TIMEOUT_MS } from '../../http';
 import { AGENT_CONFIG_SCHEMA_VERSION, formatConfigIssues, readAgentConfig } from '../../../config';
 import { WIDGET_VERSION } from '../../../utils/widget-version';
+import { assertHistoryPage, historyQuery, HostedHistoryError, readHistoryResponse } from './history';
 
 const DEFAULT_BASE_URL = 'https://api.mordn.com';
-
-/**
- * Page ceiling, mirroring the Drizzle store. The `ChatStore` contract requires
- * every implementation to clamp `limit` so a hostile caller cannot request an
- * unbounded page; the two implementations must agree or the same request
- * paginates differently depending on which backend is wired up.
- */
-const MAX_PAGE = 100;
-
-/** Epoch ms for a value that should be a Date but came off the wire. */
-function msSinceEpoch(value: Date): number {
-  const ms = value instanceof Date ? value.getTime() : NaN;
-  return Number.isFinite(ms) ? ms : 0;
-}
 
 export interface HostedOptions {
   /** Tenant API key (mck_live_… / mck_test_…). Required. Never sent to the client. */
   apiKey: string;
-  /** API base URL. Defaults to the hosted service; override for self-host/local. */
+  /**
+   * API base URL. Defaults to the hosted service; override for self-host/local.
+   * Message history requires the API's per-response `created-at-id-v1`
+   * acknowledgement. Deploy a compatible API first; older/capped APIs fail
+   * closed instead of silently reporting inaccessible history as complete.
+   */
   baseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
@@ -73,8 +65,8 @@ function normaliseConversation(raw: any): StoredConversation {
 }
 
 function normaliseMessage(raw: any): StoredMessage | null {
-  const createdAt = new Date(raw.created_at ?? raw.createdAt);
-  if (!raw?.id || Number.isNaN(createdAt.getTime())) return null;
+  const createdAt = new Date(raw?.created_at ?? raw?.createdAt);
+  if (typeof raw?.id !== 'string' || !raw.id || Number.isNaN(createdAt.getTime())) return null;
   return {
     id: String(raw.id),
     role: raw.role,
@@ -166,72 +158,31 @@ class HostedChatStore implements ChatStore {
   }
 
   /**
-   * Load a page of messages, honouring `ListMessagesOptions`.
-   *
-   * This used to take `_opts` and ignore it: every call fetched the ENTIRE
-   * conversation and the router sliced the tail. A 6,000-message thread shipped
-   * all 6,000 rows over the wire — and through the hosted API's own memory — to
-   * render the last 30. The pagination the Drizzle path had was silently absent
-   * the moment a consumer switched to hosted.
-   *
-   * Two halves, and both are load-bearing:
-   *
-   *  1. **Forward the window.** `?before=<ISO>&limit=<N>` goes to the API so the
-   *     page is computed in SQL, next to the index.
-   *
-   *  2. **Re-apply it locally anyway.** The widget and chat-api ship on
-   *     independent release trains, so a current widget WILL run against an API
-   *     that predates these query params and returns everything. Re-applying the
-   *     window client-side means the `ChatStore` contract holds either way: an
-   *     old API just pays the bandwidth it always paid, while a new one makes
-   *     this a cheap no-op over an already-correct page. Correctness must not
-   *     depend on which side deployed first.
+   * Bounded, acknowledged tuple paging. Old APIs can ignore every query and
+   * return only their newest 100 rows; local filtering cannot recover the rest.
+   * Never treat an unacknowledged/error response as complete or empty history.
    */
   async listMessages(conversationId: string, opts?: ListMessagesOptions): Promise<StoredMessage[]> {
-    // +1 of headroom for the router's `hasMore` probe — see the matching
-    // comment in the Drizzle store.
-    const limit = Math.min(Math.max(opts?.limit ?? MAX_PAGE, 1), MAX_PAGE + 1);
-
-    // A deployed hosted API may understand the legacy timestamp-only window or
-    // ignore it entirely. Never forward a composite cursor as timestamp-only:
-    // an intermediate API could discard equal-timestamp rows before this client
-    // gets the chance to apply the id tiebreaker. Composite pages therefore
-    // fetch the conversation and window locally until chat-api supports the same
-    // cursor contract end-to-end.
-    const query = new URLSearchParams();
-    if (!opts?.beforeId) {
-      query.set('limit', String(limit));
-      if (opts?.before) query.set('before', opts.before.toISOString());
+    const { query, limit } = historyQuery(opts);
+    let res: Response;
+    try {
+      res = await this.req(
+        `/conversations/${encodeURIComponent(conversationId)}?${query}`,
+        { headers: this.headers() },
+      );
+    } catch {
+      // Transport/timeout failures have the same retryable history semantics as
+      // an upstream 5xx; never expose fetch internals or credentials to callers.
+      throw new HostedHistoryError('Hosted history request failed (transport)');
     }
-    const queryString = query.toString();
-    const suffix = queryString ? `?${queryString}` : '';
-
-    const res = await this.req(
-      `/conversations/${encodeURIComponent(conversationId)}${suffix}`,
-      { headers: this.headers() },
-    );
-    if (!res.ok) return [];
-    const data = (await res.json().catch(() => null)) as { messages?: any[] } | null;
-    const messages = (data?.messages ?? [])
-      .map(normaliseMessage)
-      .filter((message): message is StoredMessage => message !== null);
-
-    messages.sort((a, b) => {
-      const byTime = msSinceEpoch(a.createdAt) - msSinceEpoch(b.createdAt);
-      return byTime !== 0 ? byTime : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
-
-    const before = opts?.before?.getTime();
-    const beforeId = opts?.beforeId;
-    const windowed =
-      before !== undefined
-        ? messages.filter((message) => {
-            const time = msSinceEpoch(message.createdAt);
-            return time < before || (time === before && !!beforeId && message.id < beforeId);
-          })
-        : messages;
-
-    return windowed.length > limit ? windowed.slice(windowed.length - limit) : windowed;
+    const raw = await readHistoryResponse(res);
+    const messages = raw.map(normaliseMessage);
+    if (messages.some((message) => message === null)) {
+      throw new HostedHistoryError('Invalid message in hosted history page');
+    }
+    const page = messages as StoredMessage[];
+    assertHistoryPage(page, limit, opts);
+    return page;
   }
 
   async saveTurn(input: SaveTurnInput): Promise<void> {
