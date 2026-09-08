@@ -151,6 +151,13 @@ describe('renderer design-system contract', () => {
     const rule = css.match(/\.chat-widget-container \.chat-prompt-box:focus-within\s*\{([\s\S]*?)\}/);
     expect(rule?.[1]).toContain('hsl(var(--chat-primary) / 0.07)');
   });
+
+  it('keeps mobile textareas at the iOS no-zoom threshold', () => {
+    const textarea = css.match(
+      /@media \(max-width: 640px\) \{[\s\S]*?\.chat-widget-container textarea\[data-slot="textarea"\]\s*\{([\s\S]*?)\}/,
+    );
+    expect(textarea?.[1]).toContain('font-size: 16px');
+  });
 });
 
 describe('button reset (no Preflight dependency)', () => {
