@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## Unreleased
+## 0.24.2 — 2026-09-08
 
 ### Fixed
 - Mobile textareas render at 16px so iOS Safari no longer auto-zooms the host page when the chat composer receives focus or leaves it zoomed after the keyboard closes. Desktop composer typography remains unchanged.
