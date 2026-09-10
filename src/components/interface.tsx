@@ -573,6 +573,7 @@ export default function ChatInterface({ id, initialMessages, config, onClose, he
               id: (file as any).id || 'unknown',
               type: 'file',
               url: uploadResult.url,
+              storagePath: uploadResult.storagePath,
               filename: uploadResult.filename,
               mediaType: uploadResult.mediaType,
               size: uploadResult.size

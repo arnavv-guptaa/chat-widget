@@ -113,6 +113,10 @@ The widget sends no client-controlled `userId`. The handler binds stores and sto
 
 Published configuration, conversation history, private attachments, knowledge retrieval, memory, feedback, and observability are wired through one server key. You keep the application-specific runtime; mordn operates the reusable control plane.
 
+### Managed document workspaces
+
+The optional **Enable sandboxes** feature gives each verified user a Mordn-managed workspace within your tenant/agent, shared across their conversations. Analyze supported documents and publish private file downloads through curated tools. Off by default; requires published configuration, a compatible API and operator enablement. No provider key or scope selector reaches the browser. See [managed sandbox integration and release gates](./docs/managed-sandboxes.md).
+
 ## Prefer to manage the data plane yourself?
 
 Use `createChatHandler` with the included Drizzle, Supabase, or custom `ChatStore` and `StorageAdapter` implementations. The widget and server-side identity boundary stay the same; you supply the model, database, storage, prompt, and tools.

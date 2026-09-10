@@ -92,7 +92,13 @@ export async function validateChatRequest(value: unknown): Promise<ValidationRes
     }
     // Legacy integrations omit message ids. Supply one rather than narrowing
     // that existing contract; clients need stable ids for retry deduplication.
-    messages.push({ ...message, id: message.id ?? generateId() });
+    messages.push({
+      ...message,
+      id: message.id ?? generateId(),
+      // Transient events never belong to the persisted transcript or prompt,
+      // even when a client accidentally serializes its onData stream.
+      parts: message.parts.filter((part) => (part as Record<string, unknown>).transient !== true),
+    });
   }
 
   // An explicitly empty history was already accepted (e.g. initial turns).

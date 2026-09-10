@@ -372,6 +372,21 @@
       "description": "Gateway model identifier the handler runs."
     },
     {
+      "path": "runtime.sandbox",
+      "kind": "object",
+      "required": false,
+      "since": "0.25.0",
+      "description": "Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off."
+    },
+    {
+      "path": "runtime.sandbox.enabled",
+      "kind": "boolean",
+      "required": true,
+      "since": "0.25.0",
+      "description": "Enable Mordn-managed sandboxes for verified users; subject to published config and operator policy.",
+      "default": false
+    },
+    {
       "path": "runtime.systemPrompt",
       "kind": "string",
       "required": false,

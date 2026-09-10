@@ -48,6 +48,15 @@ import {
 
 import { ConversationOwnershipError, type ChatStore } from './chat-store';
 import { HostedHistoryError } from './stores/hosted/history';
+import { isManagedSandboxUnavailableError } from './sandbox-errors';
+import { filePartDetails } from '../utils/file-parts';
+import { SANDBOX_SYSTEM_PROMPT, sandboxUploadPolicy, sandboxUploadHints } from './sandbox-policy';
+import { sandboxModelMessages } from './sandbox-messages';
+import {
+  applySandboxArtifacts, isVerifiedSandboxArtifact, sandboxArtifactChunk,
+  type VerifiedSandboxArtifact,
+} from './sandbox-artifacts';
+import { createToolResourceScope } from './tool-resources';
 import { validateChatRequest } from './chat-request';
 import { hasAssistantContent } from './assistant-content';
 import { classifyError, isAbortError, messageForErrorKind } from './errors';
@@ -213,6 +222,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     followUps: followUpsOption,
     titles: titlesOption,
     buildTools,
+    sandboxes,
     store: storeFactory,
     storage: storageFactory,
     buildSystemPrompt,
@@ -393,11 +403,29 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     if (typeof storageScope !== 'string' || storageScope.trim() === '') {
       return json({ error: 'Invalid storage scope' }, 500);
     }
+    let client = published?.config.client ?? {};
+    if (sandboxes && published?.config.runtime.sandbox?.enabled === true) {
+      // Only an enabled AND available capability changes picker hints. An
+      // adapter installed on an ordinary agent must preserve existing defaults
+      // (image/*), custom accept filters, and client/server size restrictions.
+      let usable = false;
+      try {
+        const status = await sandboxes.status({ ...ctx, config: published.config });
+        usable = status.enabled && status.available;
+      } catch { /* Leave the existing non-sandbox client settings unchanged. */ }
+      if (usable) {
+        const policy = sandboxUploadPolicy(true, upload);
+        client = { ...client, features: {
+          ...client.features,
+          ...sandboxUploadHints(client.features, policy),
+        } };
+      }
+    }
     return jsonNoStore({
       protocolVersion: BOOTSTRAP_PROTOCOL_VERSION,
       agent,
       revision: published?.revision ?? 'local',
-      client: published?.config.client ?? {},
+      client,
       storageScope,
     });
   }
@@ -419,8 +447,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const conversationId = body.id;
     const incoming = body.messages;
 
-    const ctx = await authenticate(request, conversationId);
-    if (!ctx) return new Response('Unauthorized', { status: 401 });
+    const authenticated = await authenticate(request, conversationId);
+    if (!authenticated) return new Response('Unauthorized', { status: 401 });
+    let ctx: ChatRequestContext = authenticated;
 
     // A trace may be shared across requests. Mint a separate turn id so tool
     // calls from concurrent turns in the same conversation remain distinguishable.
@@ -439,6 +468,15 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
     }
     const runtime = resolvedAgentConfig?.runtime;
+    ctx = { ...ctx, config: resolvedAgentConfig };
+    const useSandboxes = runtime?.sandbox?.enabled === true && !!sandboxes;
+    // Client history is not a publication source. Keep custom tool continuation
+    // state, but never inherit an assistant file into the new streamed response.
+    const streamMessages = useSandboxes ? incoming.map((message) => message.role === 'assistant'
+      ? { ...message, parts: message.parts.filter((part) => part.type !== 'file') }
+      : message) : incoming;
+    // Do not trust a draft to authorize work. The adapter checks the API's
+    // published config too, including preview handlers without getHostedConfig.
 
     // First authenticated chat request: run a one-time reverse-proxy / CDN
     // buffering diagnostic. A buffered SSE deployment "works locally, breaks in
@@ -477,7 +515,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const windowed = incoming.slice(-maxHistoryMessages);
     const dropped = incoming.length > maxHistoryMessages ? incoming.slice(0, -maxHistoryMessages) : [];
     const capped = maxMessageChars > 0 ? capMessages(windowed, maxMessageChars) : windowed;
-    let modelMessages: ModelMessage[] = await convertToModelMessages(capped);
+    let modelMessages: ModelMessage[] = await convertToModelMessages(
+      useSandboxes ? sandboxModelMessages(capped) : capped,
+    );
     if (transformMessages) modelMessages = await transformMessages(modelMessages, ctx);
 
     // Context compaction: when older messages fell out of the window, summarize
@@ -486,8 +526,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let historySystem = '';
     if (summarizeHistory && dropped.length > 0) {
       try {
+        const cappedDropped = maxMessageChars > 0 ? capMessages(dropped, maxMessageChars) : dropped;
         const droppedModelMessages = await convertToModelMessages(
-          maxMessageChars > 0 ? capMessages(dropped, maxMessageChars) : dropped,
+          useSandboxes ? sandboxModelMessages(cappedDropped) : cappedDropped,
         );
         const summary = (await summarizeHistory(droppedModelMessages, ctx))?.trim();
         if (summary) {
@@ -520,6 +561,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     let system = '';
     let tools: ToolSet = {};
     let built: BuiltTools = { tools: {} };
+    let cleanupReason: string | undefined;
+    const toolResources = createToolResourceScope((err) => {
+      turnLog.error('cleanup.failed', { reason: cleanupReason, ...errorFields(err) });
+    });
+    const pendingArtifacts: VerifiedSandboxArtifact[] = [];
+    const streamedArtifacts: VerifiedSandboxArtifact[] = [];
+    const artifactRefs = new Set<string>();
+    const onArtifact = (artifact: VerifiedSandboxArtifact) => {
+      // Opaque, server-minted capability. Never dispatch browser/model/tool JSON
+      // just because it contains a file-shaped object or a publish tool name.
+      if (cleanedUp || streamAbort?.signal.aborted || !isVerifiedSandboxArtifact(artifact) ||
+          artifactRefs.has(artifact.file.storagePath)) return;
+      artifactRefs.add(artifact.file.storagePath);
+      pendingArtifacts.push(artifact);
+    };
 
     // ── Teardown guard ──────────────────────────────────────────────────────
     // The handler owns one model-abort controller, one optional wall-clock
@@ -543,15 +599,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         streamTimer = undefined;
       }
       detachClientAbortListener();
-      if (cleanedUp) return;
+      if (!cleanedUp) cleanupReason = reason;
       cleanedUp = true;
-      if (built.cleanup) {
-        try {
-          await built.cleanup();
-        } catch (err) {
-          turnLog.error('cleanup.failed', { reason, ...errorFields(err) });
-        }
-      }
+      // Await the same in-flight cleanup on every settled path. A fire-and-
+      // forget abort callback must not let onFinish freeze a half-closed socket.
+      await toolResources.cleanup();
     };
 
     // From here through the `system` join + `tools` merge (and the optional
@@ -566,6 +618,25 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // stream-lifecycle state (finalUsage etc.) and `streamText()` are declared,
     // so none of those declarations are trapped in the try's block scope.
     try {
+
+    // Arm cancellation BEFORE tool discovery. Late resources are adopted into a
+    // closed scope and cleaned immediately; no connection can leak on Stop.
+    streamAbort = new AbortController();
+    clientAbortListener = () => {
+      streamAbort?.abort();
+      void runCleanup('client-abort');
+    };
+    if (request.signal.aborted) clientAbortListener();
+    else request.signal.addEventListener('abort', clientAbortListener, { once: true });
+    if (streamTimeoutMs && streamTimeoutMs > 0) {
+      streamTimer = setTimeout(() => {
+        streamTimedOut = true;
+        streamAbort!.abort();
+        void runCleanup('stream-timeout');
+      }, streamTimeoutMs);
+    }
+    ctx = { ...ctx, abortSignal: streamAbort.signal };
+    streamAbort.signal.throwIfAborted();
 
     // Model: code option > resolved canonical runtime > throw.
     model = await resolveModel(ctx, runtime?.model);
@@ -745,53 +816,24 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     // Fold retrieval + memory + context into the system prompt. The operator's
     // instructions come FIRST; appended blocks are untrusted reference data /
     // non-authoritative background, never able to override the operator.
-    system = [baseSystem, RENDERING_SYSTEM, contextSystem, historySystem, retrievalSystem, memorySystem]
+    system = [baseSystem, RENDERING_SYSTEM, useSandboxes ? SANDBOX_SYSTEM_PROMPT : '', contextSystem, historySystem, retrievalSystem, memorySystem]
       .filter(Boolean)
       .join('\n\n');
 
     // Build host tools only after config/retrieval/memory resolution,
     // so an earlier failure cannot leak per-request resources before cleanup is armed.
-    built = buildTools ? await buildTools(ctx) : { tools: {} as ToolSet };
-    // Merge retrieval tools into the host's tool set (host tools win on name clash).
+    built = await toolResources.adopt(buildTools ? await buildTools(ctx) : { tools: {} as ToolSet });
+    streamAbort.signal.throwIfAborted();
+    // Merge retrieval + custom/other hosted MCP tools without replacing them.
     tools = { ...retrievalTools, ...(built.tools ?? {}) };
-
-    // ── Abort propagation — ON by default ────────────────────────────────────
-    // `streamAbort` is the single abort surface for the model call, and it is
-    // now created on EVERY turn rather than only when `streamTimeoutMs` was
-    // configured. `request.signal` is wired into it, so a client disconnect
-    // (Stop button, tab close, navigation, tab-switch) aborts `streamText` —
-    // upstream generation stops, and so does upstream BILLING.
-    //
-    // Before this, the controller only existed when `streamTimeoutMs` was set.
-    // On the default config `request.signal` was never forwarded to
-    // `streamText`, so a disconnected client left the model generating and
-    // metering until it finished naturally or the platform killed the function.
-    // The Stop button looked like it worked (the browser stopped rendering) but
-    // was cosmetic on the wire — you paid for every token after the user left.
-    //
-    // `streamTimeoutMs` keeps its exact original meaning and is now purely
-    // ADDITIVE: an optional wall-clock ceiling layered on top of the always-on
-    // client-abort wiring. Background work that deliberately outlives its
-    // requester belongs on a job/queue surface, not on this live SSE handler.
-    //
-    // Use one named listener so normal completion can remove it. The listener
-    // aborts the model before beginning resource cleanup; Stop is therefore a
-    // real upstream cancellation, not merely a client-side visual state.
-    streamAbort = new AbortController();
-    clientAbortListener = () => {
-      streamAbort?.abort();
-      void runCleanup('client-abort');
-    };
-    if (request.signal.aborted) {
-      clientAbortListener();
-    } else {
-      request.signal.addEventListener('abort', clientAbortListener, { once: true });
-    }
-    if (streamTimeoutMs && streamTimeoutMs > 0) {
-      streamTimer = setTimeout(() => {
-        streamTimedOut = true;
-        streamAbort!.abort();
-      }, streamTimeoutMs);
+    if (useSandboxes && sandboxes) {
+      const managed = await toolResources.adopt(await sandboxes.buildTools(ctx, {
+        abortSignal: streamAbort.signal, onArtifact,
+      }));
+      streamAbort.signal.throwIfAborted();
+      // Managed names are reserved while enabled: another MCP/custom tool cannot
+      // shadow sandbox_publish_file and acquire the artifact publication seam.
+      tools = { ...tools, ...managed.tools };
     }
 
     // ── Setup-failure teardown ───────────────────────────────────────────────
@@ -853,7 +895,9 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       memoryEnabled,
     });
 
-    const result = streamText({
+    let result: ReturnType<typeof streamText>;
+    try {
+    result = streamText({
       model,
       system,
       messages: modelMessages,
@@ -876,6 +920,12 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         finalProviderMetadata = providerMetadata;
         finalFinishReason = typeof finishReason === 'string' ? finishReason : undefined;
         finalStepCount = Array.isArray(steps) ? steps.length : undefined;
+        if (followUpWriter) {
+          for (const artifact of pendingArtifacts.splice(0)) {
+            followUpWriter.write(sandboxArtifactChunk(artifact));
+            streamedArtifacts.push(artifact);
+          }
+        }
 
         // A turn can finish with NO text: the model spends every step on tool
         // calls and `stopWhen` halts the loop before it ever writes an answer.
@@ -883,7 +933,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         // else — indistinguishable from a broken product. Emit a plain-text
         // part so the turn always ends in words. Written before the finish
         // event below so it lands inside the same message.
-        if (!text?.trim() && finishReason !== 'error' && !request.signal.aborted) {
+        if (!text?.trim() && artifactRefs.size === 0 && finishReason !== 'error' && !request.signal.aborted) {
           const id = 'empty-turn-fallback';
           followUpWriter?.write({ type: 'text-start', id });
           followUpWriter?.write({
@@ -1043,6 +1093,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         }
       },
     });
+    } catch (error) {
+      await runCleanup('stream-setup-error');
+      throw error;
+    }
 
     let mappedStreamError: string | undefined;
     const emitErrorMetadata = (classified: Pick<ChatErrorMetadata, 'kind' | 'retryable' | 'retryAfterMs'>) => {
@@ -1149,7 +1203,7 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       // REQUIRED for correct persistence. Without a generated response id every
       // assistant turn collides on the empty-string primary key. Passing the
       // original messages also lets the SDK reuse ids during continuations.
-      originalMessages: incoming,
+      originalMessages: streamMessages,
       generateId,
       onError: mapStreamError,
       execute: ({ writer }) => {
@@ -1162,11 +1216,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
             sendSources: true,
             sendReasoning: true,
             sendFinish: false,
-            originalMessages: incoming,
+            originalMessages: streamMessages,
             generateMessageId: generateId,
             onError: mapStreamError,
           }).pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
             transform(chunk, controller) {
+              // A provider-generated file chunk or arbitrary tool JSON cannot
+              // become a managed download. Only the live, verified publish sink
+              // adds file chunks; never scan text/tool output for file objects.
+              if (useSandboxes && chunk.type === 'file') return;
+              if (chunk.type !== 'start') {
+                for (const artifact of pendingArtifacts.splice(0)) {
+                  controller.enqueue(sandboxArtifactChunk(artifact));
+                  streamedArtifacts.push(artifact);
+                }
+              }
               // SDK v6 emits an abort chunk (not onError) for abortSignal.
               // Preserve it for partial-turn persistence, but make our timeout
               // visible to Chat: abort chunks alone do not set its error state.
@@ -1182,6 +1246,11 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
         );
       },
       onFinish: async ({ messages: finalMessages, isAborted }) => {
+        // SDK stream metadata is a transport detail. Restore canonical top-level
+        // file parts ONLY from this request's verified/emitted artifact ledger.
+        const lastIndex = finalMessages.length - 1;
+        const last = finalMessages[lastIndex];
+        if (last) finalMessages[lastIndex] = applySandboxArtifacts(last, streamedArtifacts) as UIMessage;
         // Citations: stamp de-duplicated `source-url` parts for the retrieved
         // chunks onto the assistant message so the Sources UI renders them and
         // they survive reload (the store persists `parts` verbatim). Existing
@@ -1226,7 +1295,13 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
           // silently-dropped turn is the exact failure we designed against —
           // but never thrown, because the user already has their answer.
           try {
-            await store.saveTurn({ conversationId, messages: finalMessages, model: modelLabel, usage });
+            await store.saveTurn({
+              conversationId,
+              // The latest user already persisted. Do not re-save client-supplied
+              // assistant history as if it were generated in this managed turn.
+              messages: useSandboxes ? finalMessages.slice(-1) : finalMessages,
+              model: modelLabel, usage,
+            });
             persisted = true;
           } catch (err) {
             // The loudest line in this file: the user has an answer on
@@ -1447,7 +1522,21 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
     const storage = resolveStorage(ctx.userId);
     if (!storage) return json({ error: 'File upload is not configured' }, 503);
 
-    const policy = resolveUploadPolicy(upload);
+    let policy = resolveUploadPolicy(upload);
+    if (sandboxes) {
+      const published = await loadPublishedConfig(ctx);
+      if (published?.config.runtime.sandbox?.enabled === true) {
+        let usable = false;
+        try {
+          const status = await sandboxes.status({ ...ctx, config: published.config });
+          usable = status.enabled && status.available;
+        } catch { /* Existing upload policy remains in place during outages. */ }
+        // Never read browser config/features to authorize extra documents.
+        // If off/unavailable, do not constrain an existing host upload policy.
+        // The managed API independently validates bytes, enablement and scope.
+        if (usable) policy = sandboxUploadPolicy(true, upload);
+      }
+    }
     // Enforce the limit against actual request bytes before formData() buffers
     // the multipart payload. Leave bounded room for multipart headers/fields.
     const raw = await readBodyWithLimit(request, policy.maxBytes + 256 * 1024);
@@ -1771,6 +1860,10 @@ export function createChatHandler(options: CreateChatHandlerOptions) {
       }
       return json({ error: 'Not found' }, 404);
     } catch (err) {
+      if (isManagedSandboxUnavailableError(err)) {
+        // This safe setup error is not a model run or a successful execution.
+        return jsonNoStore({ error: err.message, code: err.code }, err.status);
+      }
       // The last line of defence. Classified so an infrastructure blip is
       // distinguishable from a genuine bug at a glance, and carrying the trace
       // id so it joins the rest of the turn's lines.
@@ -1992,10 +2085,9 @@ async function collectAttachmentPaths(store: ChatStore, conversationId: string):
     for (const m of page) {
       if (!Array.isArray(m.parts)) continue;
       for (const part of m.parts) {
-        const p = part as { type?: string; storagePath?: unknown };
-        if (p.type === 'file' && typeof p.storagePath === 'string' && p.storagePath) {
-          paths.push(p.storagePath);
-        }
+        if (part.type !== 'file') continue;
+        const { storagePath } = filePartDetails(part);
+        if (storagePath) paths.push(storagePath);
       }
     }
     if (page.length < pageSize) break;
@@ -2063,8 +2155,8 @@ function capMessages(messages: UIMessage[], maxChars: number): UIMessage[] {
 
 /**
  * Re-sign every file part on a stored message so a reopened conversation gets
- * live URLs. A failed re-sign leaves the original (stale) url in place rather
- * than dropping the whole message — one missing blob never breaks a load.
+ * live URLs. A missing/revoked reference becomes an unavailable file card;
+ * NEVER reuse an old signed URL after the backend denied access.
  */
 async function resignMessageAttachments<T extends { parts: UIMessage['parts'] }>(
   message: T,
@@ -2073,10 +2165,13 @@ async function resignMessageAttachments<T extends { parts: UIMessage['parts'] }>
   if (!message.parts?.length) return message;
   const parts = await Promise.all(
     message.parts.map(async (part) => {
-      const p = part as { type?: string; storagePath?: string; url?: string };
-      if (p.type !== 'file' || typeof p.storagePath !== 'string') return part;
-      const fresh = await storage.resign(p.storagePath);
-      return fresh ? { ...part, url: fresh } : part;
+      if (part.type !== 'file') return part;
+      const file = filePartDetails(part);
+      if (!file.storagePath) return part;
+      const fresh = await Promise.resolve().then(() => storage.resign(file.storagePath!)).catch(() => null);
+      // Keep the attachment's safe display/reference metadata, not a stale URL
+      // hidden inside providerMetadata or a model-supplied fallback location.
+      return { type: 'file' as const, ...file, url: fresh ?? '', ...(fresh ? {} : { unavailable: true }) };
     }),
   );
   return { ...message, parts };

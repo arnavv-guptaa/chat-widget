@@ -64,6 +64,7 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
     <div className={cn("flex flex-wrap gap-2", className)}>
       {attachments.map((attachment, index) => {
         const isImage = attachment.mediaType.startsWith("image/");
+        const available = !!safeUrl(attachment.url);
         // Only render the inline preview if the URL passes the protocol
         // allowlist; otherwise fall back to the (guarded) file button.
         const safeImageSrc = isImage ? safeUrl(attachment.url) : undefined;
@@ -89,6 +90,8 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
             key={`${attachment.url ?? attachment.filename ?? "att"}-${index}`}
             type="button"
             onClick={() => openAttachment(attachment)}
+            disabled={!available}
+            aria-label={available ? attachment.filename : `${attachment.filename} — unavailable`}
             className={cn(
               "group flex min-h-12 max-w-[240px] cursor-pointer items-center gap-2.5 rounded-[11px] border border-[hsl(var(--chat-border-soft))] bg-[hsl(var(--chat-surface))] px-2.5 text-left transition-colors",
               "hover:bg-[hsl(var(--chat-hover-bg))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--chat-primary)/0.28)]",
@@ -102,7 +105,7 @@ export function MessageAttachments({ attachments, className }: MessageAttachment
                 {attachment.filename}
               </span>
               <span className="mt-0.5 truncate text-[11px] text-[hsl(var(--chat-text-faint))]">
-                {label}{sizeLabel ? ` · ${sizeLabel}` : ""}
+                {available ? label : "Unavailable"}{sizeLabel ? ` · ${sizeLabel}` : ""}
               </span>
             </div>
           </button>

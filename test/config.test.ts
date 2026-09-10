@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAgentBootstrap, isAgentConfig, mergeAgentClientConfig } from '../src/config';
+import { isAgentBootstrap, isAgentConfig, mergeAgentClientConfig, readAgentConfig } from '../src/config';
 
 const config = {
   schemaVersion: 1 as const,
@@ -72,6 +72,19 @@ describe('canonical AgentConfig', () => {
 
   it('rejects a client key that is not in the schema', () => {
     expect(isAgentConfig({ ...config, client: { ...config.client, bogusKey: 1 } })).toBe(false);
+  });
+
+  it('adds optional runtime sandbox enablement at schema v1 without provider/scope config', () => {
+    expect(readAgentConfig(config)).toEqual({ ok: true, value: config, dropped: [] });
+    for (const enabled of [false, true]) {
+      const value = { ...config, runtime: { ...config.runtime, sandbox: { enabled } } };
+      expect(isAgentConfig(value)).toBe(true);
+      expect(readAgentConfig(value)).toEqual({ ok: true, value, dropped: [] });
+    }
+    for (const sandbox of [{}, true, { enabled: 'true' }, { enabled: true, apiKey: 'secret' }, { enabled: true, scope: 'thread' }, { enabled: true, providerUrl: 'https://untrusted.example' }]) {
+      expect(isAgentConfig({ ...config, runtime: { ...config.runtime, sandbox } })).toBe(false);
+    }
+    expect(isAgentConfig({ ...config, client: { ...config.client, sandbox: { enabled: true } } })).toBe(false);
   });
 
   it('rejects client.followUps — follow-ups are runtime-only (they cost a model call)', () => {

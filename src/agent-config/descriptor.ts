@@ -39,6 +39,7 @@ import type {
   AgentRuntimeConfig,
   SerializableFollowUpConfig,
   SerializableMemoryConfig,
+  SerializableSandboxConfig,
   SerializableStarterPrompt,
   SerializableTitleConfig,
 } from '../config';
@@ -72,6 +73,10 @@ const MEMORY_FIELDS = {
   limit: { spec: { kind: 'number', integer: true, min: 1, max: 20 }, required: true, since: V1, description: 'Maximum memories injected per turn.' },
 } satisfies Record<keyof SerializableMemoryConfig, Field>;
 
+const SANDBOX_FIELDS = {
+  enabled: { spec: { kind: 'boolean' }, required: true, since: '0.25.0', default: false, description: 'Enable Mordn-managed sandboxes for verified users; subject to published config and operator policy.' },
+} satisfies Record<keyof SerializableSandboxConfig, Field>;
+
 export const RUNTIME_FIELDS = {
   model: { spec: { kind: 'string', nonEmpty: true }, required: true, since: V1, description: 'Gateway model identifier the handler runs.' },
   systemPrompt: { spec: { kind: 'string' }, since: V1, description: 'System prompt.' },
@@ -88,6 +93,7 @@ export const RUNTIME_FIELDS = {
     description: 'Smart thread titles: boolean shorthand or detailed settings.',
   },
   memory: { spec: { kind: 'object', fields: MEMORY_FIELDS }, since: V1, description: 'Long-term memory settings.' },
+  sandbox: { spec: { kind: 'object', fields: SANDBOX_FIELDS }, since: '0.25.0', description: 'Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off.' },
 } satisfies Record<keyof AgentRuntimeConfig, Field>;
 
 // ── client ───────────────────────────────────────────────────────────────────

@@ -93,6 +93,10 @@ export interface ConnectMcpOptions {
    * MCP servers you control.
    */
   allowPrivateHosts?: boolean;
+  /** Trusted server-side transport override (e.g. scoped hosted HTTP + timeout). */
+  fetch?: typeof fetch;
+  /** Abort discovery/execution and close connections, never remote workspaces. */
+  signal?: AbortSignal;
 }
 
 export async function connectMcpTools(
@@ -102,6 +106,25 @@ export async function connectMcpTools(
   const clients: { close: () => Promise<void> }[] = [];
   const results: ConnectedMcp['results'] = [];
   let tools: ToolSet = {};
+  let cleaned = false;
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = (): Promise<void> => {
+    if (cleanupPromise) return cleanupPromise;
+    cleaned = true;
+    opts.signal?.removeEventListener('abort', onAbort);
+    cleanupPromise = Promise.all(clients.map((client) => client.close())).then(() => {});
+    return cleanupPromise;
+  };
+  const onAbort = () => { void cleanup(); };
+  if (opts.signal?.aborted) await cleanup();
+  else opts.signal?.addEventListener('abort', onAbort, { once: true });
+  const transportFetch: typeof fetch | undefined = opts.fetch || opts.signal
+    ? (input, init) => (opts.fetch ?? globalThis.fetch)(input, {
+        ...init,
+        ...(opts.signal ? { signal: init?.signal
+          ? AbortSignal.any([opts.signal, init.signal]) : opts.signal } : {}),
+      })
+    : undefined;
 
   // Connect in parallel; isolate failures per server.
   await Promise.all(
@@ -123,21 +146,40 @@ export async function connectMcpTools(
         });
         return;
       }
+      let resource: { close: () => Promise<void> } | undefined;
       try {
+        opts.signal?.throwIfAborted();
+        if (cleaned) throw new Error('MCP connection already closed');
         const client = await createMCPClient({
           transport: {
             type: server.transport ?? 'http',
             url: server.url,
             ...(server.headers ? { headers: server.headers } : {}),
+            ...(transportFetch ? { fetch: transportFetch } : {}),
           },
         });
-        clients.push(client);
+        let closePromise: Promise<void> | undefined;
+        resource = { close: () => closePromise ??= Promise.resolve().then(() => client.close()).catch(() => {
+          // Never log a transport error that may include auth headers or URLs.
+          console.error('[chat-widget] MCP client close failed');
+        }) };
+        clients.push(resource);
+        // An abort can win while createMCPClient is resolving. A late connection
+        // still gets its one close; it cannot escape the earlier cleanup pass.
+        if (cleaned || opts.signal?.aborted) {
+          await resource.close();
+          throw new Error('MCP connection aborted');
+        }
         const serverTools = await client.tools();
+        opts.signal?.throwIfAborted();
         const merged =
           server.namespaceTools === false ? (serverTools as ToolSet) : namespaced(serverTools, server.id);
         tools = { ...tools, ...merged };
         results.push({ id: server.id, ok: true, toolCount: Object.keys(serverTools).length });
       } catch (err) {
+        // Tool discovery failure must not retain a connected client until some
+        // caller remembers to clean up a failed server.
+        await resource?.close();
         results.push({
           id: server.id,
           ok: false,
@@ -148,18 +190,5 @@ export async function connectMcpTools(
     }),
   );
 
-  let cleaned = false;
-  const cleanup = async (): Promise<void> => {
-    if (cleaned) return;
-    cleaned = true;
-    await Promise.all(
-      clients.map((c) =>
-        Promise.resolve(c.close()).catch((err) =>
-          console.error('[chat-widget] MCP client close failed:', err instanceof Error ? err.message : err),
-        ),
-      ),
-    );
-  };
-
-  return { tools, cleanup, results };
+  return { tools: cleaned ? {} : tools, cleanup, results };
 }

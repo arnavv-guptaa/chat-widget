@@ -43,6 +43,13 @@ export interface HostedOptions {
    * closed instead of silently reporting inaccessible history as complete.
    */
   baseUrl?: string;
+  /**
+   * Explicit trusted loopback origin for managed sandbox HTTP when the hosted
+   * runtime calls itself (e.g. http://127.0.0.1:3000). Literal loopback only;
+   * never derive it from a browser header/config. This does NOT relax SSRF for
+   * arbitrary MCP servers. Other hosted clients continue to use baseUrl.
+   */
+  selfBaseUrl?: string;
   /** Optional fetch override (testing). */
   fetch?: typeof fetch;
   /**
@@ -253,11 +260,14 @@ class HostedStorageAdapter implements StorageAdapter {
   }
 
   async remove(storagePath: string): Promise<void> {
-    await this.doFetch(`${this.base}/v1/uploads`, {
+    const response = await this.doFetch(`${this.base}/v1/uploads`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${this.apiKey}`, 'X-Chat-User': this.userId, 'Content-Type': 'application/json' },
       body: JSON.stringify({ storagePath }),
-    }).catch(() => {});
+    });
+    // A failed purge must retain the message's reference for retry. Missing is
+    // idempotent; transport/authorization/storage failures must not look deleted.
+    if (!response.ok && response.status !== 404) throw new Error('[chat-widget] hosted attachment removal failed');
   }
 }
 

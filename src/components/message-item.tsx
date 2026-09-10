@@ -6,6 +6,7 @@ import { Response } from './response';
 import { Source, Sources, SourcesContent, SourcesTrigger } from './sources';
 import type { CitationSource } from './citation-markers';
 import { MessageAttachments } from './message-attachments';
+import { filePartDetails } from '../utils/file-parts';
 import { MessageActions } from './message-actions';
 import { AgentTurnTranscript } from './transcript/AgentTurnTranscript';
 import { getMessagePartRenderer, isCustomMessageDataPart } from '../utils/message-part-renderers';
@@ -93,12 +94,7 @@ function MessageItemImpl({ message, isFirst, isLast, prevRole, status, toolRende
   );
   const attachments = useMemo(
     () =>
-      fileParts.map((part) => ({
-        filename: (part as { filename?: string }).filename || 'unknown',
-        mediaType: (part as { mediaType?: string }).mediaType as string,
-        url: (part as { url?: string }).url as string,
-        size: (part as { size?: number }).size || 0,
-      })),
+      fileParts.map(filePartDetails),
     [fileParts],
   );
 

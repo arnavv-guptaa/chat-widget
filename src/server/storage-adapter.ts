@@ -108,9 +108,9 @@ export interface StorageAdapter {
    *
    * Security: the adapter MUST verify the path belongs to its bound user's
    * namespace before signing, and return `null` if it does not (or if the
-   * object is missing). A `null` here means "render a broken/expired
-   * thumbnail", never "throw away the whole history" — so one missing blob
-   * can't take down a conversation load.
+   * object is missing). A `null` here means "render an unavailable file card",
+   * never reuse an old signed URL or throw away the whole history. Managed
+   * adapters must check exact-scope registry ownership, not only a path prefix.
    */
   resign(storagePath: string): Promise<string | null>;
 

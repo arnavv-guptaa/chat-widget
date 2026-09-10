@@ -56,6 +56,7 @@ export type {
 } from './storage-adapter';
 
 export { createChatHandler } from './handler';
+export type { ManagedSandboxIntegration, ManagedSandboxStatus } from './sandbox-types';
 export {
   createMordnHandler,
   type CreateMordnHandlerOptions,
@@ -69,6 +70,7 @@ export type {
   PublishedAgentConfig,
   AgentBootstrap,
   SerializableMemoryConfig,
+  SerializableSandboxConfig,
   ConfigReadIssue,
   ConfigReadResult,
 } from '../config';

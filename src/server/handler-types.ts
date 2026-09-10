@@ -37,6 +37,7 @@ import type { Namespace, RetrievedChunk, RetrieverFactory } from './knowledge/ty
 import type { Memory, MemoryAdapterFactory, MemoryScope } from './memory/types';
 import type { FollowUpMessage } from '../types';
 import type { AgentConfig, PublishedAgentConfig } from '../config';
+import type { ManagedSandboxIntegration } from './sandbox-types';
 
 /**
  * Everything a per-request hook/injection needs to know about the current
@@ -54,6 +55,10 @@ export interface ChatRequestContext {
   conversationId: string;
   /** The raw request, for hooks that need headers/cookies (e.g. an org id). */
   request: Request;
+  /** Read-only, resolved server config (preview only after the trusted resolver). */
+  readonly config?: Readonly<AgentConfig> | null;
+  /** Handler-owned client abort/deadline signal, available while building tools. */
+  readonly abortSignal?: AbortSignal;
 }
 
 /**
@@ -355,6 +360,14 @@ export interface CreateChatHandlerOptions {
    * the request settles. Omit for a chat with no tools.
    */
   buildTools?: (ctx: ChatRequestContext) => Promise<BuiltTools> | BuiltTools;
+
+  /**
+   * Managed-only sandboxes. Wire createHostedSandboxes(hostedOptions) from
+   * /server/hosted for a custom/preview handler. createMordnHandler installs it
+   * automatically; false explicitly opts out. Requires resolved runtime.sandbox
+   * enablement AND the API's published/operator gates. No provider credentials.
+   */
+  sandboxes?: false | ManagedSandboxIntegration;
 
   /**
    * Persistence backend. Omit to use the hosted/default store. Provide a
