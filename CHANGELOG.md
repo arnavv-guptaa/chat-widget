@@ -2,7 +2,7 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
-## 0.25.0 — Unreleased
+## 0.25.0 — 2026-09-10
 
 ### Added
 - **Enable sandboxes:** additive, absent-off `runtime.sandbox.enabled` at schema v1. Managed-only workspace per verified user within tenant/agent, shared across conversations; no BYO/scope/provider credentials in configuration or bootstrap.
