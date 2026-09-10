@@ -93,7 +93,7 @@ export const RUNTIME_FIELDS = {
     description: 'Smart thread titles: boolean shorthand or detailed settings.',
   },
   memory: { spec: { kind: 'object', fields: MEMORY_FIELDS }, since: V1, description: 'Long-term memory settings.' },
-  sandbox: { spec: { kind: 'object', fields: SANDBOX_FIELDS }, since: '0.25.0', default: { enabled: false }, description: 'Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off.' },
+  sandbox: { spec: { kind: 'object', fields: SANDBOX_FIELDS }, since: '0.25.0', description: 'Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off.' },
 } satisfies Record<keyof AgentRuntimeConfig, Field>;
 
 // ── client ───────────────────────────────────────────────────────────────────

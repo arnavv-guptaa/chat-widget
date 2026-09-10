@@ -376,10 +376,7 @@
       "kind": "object",
       "required": false,
       "since": "0.25.0",
-      "description": "Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off.",
-      "default": {
-        "enabled": false
-      }
+      "description": "Managed workspace per verified user within this tenant and agent, shared across conversations. Absent means off."
     },
     {
       "path": "runtime.sandbox.enabled",
