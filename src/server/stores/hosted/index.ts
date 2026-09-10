@@ -27,3 +27,6 @@ export {
   type HostedOptions,
   type HostedFeedbackOptions,
 } from './store';
+
+export { createHostedSandboxes, ManagedSandboxUnavailableError } from './sandboxes';
+export type { ManagedSandboxIntegration, ManagedSandboxStatus } from '../../sandbox-types';

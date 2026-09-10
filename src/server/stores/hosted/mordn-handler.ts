@@ -4,6 +4,8 @@ import { createChatHandler } from '../../handler';
 import type { BuiltTools, ChatRequestContext, CreateChatHandlerOptions } from '../../handler-types';
 import { DEFAULT_HTTP_TIMEOUT_MS, withFetchTimeout } from '../../http';
 import { connectMcpTools, type McpServerConfig } from '../../mcp';
+import { createToolResourceScope } from '../../tool-resources';
+import { createHostedSandboxes } from './sandboxes';
 import { createHostedKnowledgeRetriever } from '../knowledge-hosted/client';
 import { createHostedMemory } from '../memory-hosted/client';
 import {
@@ -25,12 +27,14 @@ export type CreateMordnHandlerOptions = HostedOptions &
 
 /**
  * Standard hosted façade: one API key wires published config, persistence,
- * attachments, feedback, knowledge, memory, and agent MCP tools while model
- * execution continues in this handler.
+ * attachments, feedback, knowledge, memory, agent MCP tools and optional managed
+ * sandboxes while model execution continues in this handler.
  *
  * Tools are MERGED, not either/or: developer `buildTools(ctx)` runs alongside
  * the hosted MCP connect, with developer tools winning on a name clash
- * (code > hosted). Both cleanups run, each isolated from the other.
+ * (code > hosted). Both cleanups run, each isolated from the other. Enabled
+ * managed sandboxes additionally reserve their six sandbox_* names; they cannot
+ * be shadowed by a custom tool that has not verified an artifact's provenance.
  *
  * Browser storage scoping uses the handler's default resolver — an opaque
  * digest of the server-resolved agent + verified user — so rotating the API
@@ -38,8 +42,8 @@ export type CreateMordnHandlerOptions = HostedOptions &
  * pass `resolveStorageScope` explicitly.
  */
 export function createMordnHandler(options: CreateMordnHandlerOptions) {
-  const { apiKey, baseUrl, fetch: fetchOption, timeoutMs, getUserId, ...advancedOptions } = options;
-  const hosted = { apiKey, baseUrl, fetch: fetchOption, timeoutMs };
+  const { apiKey, baseUrl, selfBaseUrl, fetch: fetchOption, timeoutMs, getUserId, ...advancedOptions } = options;
+  const hosted = { apiKey, baseUrl, selfBaseUrl, fetch: fetchOption, timeoutMs };
   const hostedBaseUrl = (baseUrl ?? 'https://api.mordn.com').replace(/\/$/, '');
   const doFetch = withFetchTimeout(
     fetchOption ?? globalThis.fetch,
@@ -48,18 +52,20 @@ export function createMordnHandler(options: CreateMordnHandlerOptions) {
 
   // Best-effort hosted MCP connect: a control-plane hiccup yields zero hosted
   // tools for the turn, never an error into the chat.
-  async function connectHostedTools(): Promise<BuiltTools> {
+  async function connectHostedTools(ctx: ChatRequestContext): Promise<BuiltTools> {
     try {
       const response = await doFetch(`${hostedBaseUrl}/v1/mcp/connect`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         cache: 'no-store',
+        signal: ctx.abortSignal ?? ctx.request.signal,
       });
       if (!response.ok) return { tools: {} };
       const body = (await response.json().catch(() => null)) as {
         servers?: McpServerConfig[];
       } | null;
       if (!body?.servers?.length) return { tools: {} };
-      return connectMcpTools(body.servers);
+      // selfBaseUrl deliberately does NOT relax arbitrary MCP SSRF guards.
+      return connectMcpTools(body.servers, { signal: ctx.abortSignal ?? ctx.request.signal });
     } catch {
       return { tools: {} };
     }
@@ -68,28 +74,31 @@ export function createMordnHandler(options: CreateMordnHandlerOptions) {
   const customBuildTools = advancedOptions.buildTools;
 
   async function buildMergedTools(ctx: ChatRequestContext): Promise<BuiltTools> {
-    const [custom, hostedTools] = await Promise.all([
-      Promise.resolve(customBuildTools ? customBuildTools(ctx) : { tools: {} as BuiltTools['tools'] }),
-      connectHostedTools(),
-    ]);
-    return {
-      // Developer tools win on a name clash: code > hosted, same precedence
-      // the handler applies to model and system prompt.
-      tools: { ...hostedTools.tools, ...custom.tools },
-      cleanup: async () => {
-        // Run BOTH cleanups even if one throws — a failing custom cleanup must
-        // not leak hosted MCP connections, and vice versa.
-        const settled = await Promise.allSettled([
-          Promise.resolve(custom.cleanup?.()),
-          Promise.resolve(hostedTools.cleanup?.()),
-        ]);
-        for (const result of settled) {
-          if (result.status === 'rejected') {
-            console.error('[chat-widget] mordn tool cleanup failed:', result.reason);
-          }
-        }
-      },
+    const resources = createToolResourceScope(() => {
+      console.error('[chat-widget] mordn tool cleanup failed');
+    });
+    const signal = ctx.abortSignal ?? ctx.request.signal;
+    const onAbort = () => { void resources.cleanup(); };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+    const cleanup = async () => {
+      signal.removeEventListener('abort', onAbort);
+      await resources.cleanup();
     };
+    try {
+      // Adopt each result as it arrives. Promise.all rejection must not leak
+      // the other connection, even if it arrives after the failure/abort.
+      const [custom, hostedTools] = await Promise.all([
+        Promise.resolve().then(() => customBuildTools ? customBuildTools(ctx) : { tools: {} })
+          .then((built) => resources.adopt(built)),
+        connectHostedTools(ctx).then((built) => resources.adopt(built)),
+      ]);
+      signal.throwIfAborted();
+      return { tools: { ...hostedTools.tools, ...custom.tools }, cleanup };
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
   }
 
   return createChatHandler({
@@ -98,6 +107,7 @@ export function createMordnHandler(options: CreateMordnHandlerOptions) {
     store: createHostedChatStore(hosted),
     storage: createHostedStorage(hosted),
     getHostedConfig: createHostedConfig(hosted),
+    sandboxes: advancedOptions.sandboxes ?? createHostedSandboxes(hosted),
     retrieval:
       advancedOptions.retrieval ??
       ({

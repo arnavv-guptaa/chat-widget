@@ -55,6 +55,11 @@ export interface SerializableMemoryConfig {
   limit: number;
 }
 
+/** Managed workspace per verified user within an agent/tenant; absent means off. */
+export interface SerializableSandboxConfig {
+  enabled: boolean;
+}
+
 export interface AgentRuntimeConfig {
   model: string;
   systemPrompt?: string;
@@ -68,6 +73,8 @@ export interface AgentRuntimeConfig {
    */
   titles?: boolean | SerializableTitleConfig;
   memory?: SerializableMemoryConfig;
+  /** Enable sandboxes: Mordn-managed, shared across this user's conversations. */
+  sandbox?: SerializableSandboxConfig;
 }
 
 export interface AgentClientConfig {

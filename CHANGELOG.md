@@ -2,6 +2,22 @@
 
 All notable changes to `@mordn/chat-widget` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/); versions follow semver with pre-1.0 semantics (minor versions may contain breaking changes, always listed under **Breaking**).
 
+## 0.25.0 — Unreleased
+
+### Added
+- **Enable sandboxes:** additive, absent-off `runtime.sandbox.enabled` at schema v1. Managed-only workspace per verified user within tenant/agent, shared across conversations; no BYO/scope/provider credentials in configuration or bootstrap.
+- `createHostedSandboxes(hostedOptions)` from `/server/hosted`, accepted by the new `createChatHandler({ sandboxes })` option. `createMordnHandler` installs it automatically; explicit `false` opts out. Curated remote HTTP MCP tools use the Mordn agent key and verified user, with lazy discovery, authoritative API gates and a dedicated trusted-loopback option that does not relax arbitrary MCP SSRF checks.
+- Gated 10 MiB PDF/DOCX/XLSX/PPTX/text attachment policy with matching bootstrap accept hints that preserve disabled-agent behavior and narrower host preferences, safe untrusted document-reference prompts, and preserved original user attachments. Only live, backend-verified managed publish results can emit/persist generated file cards; file-only results, re-signing and unavailable attachments use the existing file UI.
+
+### Fixed
+- Uploads retain their durable storage reference through the frontend send path.
+- Per-request tool cleanup covers abort/deadline, setup failure, failed discovery and late connections without deleting a shared workspace. Other hosted/custom tools keep their merge behavior.
+- Failed attachment re-signing no longer falls back to a stale URL; hosted deletion failures retain rows/references for retry. Transient input parts cannot persist or enter model context.
+
+### Release gate
+- Requires compatible managed-sandbox API endpoints, authoritative publisher metadata and exact-scope provenance checks on existing re-sign/delete routes. Preview routes must explicitly wire the helper. See [managed sandboxes](docs/managed-sandboxes.md) for exact contracts, limits and cross-repo rollout order.
+- Dependency set unchanged; no AI SDK7 migration. Previous schema baseline retained. Local native helper/contract tests passed; real SDK Vitest, typecheck, build and packaged-consumer verification remain required in CI. No tag, publish, deployment or paid provider test has occurred.
+
 ## 0.24.2 — 2026-09-08
 
 ### Fixed
