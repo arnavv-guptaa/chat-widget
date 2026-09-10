@@ -155,7 +155,11 @@ describe('managed publish -> real SDK live file -> persisted file -> reload', ()
     const result = await turn(s.handler);
     expect(result.chunks.filter((part) => part.type === 'file')).toEqual([]);
     expect(result.wire).toContain('tool-output-error');
-    expect(result.wire).toContain('No download was attached');
+    // The handler intentionally sanitizes tool exceptions on the public wire;
+    // the helper's detailed safe failure remains internal, not a copy contract.
+    expect(result.chunks.find((part) => part.type === 'tool-output-error')).toMatchObject({
+      errorText: 'An error occurred while generating the response.',
+    });
     expect(s.managedCleanup).toHaveBeenCalledOnce();
   });
 });
